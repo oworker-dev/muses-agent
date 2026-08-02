@@ -17,8 +17,8 @@ test("SDK package exports expose the independently versioned public surfaces", (
   assert.equal(AGENT_SESSION_CONTRACT_VERSION, "0.1.0-draft");
   assert.equal(AGENT_HOST_CONTRACT_VERSION, "0.1.0-draft");
   assert.equal(AGENT_HOST_CAPABILITY_CONTRACT_VERSION, "0.1.0-draft");
-  assert.equal(AGENT_CLIENT_VERSION, "0.1.0-alpha.1");
-  assert.equal(AGENT_UI_VERSION, "0.1.0-alpha.1");
+  assert.equal(AGENT_CLIENT_VERSION, "0.1.0-alpha.2");
+  assert.equal(AGENT_UI_VERSION, "0.1.0-alpha.2");
   assert.equal(DEFAULT_AGENT_PROFILE.profileId, "general-purpose");
   assert.equal(typeof createAgentRunClient, "function");
   assert.equal(typeof createHttpAgentThreadStorage, "function");

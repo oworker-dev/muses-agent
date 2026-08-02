@@ -8,11 +8,13 @@ const workspaceRoot = new URL("../", import.meta.url).pathname;
 const temporaryRoot = await mkdtemp(join(tmpdir(), "muses-agent-sdk-"));
 const packageDirectory = join(temporaryRoot, "packages");
 const consumerDirectory = join(temporaryRoot, "consumer");
+const pnpmConsumerDirectory = join(temporaryRoot, "pnpm-consumer");
 
 try {
   await Promise.all([
     mkdir(packageDirectory, { recursive: true }),
     mkdir(consumerDirectory, { recursive: true }),
+    mkdir(pnpmConsumerDirectory, { recursive: true }),
   ]);
   for (const workspace of [
     "@muses/agent-contracts",
@@ -53,9 +55,9 @@ try {
     assert.equal(AGENT_RUN_CONTRACT_VERSION, "0.1.0-draft");
     assert.equal(AGENT_SESSION_CONTRACT_VERSION, "0.1.0-draft");
     assert.equal(AGENT_EMBED_CONTRACT_VERSION, "0.1.0");
-    assert.equal(AGENT_CLIENT_VERSION, "0.1.0-alpha.1");
+    assert.equal(AGENT_CLIENT_VERSION, "0.1.0-alpha.2");
     assert.equal(AGENT_HOST_SIGNATURE_VERSION, "0.1.0");
-    assert.equal(AGENT_UI_VERSION, "0.1.0-alpha.1");
+    assert.equal(AGENT_UI_VERSION, "0.1.0-alpha.2");
     assert.equal(typeof createAgentRunClient, "function");
     assert.equal(typeof signAgentHostCapabilityRequest, "function");
     assert.equal(typeof AgentWorkspace, "function");
@@ -67,7 +69,26 @@ try {
     stdio: "pipe",
   });
 
-  process.stdout.write(JSON.stringify({ archives: archives.map((path) => path.split("/").at(-1)), ok: true }) + "\n");
+  await writeFile(
+    join(pnpmConsumerDirectory, "package.json"),
+    JSON.stringify({ name: "agent-sdk-pnpm-conformance-consumer", private: true, type: "module" }),
+  );
+  execFileSync("pnpm", ["add", "--ignore-scripts", ...archives], {
+    cwd: pnpmConsumerDirectory,
+    stdio: "pipe",
+  });
+  execFileSync("node", ["--input-type=module", "--eval", probe], {
+    cwd: pnpmConsumerDirectory,
+    stdio: "pipe",
+  });
+
+  process.stdout.write(
+    JSON.stringify({
+      archives: archives.map((path) => path.split("/").at(-1)),
+      consumers: ["npm", "pnpm"],
+      ok: true,
+    }) + "\n",
+  );
 } finally {
   await rm(temporaryRoot, { force: true, recursive: true });
 }

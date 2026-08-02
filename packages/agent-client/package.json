@@ -1,6 +1,6 @@
 {
   "name": "@muses/agent-client",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "description": "Headless TypeScript client for the Muses Agent service.",
   "type": "module",
@@ -30,10 +30,8 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit -p tsconfig.build.json"
   },
-  "dependencies": {
-    "@muses/agent-contracts": "0.1.0-alpha.1"
-  },
   "peerDependencies": {
+    "@muses/agent-contracts": "0.1.0-alpha.2",
     "eve": ">=0.27.8 <0.28.0"
   },
   "peerDependenciesMeta": {

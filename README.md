@@ -367,9 +367,10 @@ it imports no UI package and owns every DOM element while using
 continuation, approval, cancellation, and refresh recovery.
 
 Run `npm run verify:sdk-packages` to build, pack, install, and import all SDK
-artifacts in an empty temporary consumer. They remain private alpha packages
-until the repository license, public registry, release policy, and cross-host
-conformance gates are complete.
+artifacts in empty npm and pnpm consumers. Versioned GitHub prerelease tarballs
+are available for host integration, while npm publication remains disabled
+until the repository license, stable release policy, and cross-host conformance
+gates are complete.
 
 ## Host Capability bridge
 

@@ -1,4 +1,4 @@
-export const AGENT_UI_VERSION = "0.1.0-alpha.1" as const;
+export const AGENT_UI_VERSION = "0.1.0-alpha.2" as const;
 
 export * from "./agent-workspace/index.js";
 export {
