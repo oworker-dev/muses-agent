@@ -1,6 +1,6 @@
 {
   "name": "@muses/example-custom-host-react",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.5",
   "private": true,
   "description": "A non-iframe React host that owns its UI and consumes the Muses AgentSession SDK.",
   "type": "module",
@@ -23,8 +23,8 @@
     "check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@muses/agent-client": "0.1.0-alpha.4",
-    "@muses/agent-contracts": "0.1.0-alpha.4"
+    "@muses/agent-client": "0.1.0-alpha.5",
+    "@muses/agent-contracts": "0.1.0-alpha.5"
   },
   "peerDependencies": {
     "eve": ">=0.27.8 <0.28.0",

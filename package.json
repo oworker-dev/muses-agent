@@ -1,6 +1,6 @@
 {
   "name": "muses-agent",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0-alpha.5",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -26,6 +26,7 @@
     "start:eve": "eve start",
     "test:e2e": "playwright test",
     "test:unit": "npm run build:sdk && node --test tests/unit/*.test.ts",
+    "verify:ci": "npm run typecheck && npm run test:unit && npm run verify:provider-failures && npm run build:eve && npm run build && npm run verify:sdk-packages && npm run verify:custom-host-example",
     "verify:agent-run-api": "node scripts/verify-agent-run-api.mjs",
     "verify:custom-host-example": "npm run build:examples",
     "verify:sdk-packages": "npm run build:sdk && node scripts/verify-sdk-packages.mjs",
@@ -40,10 +41,10 @@
     "verify:sandbox-reaper": "node scripts/verify-sandbox-reaper.mjs"
   },
   "dependencies": {
-    "@muses/agent-client": "0.1.0-alpha.4",
-    "@muses/agent-contracts": "0.1.0-alpha.4",
-    "@muses/agent-host": "0.1.0-alpha.4",
-    "@muses/agent-ui": "0.1.0-alpha.4",
+    "@muses/agent-client": "0.1.0-alpha.5",
+    "@muses/agent-contracts": "0.1.0-alpha.5",
+    "@muses/agent-host": "0.1.0-alpha.5",
+    "@muses/agent-ui": "0.1.0-alpha.5",
     "@ai-sdk/openai": "^4.0.24",
     "@opentelemetry/api": "1.9.1",
     "@radix-ui/react-use-controllable-state": "1.2.2",

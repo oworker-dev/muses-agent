@@ -1,0 +1,104 @@
+# Self-hosted Deployment Runbook
+
+This runbook describes the supported self-hosted alpha topology. It does not
+claim that an unverified deployment is production-ready.
+
+## Topology
+
+Run Agent Web and Eve Runtime as separate Node.js 24 processes. Use three
+separate state boundaries:
+
+1. Host product data may contain the `muses_agent` product schema for thread,
+   ownership, AgentRun, extension, and deletion-authorization records.
+2. Eve must use a physically separate PostgreSQL database for its Workflow
+   World. A schema or queue prefix is not enough to isolate incompatible
+   Workflow runtime generations.
+3. Each Muses host deployment keeps its own Workflow World database outside the
+   Eve database.
+
+Use a unique `WORKFLOW_POSTGRES_JOB_PREFIX` for every World. The supported Eve
+prefix is `muses_agent_`; the Muses host uses `muses_` in its own database.
+
+## Preflight
+
+Pin the exact source revision and container digest. Load secrets from the target
+secret manager, then run:
+
+```bash
+npm ci
+npm run verify:ci
+npm run doctor:production
+```
+
+The doctor must pass in the same environment used for the build. In particular,
+`AGENT_EMBED_ALLOWED_ORIGINS` and `EVE_NEXT_PRODUCTION_PORT` are build inputs.
+Do not continue when the doctor reports a shared Workflow database, implicit
+sandbox backend, missing telemetry, test fixture model, or disabled Shell
+approval.
+
+Bootstrap each database once and run product migrations before accepting
+traffic:
+
+```bash
+WORKFLOW_POSTGRES_URL=postgres://... npx --package=@workflow/world-postgres bootstrap
+AGENT_DATABASE_URL=postgres://... npm run db:migrate
+```
+
+Build and start Eve before Agent Web. The complete environment example and
+commands are in the root README. Health checks must verify the Eve health route,
+the Agent Web route, PostgreSQL connectivity, and telemetry export.
+
+## Rollout And Rollback
+
+- Deploy an immutable image and record its Git commit, package version, Eve
+  version, database migration revision, model catalog, and extension catalog.
+- Keep the previous image available. Application rollback is allowed only when
+  its database and Workflow spec versions can read all persisted state.
+- Stop new traffic before changing a Workflow runtime generation. Never point a
+  different Workflow major/spec at an existing World as a rollback shortcut.
+- Use canary traffic and compare completion rate, p95 turn latency, provider
+  error rate, sandbox allocation failures, cancellation settlement, token/cost
+  reconciliation, and queue backlog before promotion.
+- Abort rollout on authorization leakage, cross-session sandbox access, lost
+  continuation state, unbounded queue growth, or missing audit/telemetry export.
+
+## Data Lifecycle
+
+Thread deletion first retires the Eve durable session and only then writes a
+database-authorized sandbox tombstone. Schedule the Docker reaper with bounded
+retention and removal limits. Export both the reaper JSON result and tombstone
+state to durable audit storage. Container age alone never authorizes deletion.
+
+Define and publish retention periods for thread snapshots, AgentRun events,
+extension audits, host invocation audits, Workflow history, telemetry, provider
+usage, and backups. A customer deletion request must cover every store and must
+produce an auditable completion record. Backup restores must be tested into an
+isolated environment without starting workers against production queues.
+
+## Observability And Privacy
+
+Agent Web, Eve, Muses, and the collector must share W3C trace context. Durable
+queue work uses Span Links. Dashboards should cover turn and tool latency,
+Provider status, queue backlog, cancellation, sandbox allocation/reaping,
+token/cache usage, projected cost, and host capability failures.
+
+Keep full prompts and outputs out of spans, logs, and exception stacks. Run the
+private-probe verification against the deployed collector before using private
+customer content. Configure sampler, retention, access control, and deletion at
+the collector; the local mock collector is evidence tooling only.
+
+## Incident Actions
+
+1. Disable affected Host capabilities or revoke the extension version.
+2. Stop new Agent turns while preserving databases and queue evidence.
+3. Rotate exposed Provider, Host JWT, HMAC, database, and collector credentials.
+4. Capture redacted run, trace, deployment, queue, and audit identifiers.
+5. Restore service through a reviewed image or configuration rollback.
+6. Reconcile provider charges, host credits, unfinished runs, and sandbox state.
+7. Record the cause, affected tenants, deletion/notification duties, and a
+   regression test before reopening traffic.
+
+The selected production sandbox, MCP OAuth lifecycle, provider billing,
+deployed dashboards, SLO/load evidence, abuse controls, and deletion proof are
+still release gates tracked in the architecture document.
+

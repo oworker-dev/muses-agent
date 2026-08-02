@@ -16,6 +16,7 @@ const request = {
       "canvas.item.put",
       "workflow.invoke",
       "workflow.run.inspect",
+      "workflow.run.wait",
     ],
     limits: {
       maxTurns: 1,
@@ -41,7 +42,7 @@ assert(run.usage.inputTokens > 0 && run.usage.outputTokens > 0 && run.usage.step
 
 const eventPayload = await api("GET", `/api/agent/runs/${encodeURIComponent(run.runId)}/events?after=0`, undefined, 200);
 const serialized = JSON.stringify(eventPayload.events);
-for (const capability of ["canvas.inspect", "workflow.invoke", "workflow.run.inspect", "canvas.item.put"]) {
+for (const capability of ["canvas.inspect", "workflow.invoke", "workflow.run.wait", "canvas.item.put"]) {
   assert(serialized.includes(capability), `Agent event stream is missing ${capability}.`);
 }
 assert(serialized.includes("completed"), "Agent never observed a completed Workflow run.");
@@ -52,7 +53,7 @@ const hostResults = eventPayload.events
   .filter((output) => output?.capability);
 const workflowInspection = hostResults.find(
   (output) =>
-    output.capability === "workflow.run.inspect" &&
+    output.capability === "workflow.run.wait" &&
     output.output?.status === "completed",
 );
 assert(workflowInspection, "Platform Agent did not observe a completed Workflow run.");

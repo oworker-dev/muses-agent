@@ -245,9 +245,9 @@ The Muses Studio reference integration currently has two separate surfaces:
   API (`/api/agent/runs`). The Agent-to-host canvas bridge uses the signed
   `host_capabilities`/`host_invoke` protocol.
 
-The repository now builds `@muses/agent-contracts@0.1.0-alpha.4`,
-`@muses/agent-client@0.1.0-alpha.4`, `@muses/agent-host@0.1.0-alpha.4`, and
-`@muses/agent-ui@0.1.0-alpha.4` as real ESM/declaration packages with stable
+The repository now builds `@muses/agent-contracts@0.1.0-alpha.5`,
+`@muses/agent-client@0.1.0-alpha.5`, `@muses/agent-host@0.1.0-alpha.5`, and
+`@muses/agent-ui@0.1.0-alpha.5` as real ESM/declaration packages with stable
 subpath exports. A conformance command packs all four tarballs, installs them
 in an empty consumer, and imports their public entrypoints, an individual AI
 Element, and the stylesheet export. They remain private while the open-source
@@ -323,7 +323,9 @@ Span Link to the originating Web request and stays in the Agent execution trace.
 Eve spans carry AgentRun, correlation, session, Profile, Project and Canvas ids
 while full prompts and outputs remain disabled. A local Postgres World
 conformance run proved the link and proved a private prompt probe was not
-exported. Production still needs a deployed collector conformance run, billing
+exported, including the Provider-failure exception path: raw SDK error messages
+and causes are discarded before the durable error reaches telemetry. Production
+still needs a deployed collector conformance run, billing
 reconciliation, latency and error dashboards, and retention controls. UI
 projections are not an audit log.
 
@@ -333,7 +335,7 @@ The current implementation has passed type checking, deterministic browser
 tests, Eve production build under Node 24, Next production build, HMAC Host
 bridge tests, and a two-process local production smoke test. The Headless
 AgentRun protocol has also passed a local Eve/PostgreSQL conformance run.
-The Eve-native fixed suite additionally passes 25/25 gates against real Docker
+The Eve-native fixed suite additionally passes 43/43 gates against real Docker
 sandboxes for Skill/file/Shell/checkpoint autonomy, tool failure recovery,
 durable approval, cancellation, and cross-turn continuity. PostgreSQL extension
 lifecycle conformance proves default enablement, tenant revocation, re-enable,

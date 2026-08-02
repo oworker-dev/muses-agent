@@ -1,0 +1,58 @@
+name: Prerelease Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AGENT_EMBED_ALLOWED_ORIGINS: https://host.example.invalid
+      EVE_NEXT_PRODUCTION_PORT: "4275"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version-file: .node-version
+      - run: npm ci
+      - run: npm run verify:ci
+      - name: Verify tag matches package version
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(node -p 'require(\"./package.json\").version')"
+      - name: Pack installable SDK artifacts
+        run: |
+          mkdir -p release-artifacts
+          npm pack --workspace @muses/agent-contracts --pack-destination release-artifacts
+          npm pack --workspace @muses/agent-client --pack-destination release-artifacts
+          npm pack --workspace @muses/agent-host --pack-destination release-artifacts
+          npm pack --workspace @muses/agent-ui --pack-destination release-artifacts
+          sha256sum release-artifacts/*.tgz > release-artifacts/SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release-artifacts/*.tgz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muses-agent-${{ github.ref_name }}
+          path: release-artifacts/
+          if-no-files-found: error
+      - name: Publish immutable GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          release-artifacts/*
+          --verify-tag
+          --generate-notes
+          --prerelease
+

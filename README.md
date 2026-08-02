@@ -27,7 +27,9 @@ skill lifecycle management, billing reconciliation, deployed telemetry and
 security evidence remain release gates. The standalone Agent runtime and Muses
 Host Capability bridge are implemented and build-tested; they are not a
 substitute for a real provider-backed production E2E. See
-[Architecture](docs/architecture.md).
+[Architecture](docs/architecture.md), the
+[deployment runbook](docs/deployment.md), and the
+[release runbook](docs/releasing.md).
 
 ## Requirements
 
@@ -128,6 +130,9 @@ so the accepted Agent turn uses an OpenTelemetry Span Link to the originating
 Web request instead of pretending the queued work is a synchronous child span.
 Full prompts and model outputs are disabled; AgentRun, correlation, Profile,
 Project, Canvas, session, and turn identifiers remain available for joins.
+Provider errors are reduced to status and retry classification before entering
+the durable event log, because upstream SDK exception messages may contain the
+request body and would otherwise leak through OpenTelemetry exception stacks.
 
 Every direct Provider HTTP/SSE request has a hard deadline configured by
 `AGENT_PROVIDER_HTTP_TIMEOUT_MS` (120 seconds by default). Eve is the only
@@ -390,7 +395,8 @@ POST /api/studio/agent-host-tools/invoke
 ```
 
 The bridge maps only registered capabilities to the Muses operation gateway:
-canvas inspection/placement, Workflow catalog inspection/invocation, and
+canvas inspection/placement, Workflow catalog inspection/invocation, bounded
+server-side Workflow run waiting that does not spend LLM calls on polling, and
 versioned Workflow draft create/command/validate/publish. It never exposes a
 database handle or internal Agent state. Configure the same 32+ character HMAC
 secret as `MUSES_AGENT_HOST_TOOLS_SECRET` in Muses and

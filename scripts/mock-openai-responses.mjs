@@ -167,7 +167,7 @@ async function planResponse(body) {
   );
   if (!workflowRunId) return { kind: "text", text: "MUSES_HOST_E2E_FAILED: missing Workflow run id" };
 
-  const inspections = toolOutputs(input, called, "workflow.run.inspect");
+  const inspections = toolOutputs(input, called, "workflow.run.wait");
   const completed = inspections.some(
     (output) => deepFind(output, (key, value) => key === "status" && value === "completed") === "completed",
   );
@@ -179,7 +179,7 @@ async function planResponse(body) {
   if (failed) return { kind: "text", text: `MUSES_HOST_E2E_FAILED ${workflowRunId}` };
   if (!completed) {
     if (inspections.length > 0) await new Promise((resolve) => setTimeout(resolve, 500));
-    return hostInvoke("workflow.run.inspect", { runId: workflowRunId });
+    return hostInvoke("workflow.run.wait", { runId: workflowRunId, timeoutMs: 25_000 });
   }
 
   const canvasPuts = toolOutputs(input, called, "canvas.item.put");

@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AGENT_EMBED_ALLOWED_ORIGINS: https://host.example.invalid
+      EVE_NEXT_PRODUCTION_PORT: "4275"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version-file: .node-version
+      - run: npm ci
+      - run: npm run verify:ci
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AGENT_EVAL_FIXTURE_MODEL: autonomy-v1
+      AGENT_SANDBOX_BACKEND: docker
+      AGENT_WEB_URL: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          cache: npm
+          node-version-file: .node-version
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Start deterministic Agent Web
+        run: |
+          npm run dev > /tmp/muses-agent-ci.log 2>&1 &
+          echo $! > /tmp/muses-agent-ci.pid
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -200 /tmp/muses-agent-ci.log
+          exit 1
+      - run: npm run test:e2e
+      - name: Print server log on failure
+        if: failure()
+        run: tail -300 /tmp/muses-agent-ci.log || true
+      - name: Stop deterministic Agent Web
+        if: always()
+        run: |
+          if test -f /tmp/muses-agent-ci.pid; then
+            kill "$(cat /tmp/muses-agent-ci.pid)" 2>/dev/null || true
+          fi
+

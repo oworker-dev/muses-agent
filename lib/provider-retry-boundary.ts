@@ -1,9 +1,16 @@
 import type { LanguageModelMiddleware } from "ai";
 
 export class EveOwnedProviderAttemptError extends Error {
+  readonly statusCode?: number;
+  readonly isRetryable?: boolean;
+
   constructor(cause: unknown) {
-    super(providerErrorMessage(cause), { cause });
+    super(providerErrorMessage(cause));
     this.name = "EveOwnedProviderAttemptError";
+    const statusCode = providerStatusCode(cause);
+    if (statusCode !== undefined) this.statusCode = statusCode;
+    const isRetryable = providerRetryable(cause, statusCode);
+    if (isRetryable !== undefined) this.isRetryable = isRetryable;
   }
 }
 
@@ -33,9 +40,40 @@ export async function oneProviderAttempt<T>(operation: () => PromiseLike<T>): Pr
 }
 
 function providerErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim()
-    ? error.message
-    : "The model Provider request failed.";
+  const statusCode = providerStatusCode(error);
+  if (statusCode === 401 || statusCode === 403) {
+    return `The model Provider rejected this request (HTTP ${statusCode}).`;
+  }
+  if (statusCode !== undefined) {
+    return `The model Provider request failed (HTTP ${statusCode}).`;
+  }
+  if (error instanceof Error && error.name === "TimeoutError") {
+    return "The model Provider request timed out.";
+  }
+  return "The model Provider request failed.";
+}
+
+function providerStatusCode(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  for (const key of ["statusCode", "status"] as const) {
+    const value = Reflect.get(error, key);
+    if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function providerRetryable(
+  error: unknown,
+  statusCode: number | undefined,
+): boolean | undefined {
+  if (error && typeof error === "object") {
+    const explicit = Reflect.get(error, "isRetryable");
+    if (typeof explicit === "boolean") return explicit;
+  }
+  if (statusCode === undefined) return undefined;
+  return statusCode === 408 || statusCode === 429 || statusCode >= 500;
 }
 
 function isAbortError(error: unknown): boolean {

@@ -8,8 +8,9 @@ import {
   oneProviderAttempt,
 } from "../../lib/provider-retry-boundary.ts";
 
-test("wraps one Provider attempt while preserving its diagnostic cause", async () => {
-  const providerError = Object.assign(new Error("Rate limited"), {
+test("wraps one Provider attempt with safe diagnostics and no payload-bearing cause", async () => {
+  const privateProbe = "private prompt must not reach telemetry";
+  const providerError = Object.assign(new Error(`Rate limited; request=${privateProbe}`), {
     isRetryable: true,
     statusCode: 429,
   });
@@ -19,8 +20,25 @@ test("wraps one Provider attempt while preserving its diagnostic cause", async (
     }),
     (error: unknown) =>
       error instanceof EveOwnedProviderAttemptError &&
-      error.message === "Rate limited" &&
-      error.cause === providerError,
+      error.message === "The model Provider request failed (HTTP 429)." &&
+      error.cause === undefined &&
+      error.statusCode === 429 &&
+      error.isRetryable === true &&
+      !error.stack?.includes(privateProbe),
+  );
+});
+
+test("never copies an unknown Provider error message into the durable error", async () => {
+  const privateProbe = "secret request body";
+  await assert.rejects(
+    oneProviderAttempt(async () => {
+      throw new Error(privateProbe);
+    }),
+    (error: unknown) =>
+      error instanceof EveOwnedProviderAttemptError &&
+      error.message === "The model Provider request failed." &&
+      error.cause === undefined &&
+      !error.stack?.includes(privateProbe),
   );
 });
 
