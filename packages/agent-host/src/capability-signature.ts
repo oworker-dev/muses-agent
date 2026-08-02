@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AgentHostInvocationIdentity } from "@muses/agent-contracts/host";
 
-export const AGENT_HOST_SIGNATURE_VERSION = "0.1.0" as const;
+export const AGENT_HOST_SIGNATURE_VERSION = "0.2.0" as const;
 export const AGENT_HOST_HEADER = {
   actorType: "x-agent-host-actor-type",
   canvas: "x-agent-host-canvas",
@@ -43,7 +43,14 @@ export function signAgentHostCapabilityRequest(input: AgentHostSignatureInput): 
   return {
     [AGENT_HOST_HEADER.actorType]: identity.actorType,
     [AGENT_HOST_HEADER.principal]: identity.principalId,
-    [AGENT_HOST_HEADER.signature]: signature(input.secret, timestamp, method, pathname, body),
+    [AGENT_HOST_HEADER.signature]: signature(
+      input.secret,
+      timestamp,
+      method,
+      pathname,
+      body,
+      identity,
+    ),
     [AGENT_HOST_HEADER.tenant]: identity.tenantId,
     [AGENT_HOST_HEADER.timestamp]: timestamp,
     ...(identity.projectId ? { [AGENT_HOST_HEADER.project]: identity.projectId } : {}),
@@ -70,16 +77,7 @@ export function verifyAgentHostCapabilityRequest(
     throw authError("host-capability-auth-expired", "The Host capability request timestamp is expired.");
   }
 
-  const method = normalizeMethod(input.method);
-  const pathname = normalizeUrl(input.url).pathname;
-  const expected = signature(input.secret, timestamp, method, pathname, input.body ?? "");
-  const suppliedBytes = Buffer.from(suppliedSignature);
-  const expectedBytes = Buffer.from(expected);
-  if (suppliedBytes.length !== expectedBytes.length || !timingSafeEqual(suppliedBytes, expectedBytes)) {
-    throw authError("host-capability-signature-invalid", "The Host capability signature is invalid.");
-  }
-
-  return validateIdentity({
+  const identity = validateIdentity({
     actorType: requiredHeader(headers, AGENT_HOST_HEADER.actorType) as "user" | "service",
     principalId: requiredHeader(headers, AGENT_HOST_HEADER.principal),
     tenantId: requiredHeader(headers, AGENT_HOST_HEADER.tenant),
@@ -90,6 +88,23 @@ export function verifyAgentHostCapabilityRequest(
       ? { canvasId: optionalHeader(headers, AGENT_HOST_HEADER.canvas) }
       : {}),
   });
+  const method = normalizeMethod(input.method);
+  const pathname = normalizeUrl(input.url).pathname;
+  const expected = signature(
+    input.secret,
+    timestamp,
+    method,
+    pathname,
+    input.body ?? "",
+    identity,
+  );
+  const suppliedBytes = Buffer.from(suppliedSignature);
+  const expectedBytes = Buffer.from(expected);
+  if (suppliedBytes.length !== expectedBytes.length || !timingSafeEqual(suppliedBytes, expectedBytes)) {
+    throw authError("host-capability-signature-invalid", "The Host capability signature is invalid.");
+  }
+
+  return identity;
 }
 
 export class AgentHostCapabilityAuthError extends Error {
@@ -103,23 +118,62 @@ export class AgentHostCapabilityAuthError extends Error {
   }
 }
 
-function signature(secret: string, timestamp: string, method: string, pathname: string, body: string) {
+function signature(
+  secret: string,
+  timestamp: string,
+  method: string,
+  pathname: string,
+  body: string,
+  identity: AgentHostInvocationIdentity,
+) {
   return createHmac("sha256", secret)
-    .update(`${timestamp}.${method}.${pathname}.${body}`)
+    .update(`${timestamp}.${method}.${pathname}.${canonicalIdentity(identity)}.${body}`)
     .digest("base64url");
 }
 
 function validateIdentity(identity: AgentHostInvocationIdentity): AgentHostInvocationIdentity {
-  if (!identity.tenantId?.trim() || !identity.principalId?.trim()) {
+  const tenantId = normalizeIdentityText(identity.tenantId);
+  const principalId = normalizeIdentityText(identity.principalId);
+  if (!tenantId || !principalId) {
     throw authError("host-capability-auth-invalid", "Tenant and principal identity are required.");
   }
   if (identity.actorType !== "user" && identity.actorType !== "service") {
     throw authError("host-capability-actor-invalid", "The Host capability actor type is invalid.");
   }
-  if (identity.canvasId && !identity.projectId) {
+  const projectId = normalizeIdentityText(identity.projectId);
+  const canvasId = normalizeIdentityText(identity.canvasId);
+  if (canvasId && !projectId) {
     throw authError("host-capability-project-required", "A Canvas scope requires a Project scope.");
   }
-  return identity;
+  return {
+    actorType: identity.actorType,
+    principalId,
+    tenantId,
+    ...(projectId ? { projectId } : {}),
+    ...(canvasId ? { canvasId } : {}),
+  };
+}
+
+function canonicalIdentity(identity: AgentHostInvocationIdentity) {
+  return Buffer.from(
+    JSON.stringify([
+      identity.tenantId,
+      identity.principalId,
+      identity.actorType,
+      identity.projectId ?? "",
+      identity.canvasId ?? "",
+    ]),
+    "utf8",
+  ).toString("base64url");
+}
+
+function normalizeIdentityText(value: string | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized.length > 240) {
+    throw authError("host-capability-auth-invalid", "Host capability identity fields are too long.");
+  }
+  return normalized;
 }
 
 function assertSecret(secret: string) {

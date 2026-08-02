@@ -61,6 +61,17 @@ test("Host SDK rejects tampering, stale requests, and invalid scope", () => {
   );
   assert.throws(
     () => verifyAgentHostCapabilityRequest({
+      headers: { ...headers, "x-agent-host-tenant": "another-workspace" },
+      method: "GET",
+      now: NOW,
+      secret: SECRET,
+      url: "https://host.example/capabilities",
+    }),
+    (error: unknown) => error instanceof AgentHostCapabilityAuthError
+      && error.code === "host-capability-signature-invalid",
+  );
+  assert.throws(
+    () => verifyAgentHostCapabilityRequest({
       headers,
       method: "GET",
       now: NOW + 60_001,

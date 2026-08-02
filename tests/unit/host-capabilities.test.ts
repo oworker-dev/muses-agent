@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
 import test from "node:test";
 
 import type { SessionContext } from "eve/context";
+import { verifyAgentHostCapabilityRequest } from "@muses/agent-host";
 
 import {
   invokeHostCapability,
@@ -140,11 +140,20 @@ function sessionContext(agentRunPolicy?: string): SessionContext {
 
 function assertValidSignature(request: Request, body: string) {
   const timestamp = request.headers.get("x-agent-host-timestamp")!;
-  const signingInput = `${timestamp}.${request.method}.${new URL(request.url).pathname}.${body}`;
-  const expected = createHmac("sha256", SECRET)
-    .update(signingInput)
-    .digest("base64url");
-  assert.equal(request.headers.get("x-agent-host-signature"), expected);
+  const identity = verifyAgentHostCapabilityRequest({
+    body,
+    headers: request.headers,
+    method: request.method,
+    now: Number(timestamp),
+    secret: SECRET,
+    url: request.url,
+  });
+  assert.deepEqual(identity, {
+    actorType: "user",
+    principalId: "user-1",
+    projectId: "project-1",
+    tenantId: "workspace-1",
+  });
 }
 
 function restoreEnvironment(
