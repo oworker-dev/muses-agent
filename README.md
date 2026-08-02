@@ -1,0 +1,396 @@
+# muses-agent
+
+`muses-agent` is a standalone, Web-first autonomous agent. It targets a Codex-like
+product shape while keeping the runtime independent of Muses, canvases, image
+generation, presentations, and other host-specific domains.
+
+Muses is the first host, not a compile-time dependency. Host capabilities must be
+provided as authenticated tools, skills, connections, or client context.
+
+## Current status
+
+The project has a working Eve runtime and a reusable AI Elements Web workspace:
+
+- durable multi-turn sessions and reconnectable event streams;
+- model and reasoning selection;
+- reasoning, tools, human approval, authorization, usage, and cost projections;
+- multiple local threads, responsive navigation, English and Simplified Chinese;
+- cancellation, failed-turn continuation, and hard-refresh recovery;
+- per-durable-session Eve sandbox behavior;
+- PostgreSQL-backed session ownership and injectable account thread storage;
+- Host JWT enforcement across create, continue, stream, cancel, and reset routes.
+- buildable Contracts, Client, Host, and React UI alpha SDK packages;
+- optional iframe, native `AgentWorkspace`, and custom-host UI integration paths.
+
+This is an integration preview, not a completed production release. MCP and
+skill lifecycle management, billing reconciliation, deployed telemetry and
+security evidence remain release gates. The standalone Agent runtime and Muses
+Host Capability bridge are implemented and build-tested; they are not a
+substitute for a real provider-backed production E2E. See
+[Architecture](docs/architecture.md).
+
+## Requirements
+
+- Node.js 24
+- Docker for the current local sandbox selection
+- `OPENAI_API_KEY`
+- optional `OPENAI_BASE_URL` and `AGENT_MODEL_ID`
+
+Do not put credentials in the repository or browser storage.
+
+## Development
+
+Run with a Node 24 shell:
+
+```bash
+npm install
+npm run dev
+```
+
+The Next.js app and Eve development runtime are mounted on one origin by
+`withEve()`. The default Web URL is `http://127.0.0.1:3000`.
+
+## Verification
+
+```bash
+npm run typecheck
+npm run test:unit
+npm run test:e2e
+npm run verify:provider-failures
+```
+
+The default browser suite keeps provider-dependent output out of deterministic
+regression tests. Run the live provider continuation check explicitly:
+
+```bash
+RUN_AGENT_LIVE_E2E=1 npm run test:e2e -- --grep "real conversation"
+```
+
+`verify:provider-failures` boots a real Eve runtime against a fault-injecting
+OpenAI Responses-compatible server. It proves that HTTP 408, 429, and 5xx
+responses are retried only by Eve and recover on the third Provider request;
+the AI SDK does not multiply those attempts with its own retry loop. It also
+proves that a hung request and a stream interrupted after Provider output emit
+`step.failed` and `turn.failed`, park at `session.waiting`, and accept a
+successful follow-up in the same durable session without `session.failed`.
+
+## Production build
+
+For a self-hosted production build, use the PostgreSQL Workflow World during
+both build and runtime. Bootstrap its schema once against the target database:
+
+```bash
+WORKFLOW_POSTGRES_URL=postgres://... npx --package=@workflow/world-postgres bootstrap
+AGENT_DATABASE_URL=postgres://... npm run db:migrate
+```
+
+Build both services with the same Eve port baked into the Next rewrite:
+
+```bash
+AGENT_SANDBOX_BACKEND=docker \
+WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
+WORKFLOW_POSTGRES_URL=postgres://... \
+WORKFLOW_POSTGRES_JOB_PREFIX=muses_agent_ \
+  npm run build:eve
+AGENT_SANDBOX_BACKEND=docker \
+AGENT_EMBED_ALLOWED_ORIGINS=https://muses.example.com \
+EVE_NEXT_PRODUCTION_PORT=4275 npm run build
+```
+
+Eve 0.27.8 documents automatic local runtime startup from `next start`, but the
+installed Next.js 16.3 preview does not currently invoke that resolver reliably.
+For local production verification, start the two official services explicitly:
+
+```bash
+AGENT_SANDBOX_BACKEND=docker \
+WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
+WORKFLOW_POSTGRES_URL=postgres://... \
+WORKFLOW_POSTGRES_JOB_PREFIX=muses_agent_ \
+  npm run start:eve -- --port 4275
+AGENT_RUNTIME_URL=http://127.0.0.1:4275 \
+EVE_NEXT_PRODUCTION_PORT=4275 npm start -- -p 3100
+```
+
+Verify `http://127.0.0.1:3100/eve/v1/health` before sending a turn. Vercel uses
+generated service routes and does not use this two-process local fallback.
+
+Run `npm run doctor:production` with the deployment environment before building.
+It fails when Node is not 24, a production sandbox backend is implicit, the Eve
+World shares the Agent product database, the queue prefix can collide with
+Muses, build-time CSP/port values are missing, or Host credentials are partial.
+`AGENT_EMBED_ALLOWED_ORIGINS` and `EVE_NEXT_PRODUCTION_PORT` are build inputs;
+setting them only when `next start` runs cannot repair an already built image.
+The Agent Web API and Eve runtime both register OpenTelemetry through
+`@vercel/otel`. Configure `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or the Vercel
+collector) in both processes and use the same collector as Muses. Synchronous
+HTTP hops propagate W3C context. Eve's durable queue is an asynchronous boundary,
+so the accepted Agent turn uses an OpenTelemetry Span Link to the originating
+Web request instead of pretending the queued work is a synchronous child span.
+Full prompts and model outputs are disabled; AgentRun, correlation, Profile,
+Project, Canvas, session, and turn identifiers remain available for joins.
+
+Every direct Provider HTTP/SSE request has a hard deadline configured by
+`AGENT_PROVIDER_HTTP_TIMEOUT_MS` (120 seconds by default). Eve is the only
+automatic retry authority: transient 408, 429, and 5xx failures receive Eve's
+bounded three-attempt policy. A request that reaches the hard deadline, or a
+stream that breaks after Provider output begins, ends the current turn as a
+recoverable failure and preserves its continuation token. The client must ask
+the user to continue or retry explicitly; the runtime does not automatically
+replay a possibly completed tool or external side effect. Caller cancellation
+remains distinct and propagates as Eve's normal cancellation flow.
+
+Production browser traffic must carry a short-lived host JWT. Configure
+`AGENT_HOST_JWT_SECRET`, `AGENT_HOST_JWT_ISSUER`, and
+`AGENT_HOST_JWT_AUDIENCE` from the deployment secret manager. Tokens must
+contain `sub` and a non-empty `tenantId`; optional `actorType` is `user` or
+`service`. Local loopback development remains available through Eve's
+`localDev()` authenticator.
+
+`AGENT_DATABASE_URL` is mandatory whenever Host JWT auth is enabled. Eve records
+the immutable `tenantId + principalId` owner on `session.started`; every later
+session-specific request checks that owner before exposing events or accepting
+work. Agent product tables use `AGENT_DATABASE_SCHEMA` (default `muses_agent`)
+and may live in the host product database. The Eve Workflow World must use a
+physically separate database: Workflow runtime generations with incompatible
+spec versions cannot safely share a `workflow` schema or worker queue.
+
+`AGENT_RUNTIME_URL` names the Eve origin or deployment base path before
+`/eve/v1`; the Eve client appends its protocol routes. The adapter also repairs
+the common trailing `/eve/v1` misconfiguration to prevent duplicated paths.
+`AGENT_RUN_CANCELLATION_GRACE_MS` controls the bounded cooperative-cancel window
+before the service terminally resets an exclusive Headless AgentRun session.
+
+The runtime accepts two versioned profiles: `general-purpose@0.1.0` is
+host-neutral, while `muses-platform@0.1.0` enables the same Agent runtime with
+Muses-specific host instructions. Profile selection is validated at the
+Headless AgentRun boundary and projected into the Eve session; a host cannot
+invent a profile by changing a Workflow node.
+
+## Headless AgentRun API
+
+The service exposes a framework-neutral run contract for hosts and Workflow
+nodes. Eve `sessionId` is an internal harness handle; callers use the stable
+`runId` returned by the API:
+
+```text
+POST   /api/agent/runs
+GET    /api/agent/runs/:runId
+GET    /api/agent/runs/:runId/events?after=cursor
+DELETE /api/agent/runs/:runId
+```
+
+Every request requires a Host JWT and is scoped to its verified
+`tenantId + principalId`. Start requests require an idempotency key. Replaying
+the same semantic request returns the original run without submitting another
+model turn; reusing the key for a different request returns `409`.
+
+The event endpoint projects Eve events into the versioned Agent contract and
+reports token usage, cache reads/writes, and provider cost when Eve supplies
+them. `DELETE` first requests Eve cooperative cancellation and records
+`cancellationRequestedAt`. If Eve does not emit `turn.cancelled` within the
+bounded grace window, the service terminally resets that AgentRun's exclusive
+session and records `cancelled`. Late provider completion cannot overwrite the
+cancelled state or publish a result. Inspection and event reads repeat the same
+idempotent reconciliation after interrupted cancellation requests.
+
+The draft does not yet provide per-run credit reservations or deployed
+collector, dashboard, retention, and cost-reconciliation evidence. Those remain
+explicit release gates rather than hidden behavior.
+
+## Docker sandbox retention
+
+Eve's Docker backend preserves `/workspace` in a long-lived container for each
+durable session. Stopping the Agent server stops sandbox compute but intentionally
+keeps the container so the next server can reattach. Deletion is therefore an
+application retention decision, not an Eve server-shutdown side effect.
+
+The operator reaper is conservative and prints a JSON dry-run by default:
+
+```bash
+EVE_SANDBOX_RETENTION_HOURS=168 \
+EVE_SANDBOX_REAPER_MAX_REMOVALS=50 \
+  npm run reap:sandboxes
+
+# Apply exactly the previously reviewed policy.
+EVE_SANDBOX_RETENTION_HOURS=168 \
+EVE_SANDBOX_REAPER_MAX_REMOVALS=50 \
+  npm run reap:sandboxes -- --apply
+```
+
+It only owns containers with Eve's session labels and name convention, skips
+running and protected sessions, rechecks ownership immediately before deletion,
+and limits every invocation. Emergency deletion of a running sandbox requires
+both `--include-running` and the exact `--session-id`; neither flag alone is
+accepted. `EVE_SANDBOX_PROTECTED_SESSION_IDS` is a comma-separated protection
+list. `--apply` also requires `AGENT_DATABASE_URL` and atomically claims a
+session tombstone written only after Eve was retired; container age alone never
+authorizes deletion. Production operations must schedule this command and ship
+its JSON plus the persisted tombstone lifecycle to durable audit storage.
+
+## Host integration
+
+`AgentWorkspace` accepts transport and per-turn host hooks without importing a
+host product into the Agent core:
+
+```tsx
+import { AgentWorkspace, createHttpAgentThreadStorage } from "@muses/agent-ui";
+import "@muses/agent-ui/styles.css";
+
+const threadStorage = createHttpAgentThreadStorage({
+  getAccessToken: () => hostSession.agentAccessToken(),
+});
+
+<AgentWorkspace
+  agentName="general-agent"
+  client={{
+    host: "",
+    headers: async () => ({ "x-host-csrf": await getCsrfToken() }),
+    prepareSend: (input) => ({
+      ...input,
+      clientContext: { route: window.location.pathname },
+    }),
+  }}
+  defaultPreferences={{ modelId: "provider/model", reasoning: "high" }}
+  models={[{ contextWindowTokens: 128000, id: "provider/model", label: "Model" }]}
+  productName="Agent"
+  reasoningLevels={["low", "medium", "high"]}
+/>
+```
+
+Hosts can also inject authenticated thread persistence. The storage adapter
+owns account/database access; `AgentWorkspace` only consumes versioned thread
+snapshots and serializes writes so rapid stream events cannot reorder them:
+
+```tsx
+<AgentWorkspace
+  agentName="general-agent"
+  defaultPreferences={{ modelId: "provider/model", reasoning: "high" }}
+  models={[{ contextWindowTokens: 128000, id: "provider/model", label: "Model" }]}
+  productName="Agent"
+  reasoningLevels={["low", "medium", "high"]}
+  threadStorage={threadStorage}
+  onStorageError={reportHostStorageFailure}
+/>
+```
+
+For server-backed threads, hosts should also provide `onDeleteThread`. The
+reference Muses embed calls `DELETE /api/agent/sessions/:sessionId` with the
+thread continuation token. The service retires Eve first, then records a
+database-authorized sandbox tombstone for asynchronous reaping. A failed
+retirement leaves the thread and sandbox visible.
+
+The bundled HTTP adapter uses `If-Match` revisions. A competing client receives
+`409` and the workspace stops further writes, shows a visible persistence error,
+and requires an explicit reload; it never silently overwrites server state.
+
+The server remains authoritative for identity, model entitlement, tool access,
+and billing. Browser headers and `clientContext` are untrusted input.
+
+## Tools and fixed evals
+
+Eve supplies the general-purpose file, Shell, Web, todo, clarification,
+Skill, and subagent loop. Muses Agent preserves those framework executors and
+overrides only the `bash` approval policy. `AGENT_BASH_APPROVAL_MODE=risky`
+parks destructive, publishing, infrastructure-mutating, and external write
+commands for durable user approval. Unattended service/runtime principals are
+denied instead of approving themselves. Production rejects `never`.
+
+Run the deterministic Harness suite against a real Docker sandbox:
+
+```bash
+npm run eval:fixed
+```
+
+The suite covers Skill loading, file write/read, Shell execution, checkpoints,
+tool failure recovery, durable approval, cancellation, cross-turn sandbox
+continuity, and repeated Eve context compaction. The compaction case preserves
+exact facts, active todo state, and sandbox contents across two checkpoints,
+and proves that Eve resets read-before-write evidence after summarization so an
+existing file must be read again before it can be changed. It uses
+`AGENT_EVAL_FIXTURE_MODEL` and a small
+`AGENT_EVAL_CONTEXT_WINDOW_TOKENS` only inside the runner;
+`doctor:production` rejects both test controls in production.
+
+## Skill and MCP control plane
+
+The deployment catalog is code-reviewed and version-pinned. Tenant operators
+with the Host JWT scope `agent.extensions.manage` can inspect, enable, or revoke
+catalog entries through:
+
+```text
+GET    /api/agent/extensions
+PUT    /api/agent/extensions/:extensionId/:version
+DELETE /api/agent/extensions/:extensionId/:version
+```
+
+The `PUT` body accepts only an optional `credentialRef`. It must be an opaque
+`vault://...` or `vercel-connect://...` locator; raw credentials are rejected.
+Audit records persist state transitions and whether a credential was
+configured, never the reference or secret. Revocation is checked before a
+Headless AgentRun starts and again when an Eve session starts or continues.
+It prevents future calls; it cannot roll back a side effect that already
+completed, so write capabilities still require approval and idempotency.
+
+The current compiled catalog contains `software-task@1.0.0`. The lifecycle
+contract supports MCP entries, but none are advertised until a real MCP
+connection, allowlist, auth provider, approval policy, and eval are compiled
+into the deployment.
+
+Headless hosts use the same versioned Run contract through the buildable
+`@muses/agent-contracts` and `@muses/agent-client` workspace packages.
+`createAgentRunClient()` provides start, inspect, incremental events, and
+cancellation without exposing Eve session identifiers or importing a host
+product. It resolves a short-lived token for every request, rejects credential
+forwarding redirects by default, and validates successful responses against the
+advertised contract version. The host is responsible for issuing a JWT whose
+`sub`, `tenantId`, and `actorType` identify the immutable owner.
+
+The `@muses/agent-client/eve-session` subpath adapts Eve's interactive session
+implementation to a host-neutral cursor, turn, event, continuation,
+cancellation, and reset interface. Hosts that own their UI can use this path
+without importing `AgentWorkspace` or loading the iframe.
+
+`@muses/agent-host` owns the signed Host Capability client, verification, and
+registry primitives. Application membership and business authorization remain
+the host's responsibility.
+
+`@muses/agent-ui` owns the host-neutral React `AgentWorkspace`, thread storage,
+event projection, individual AI Elements subpaths, and a precompiled stylesheet.
+The host must inject its reviewed model catalog and defaults; identity,
+entitlement, billing, and tool policy remain server-authoritative. Both the
+standalone page and optional `/embed` adapter consume this package rather than
+private component source.
+
+[`examples/custom-host-react`](examples/custom-host-react) is the inverse proof:
+it imports no UI package and owns every DOM element while using
+`@muses/agent-client/eve-session` for rotating credentials, streaming,
+continuation, approval, cancellation, and refresh recovery.
+
+Run `npm run verify:sdk-packages` to build, pack, install, and import all SDK
+artifacts in an empty temporary consumer. They remain private alpha packages
+until the repository license, public registry, release policy, and cross-host
+conformance gates are complete.
+
+## Host Capability bridge
+
+When `AGENT_HOST_TOOLS_URL` and `AGENT_HOST_TOOLS_SECRET` are configured, the
+runtime exposes `host_capabilities` and `host_invoke` as dynamic tools. They are
+absent from standalone sessions when the bridge is not configured, so the Agent
+remains useful without Muses. Requests use a short-lived HMAC signature over
+timestamp, method, path, and body, and carry tenant, raw principal, project, and
+canvas scope. User calls require Eve approval; explicitly marked service actors
+may proceed only for owner/admin Workspace members.
+
+Muses implements the first bridge at:
+
+```text
+GET  /api/studio/agent-host-tools/capabilities
+POST /api/studio/agent-host-tools/invoke
+```
+
+The bridge maps only registered capabilities to the Muses operation gateway:
+canvas inspection/placement, Workflow catalog inspection/invocation, and
+versioned Workflow draft create/command/validate/publish. It never exposes a
+database handle or internal Agent state. Configure the same 32+ character HMAC
+secret as `MUSES_AGENT_HOST_TOOLS_SECRET` in Muses and
+`AGENT_HOST_TOOLS_SECRET` in this service.

@@ -1,0 +1,42 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  AGENT_EMBED_CONTRACT_VERSION,
+  isAllowedAgentEmbedParentOrigin,
+  parseAgentEmbedHostMessage,
+} from "../../contracts/agent-embed.ts";
+
+test("accepts a valid in-memory embed configuration", () => {
+  const parsed = parseAgentEmbedHostMessage({
+    type: "agent.embed.configure",
+    contractVersion: AGENT_EMBED_CONTRACT_VERSION,
+    requestId: "request-1",
+    accessToken: "a-valid-short-lived-token",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    serviceUrl: "https://agent.example",
+    storageKey: "tenant:project:threads",
+    profile: { id: "muses-platform", version: "0.1.0" },
+    theme: "light",
+  });
+  assert.equal(parsed?.profile.id, "muses-platform");
+});
+
+test("rejects tokens in an invalid or unknown protocol message", () => {
+  assert.equal(parseAgentEmbedHostMessage({
+    type: "agent.embed.configure",
+    contractVersion: "9.0.0",
+    accessToken: "secret-token",
+  }), undefined);
+});
+
+test("derives only an exact allowlisted parent origin from referrer", () => {
+  const allowed = ["https://muses.example"];
+  assert.equal(
+    isAllowedAgentEmbedParentOrigin("https://muses.example/studio", allowed),
+    "https://muses.example",
+  );
+  assert.equal(
+    isAllowedAgentEmbedParentOrigin("https://evil.example/studio", allowed),
+    undefined,
+  );
+});

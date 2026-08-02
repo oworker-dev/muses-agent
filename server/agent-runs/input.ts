@@ -1,0 +1,125 @@
+import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
+import {
+  type JsonValue,
+  type StartAgentRunRequest,
+} from "../../contracts/agent-run.ts";
+import {
+  AGENT_PROFILE_OPTIONS,
+  isAgentProfileRef,
+} from "../../lib/agent-profile.ts";
+import { parseAgentRunPolicy } from "../../agent/lib/run-policy.ts";
+import { resolveAgentRunPolicy } from "../../lib/agent-extension-catalog.ts";
+
+const MAX_JSON_BYTES = 64 * 1024;
+export const MAX_AGENT_RUN_DEPTH = 8;
+const capabilityNameSchema = z.string().trim().min(1).max(160).regex(/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/);
+const positiveLimit = z.number().int().positive();
+const extensionRefSchema = z.object({
+  id: z.string().min(1).max(120).regex(/^[a-z0-9][a-z0-9._-]*$/),
+  version: z.string().min(1).max(80).regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$/),
+}).strict();
+
+const startSchema = z.object({
+  clientContext: z.record(z.string(), z.unknown()).optional(),
+  correlationId: z.string().trim().min(1).max(200).optional(),
+  idempotencyKey: z.string().trim().min(8).max(200),
+  message: z.string().trim().min(1).max(100_000),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  parent: z.object({
+    depth: z.number().int().min(1).max(MAX_AGENT_RUN_DEPTH),
+    parentRunId: z.string().trim().min(1).max(200),
+    rootRunId: z.string().trim().min(1).max(200),
+    source: z.enum(["agent", "workflow"]),
+  }).strict().optional(),
+  policy: z.object({
+    hostCapabilities: z.array(capabilityNameSchema).max(128).optional(),
+    limits: z.object({
+      maxDurationMs: positiveLimit.max(24 * 60 * 60 * 1_000).optional(),
+      maxInputTokens: positiveLimit.max(40_000_000).optional(),
+      maxModelCalls: positiveLimit.max(10_000).optional(),
+      maxOutputTokens: positiveLimit.max(10_000_000).optional(),
+      maxToolCalls: positiveLimit.max(100_000).optional(),
+      maxTurns: positiveLimit.max(10_000).optional(),
+    }).strict().optional(),
+    mcpConnections: z.array(extensionRefSchema).max(64).optional(),
+    skills: z.array(extensionRefSchema).max(64).optional(),
+  }).strict().optional(),
+  profile: z.object({
+    profileId: z.string().trim().min(1).max(120),
+    version: z.string().trim().min(1).max(40),
+  }).strict().refine(isAgentProfileRef, {
+    message: `The profile must be one of: ${AGENT_PROFILE_OPTIONS.map((profile) => `${profile.profileId}@${profile.version}`).join(", ")}.`,
+  }),
+}).strict();
+
+export type ParsedStartAgentRun = StartAgentRunRequest & { readonly correlationId: string };
+
+export function parseStartAgentRun(value: unknown):
+  | { readonly ok: true; readonly value: ParsedStartAgentRun }
+  | { readonly error: string; readonly ok: false } {
+  const parsed = startSchema.safeParse(value);
+  if (!parsed.success) {
+    return { error: "The AgentRun request does not match contract 0.1.0-draft.", ok: false };
+  }
+  for (const [name, candidate] of [
+    ["clientContext", parsed.data.clientContext],
+    ["metadata", parsed.data.metadata],
+    ["outputSchema", parsed.data.outputSchema],
+  ] as const) {
+    if (candidate !== undefined && !isJsonObject(candidate, MAX_JSON_BYTES)) {
+      return { error: `${name} must be a JSON object no larger than 64 KiB.`, ok: false };
+    }
+  }
+
+  try {
+    const policy = resolveAgentRunPolicy(
+      parsed.data.profile,
+      parseAgentRunPolicy(parsed.data.policy ?? {}),
+    );
+    return {
+      ok: true,
+      value: {
+        ...parsed.data,
+        clientContext: parsed.data.clientContext as Readonly<Record<string, JsonValue>> | undefined,
+        correlationId: parsed.data.correlationId ?? `corr_${randomUUID()}`,
+        metadata: parsed.data.metadata as Readonly<Record<string, JsonValue>> | undefined,
+        outputSchema: parsed.data.outputSchema as Readonly<Record<string, JsonValue>> | undefined,
+        policy,
+      },
+    };
+  } catch {
+    return { error: "The AgentRun policy requests an unavailable or invalid extension.", ok: false };
+  }
+}
+
+export function requestFingerprint(request: ParsedStartAgentRun): string {
+  const { correlationId: _correlationId, idempotencyKey: _idempotencyKey, ...semanticRequest } = request;
+  return createHash("sha256").update(canonicalJson(semanticRequest)).digest("hex");
+}
+
+function isJsonObject(value: unknown, maximumBytes: number): boolean {
+  try {
+    const serialized = JSON.stringify(value);
+    if (!serialized || Buffer.byteLength(serialized) > maximumBytes) return false;
+    const parsed = JSON.parse(serialized);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonicalize(value));
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, canonicalize(item)]),
+  );
+}

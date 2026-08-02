@@ -1,0 +1,84 @@
+.custom-agent {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  height: 100%;
+  min-height: 24rem;
+  color: #171717;
+  background: #f7f7f7;
+  font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+}
+
+.custom-agent__header,
+.custom-agent__composer,
+.custom-agent__approval {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-color: #dedede;
+}
+
+.custom-agent__header {
+  justify-content: space-between;
+  border-bottom: 1px solid #dedede;
+}
+
+.custom-agent__events {
+  overflow: auto;
+  padding: 1rem;
+}
+
+.custom-agent__event {
+  max-width: 48rem;
+  margin: 0 auto 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #dedede;
+  background: #fff;
+}
+
+.custom-agent__event p,
+.custom-agent__approval p,
+.custom-agent__error {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.custom-agent__approval {
+  flex-direction: column;
+  align-items: stretch;
+  border-top: 1px solid #dedede;
+}
+
+.custom-agent__approval div {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.custom-agent__error {
+  padding: 0.75rem 1rem;
+  color: #b42318;
+}
+
+.custom-agent__composer {
+  border-top: 1px solid #dedede;
+}
+
+.custom-agent__composer textarea {
+  min-height: 4rem;
+  flex: 1;
+  resize: vertical;
+}
+
+.custom-agent button,
+.custom-agent textarea {
+  border: 1px solid #c8c8c8;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+.custom-agent button:not(:disabled) {
+  cursor: pointer;
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@muses/example-custom-host-react",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "A non-iframe React host that owns its UI and consumes the Muses AgentSession SDK.",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "styles.css"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles.css": "./styles.css"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@muses/agent-client": "0.1.0-alpha.1",
+    "@muses/agent-contracts": "0.1.0-alpha.1"
+  },
+  "peerDependencies": {
+    "eve": ">=0.27.8 <0.28.0",
+    "react": ">=19.2.0 <20.0.0",
+    "react-dom": ">=19.2.0 <20.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.15",
+    "typescript": "6.0.3"
+  }
+}

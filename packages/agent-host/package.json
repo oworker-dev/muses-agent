@@ -1,0 +1,43 @@
+{
+  "name": "@muses/agent-host",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Server-side Host Capability SDK for Muses Agent integrations.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/capability-client.d.ts",
+      "import": "./dist/capability-client.js"
+    },
+    "./registry": {
+      "types": "./dist/capability-registry.d.ts",
+      "import": "./dist/capability-registry.js"
+    },
+    "./signature": {
+      "types": "./dist/capability-signature.d.ts",
+      "import": "./dist/capability-signature.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@muses/agent-contracts": "0.1.0-alpha.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,106 @@
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import assert from "node:assert/strict";
+import { docker } from "eve/sandbox/docker";
+
+if (process.env.RUN_SANDBOX_DOCKER_EVAL !== "1") {
+  console.log("sandbox docker eval skipped (set RUN_SANDBOX_DOCKER_EVAL=1)");
+  process.exit(0);
+}
+
+assertDockerAvailable();
+
+const suffix = randomUUID().replaceAll("-", "");
+const templateKey = `muses-agent-sandbox-eval-${suffix}`;
+const sessionAKey = `muses-agent-sandbox-eval-a-${suffix}`;
+const sessionBKey = `muses-agent-sandbox-eval-b-${suffix}`;
+const backend = docker({ networkPolicy: "deny-all", pullPolicy: "never" });
+const handles = [];
+
+try {
+  const prewarm = await backend.prewarm({
+    templateKey,
+    runtimeContext: { appRoot: process.cwd() },
+    seedFiles: [{ path: "seed/README.txt", content: "seeded by muses-agent\n" }],
+  });
+  assert.equal(prewarm.reused, false, "the isolated eval must build a fresh template");
+
+  const first = await backend.create({
+    templateKey,
+    sessionKey: sessionAKey,
+    runtimeContext: { appRoot: process.cwd() },
+    tags: { eval: "sandbox-isolation" },
+  });
+  handles.push(first);
+
+  assert.equal(first.session.resolvePath("notes/result.txt"), "/workspace/notes/result.txt");
+  assert.equal(
+    await first.session.readTextFile({ path: "seed/README.txt" }),
+    "seeded by muses-agent\n",
+  );
+
+  await first.session.writeTextFile({ path: "notes/result.txt", content: "session-a-secret\n" });
+  const shell = await first.session.run({
+    command: "set -eu; pwd; test -f notes/result.txt; grep -R session-a-secret notes; find /workspace -name '*.txt' | sort",
+  });
+  assert.equal(shell.exitCode, 0, shell.stderr);
+  assert.match(shell.stdout, /\/workspace/);
+  assert.match(shell.stdout, /session-a-secret/);
+  assert.match(shell.stdout, /notes\/result\.txt/);
+
+  // The same durable sandbox keeps /workspace across separate tool calls.
+  assert.equal(await first.session.readTextFile({ path: "notes/result.txt" }), "session-a-secret\n");
+
+  const second = await backend.create({
+    templateKey,
+    sessionKey: sessionBKey,
+    runtimeContext: { appRoot: process.cwd() },
+    tags: { eval: "sandbox-isolation" },
+  });
+  handles.push(second);
+
+  const crossSession = await second.session.run({
+    command: "test ! -e notes/result.txt && test -f seed/README.txt",
+  });
+  assert.equal(crossSession.exitCode, 0, "session B observed session A's workspace");
+  assert.equal(
+    await second.session.readTextFile({ path: "seed/README.txt" }),
+    "seeded by muses-agent\n",
+  );
+
+  const network = await first.session.run({
+    command: "set -eu; test -z \"$(getent hosts example.com || true)\"; test -z \"$(cat /proc/net/route | awk 'NR > 1 && $2 != \\\"00000000\\\" { print }')\"",
+  });
+  assert.equal(network.exitCode, 0, `deny-all egress was not enforced: ${network.stderr}`);
+
+  const containerNames = execFileSync("docker", ["ps", "--filter", "label=eve.sandbox=1", "--format", "{{.Names}}"], {
+    encoding: "utf8",
+  });
+  assert.match(containerNames, new RegExp(sessionAKey));
+  assert.match(containerNames, new RegExp(sessionBKey));
+
+  console.log(JSON.stringify({
+    backend: "docker",
+    networkPolicy: "deny-all",
+    persistence: "same-session",
+    isolation: "cross-session",
+    seed: "template",
+    sessions: [sessionAKey, sessionBKey],
+  }));
+} finally {
+  for (const handle of handles.reverse()) {
+    await handle.shutdown().catch(() => undefined);
+    const name = (await handle.captureState().catch(() => undefined))?.metadata?.containerName;
+    if (typeof name === "string") {
+      execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+    }
+  }
+}
+
+function assertDockerAvailable() {
+  try {
+    execFileSync("docker", ["info"], { stdio: "ignore" });
+  } catch {
+    throw new Error("RUN_SANDBOX_DOCKER_EVAL=1 requires a reachable Docker daemon.");
+  }
+}

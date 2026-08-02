@@ -1,0 +1,48 @@
+{
+  "name": "@muses/agent-contracts",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "description": "Host-neutral public contracts for the Muses Agent service.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./agent-run": {
+      "types": "./dist/agent-run.d.ts",
+      "import": "./dist/agent-run.js"
+    },
+    "./agent-session": {
+      "types": "./dist/agent-session.d.ts",
+      "import": "./dist/agent-session.js"
+    },
+    "./embed": {
+      "types": "./dist/agent-embed.d.ts",
+      "import": "./dist/agent-embed.js"
+    },
+    "./host": {
+      "types": "./dist/agent-host.d.ts",
+      "import": "./dist/agent-host.js"
+    },
+    "./host-capability": {
+      "types": "./dist/host-capability.d.ts",
+      "import": "./dist/host-capability.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

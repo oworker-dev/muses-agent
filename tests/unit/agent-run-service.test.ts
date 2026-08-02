@@ -1,0 +1,602 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { ClientError, type HandleMessageStreamEvent } from "eve/client";
+
+import {
+  DEFAULT_AGENT_PROFILE,
+  type AgentRunPolicy,
+} from "../../contracts/agent-run.ts";
+import type {
+  AgentRunProjection,
+  AgentRunRecord,
+  AgentRunStore,
+  ReserveAgentRunInput,
+  ReserveAgentRunResult,
+} from "../../server/data/agent-run-store.ts";
+import type { AgentSessionOwner } from "../../server/data/session-ownership-store.ts";
+import { parseStartAgentRun, requestFingerprint } from "../../server/agent-runs/input.ts";
+import { projectAgentRun } from "../../server/agent-runs/projection.ts";
+import {
+  AgentRunOperationError,
+  cancelAgentRun,
+  inspectAgentRun,
+  readAgentRunEvents,
+  startAgentRun,
+  type AgentRunRuntime,
+} from "../../server/agent-runs/service.ts";
+
+const user: AgentSessionOwner = {
+  principalId: "issuer:user-1",
+  principalType: "user",
+  tenantId: "tenant-1",
+};
+
+test("request fingerprints ignore generated correlation IDs", () => {
+  const first = parseRequest({ idempotencyKey: "request-123", message: "Do the work" });
+  const second = parseRequest({ idempotencyKey: "request-123", message: "Do the work" });
+  assert.notEqual(first.correlationId, second.correlationId);
+  assert.equal(requestFingerprint(first), requestFingerprint(second));
+});
+
+test("request fingerprints include normalized AgentRun policy", () => {
+  const first = parseRequest({
+    idempotencyKey: "request-policy-123",
+    message: "Do the work",
+    policy: { hostCapabilities: ["workflow.invoke", "canvas.inspect"] },
+  });
+  const reordered = parseRequest({
+    idempotencyKey: "request-policy-123",
+    message: "Do the work",
+    policy: { hostCapabilities: ["canvas.inspect", "workflow.invoke"] },
+  });
+  const narrower = parseRequest({
+    idempotencyKey: "request-policy-123",
+    message: "Do the work",
+    policy: { hostCapabilities: ["canvas.inspect"] },
+  });
+  assert.equal(requestFingerprint(first), requestFingerprint(reordered));
+  assert.notEqual(requestFingerprint(first), requestFingerprint(narrower));
+});
+
+test("replays an identical idempotency key without submitting another Eve session", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime();
+  const first = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "Do the work" }),
+    runtime,
+    store,
+  });
+  const replay = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "Do the work" }),
+    runtime,
+    store,
+  });
+
+  assert.equal(first.disposition, "started");
+  assert.equal(replay.disposition, "replayed");
+  assert.equal(replay.record.runId, first.record.runId);
+  assert.equal(runtime.calls.start, 1);
+});
+
+test("rejects reuse of an idempotency key for a different request", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime();
+  await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "First" }),
+    runtime,
+    store,
+  });
+
+  await assert.rejects(
+    startAgentRun({
+      accessToken: "token",
+      identity: user,
+      request: parseRequest({ idempotencyKey: "request-123", message: "Second" }),
+      runtime,
+      store,
+    }),
+    (error: unknown) => error instanceof AgentRunOperationError && error.status === 409,
+  );
+  assert.equal(runtime.calls.start, 1);
+});
+
+test("does not expose a run to another tenant or principal", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime();
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "Private" }),
+    runtime,
+    store,
+  });
+
+  const otherPrincipal = await inspectAgentRun({
+    accessToken: "token",
+    identity: { ...user, principalId: "issuer:user-2" },
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  const otherTenant = await inspectAgentRun({
+    accessToken: "token",
+    identity: { ...user, tenantId: "tenant-2" },
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(otherPrincipal, undefined);
+  assert.equal(otherTenant, undefined);
+});
+
+test("projects usage, result, status, and incremental event cursors", async () => {
+  const events = completedEvents();
+  const projection = projectAgentRun(events);
+  assert.deepEqual(projection.usage, {
+    cacheReadTokens: 7,
+    cacheWriteTokens: 3,
+    costUsd: 0.0125,
+    inputTokens: 21,
+    outputTokens: 8,
+    steps: 1,
+  });
+  assert.deepEqual(projection.result, { kind: "text", value: "Done" });
+  assert.equal(projection.status, "completed");
+
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "Run" }),
+    runtime,
+    store,
+  });
+  const result = await readAgentRunEvents({
+    accessToken: "token",
+    after: 2,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.ok(result);
+  assert.equal(result.events.length, events.length - 2);
+  assert.equal(result.events[0]?.sequence, 3);
+  assert.equal(result.record.eventCount, events.length);
+});
+
+test("cancellation is idempotent and reaches Eve only once", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events: runningEvents() });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "Keep working" }),
+    runtime,
+    store,
+  });
+  const first = await cancelAgentRun({
+    accessToken: "token",
+    identity: user,
+    runId: started.record.runId,
+    cancellationPolicy: immediateCancellation,
+    runtime,
+    store,
+  });
+  const second = await cancelAgentRun({
+    accessToken: "token",
+    identity: user,
+    runId: started.record.runId,
+    cancellationPolicy: immediateCancellation,
+    runtime,
+    store,
+  });
+
+  assert.equal(first?.cancellation, "accepted");
+  assert.equal(first?.record.status, "cancelled");
+  assert.equal(second?.cancellation, "terminal");
+  assert.equal(runtime.calls.cancel, 1);
+  assert.equal(runtime.calls.reset, 1);
+});
+
+test("uses Eve's cooperative cancellation boundary without resetting the session", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events: cancelledEvents() });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-cooperative", message: "Keep working" }),
+    runtime,
+    store,
+  });
+  const cancelled = await cancelAgentRun({
+    accessToken: "token",
+    cancellationPolicy: immediateCancellation,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+
+  assert.equal(cancelled?.record.status, "cancelled");
+  assert.equal(runtime.calls.reset, 0);
+});
+
+test("resets an exclusive session when accepted cancellation never settles", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events: runningEvents() });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-hard-cancel", message: "Keep working" }),
+    runtime,
+    store,
+  });
+  const cancelled = await cancelAgentRun({
+    accessToken: "token",
+    cancellationPolicy: immediateCancellation,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+
+  assert.equal(cancelled?.record.status, "cancelled");
+  assert.equal(runtime.calls.reset, 1);
+});
+
+test("cancellation wins when the provider completes during the grace window", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events: completedEvents() });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-race", message: "Keep working" }),
+    runtime,
+    store,
+  });
+  const cancelled = await cancelAgentRun({
+    accessToken: "token",
+    cancellationPolicy: immediateCancellation,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+
+  assert.equal(cancelled?.record.status, "cancelled");
+  assert.equal(cancelled?.record.result, undefined);
+  assert.equal(cancelled?.record.usage.inputTokens, 21);
+  assert.equal(runtime.calls.reset, 1);
+});
+
+test("inspection reconciles an interrupted cancellation and reset is idempotent", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events: runningEvents() });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-reconcile", message: "Keep working" }),
+    runtime,
+    store,
+  });
+  const requested = await store.markCancellationRequested(started.record.runId);
+  const requestedAt = Date.parse(requested.cancellationRequestedAt!);
+
+  const duringGrace = await inspectAgentRun({
+    accessToken: "token",
+    cancellationPolicy: { ...immediateCancellation, graceMs: 1_000, now: () => requestedAt },
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(duringGrace?.status, "running");
+  assert.equal(runtime.calls.reset, 0);
+
+  const afterGrace = await inspectAgentRun({
+    accessToken: "token",
+    cancellationPolicy: { ...immediateCancellation, graceMs: 1_000, now: () => requestedAt + 1_001 },
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  const replay = await inspectAgentRun({
+    accessToken: "token",
+    cancellationPolicy: immediateCancellation,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(afterGrace?.status, "cancelled");
+  assert.equal(replay?.status, "cancelled");
+  assert.equal(runtime.calls.reset, 1);
+});
+
+test("cancels a queued session when Eve has not started its first turn", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ cancelStatus: "no_active_turn" });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-queued", message: "Queued" }),
+    runtime,
+    store,
+  });
+  const cancelled = await cancelAgentRun({
+    accessToken: "token",
+    identity: user,
+    runId: started.record.runId,
+    cancellationPolicy: immediateCancellation,
+    runtime,
+    store,
+  });
+  assert.equal(cancelled?.cancellation, "no_active_turn");
+  assert.equal(cancelled?.record.status, "cancelled");
+  assert.equal(runtime.calls.reset, 1);
+});
+
+test("submission ambiguity is persisted and never automatically resubmitted", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ startError: new Error("socket closed") });
+  const request = parseRequest({ idempotencyKey: "request-123", message: "Side effect" });
+  const first = await startAgentRun({ accessToken: "token", identity: user, request, runtime, store });
+  const replay = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "Side effect" }),
+    runtime,
+    store,
+  });
+
+  assert.equal(first.disposition, "ambiguous");
+  assert.equal(first.record.status, "submission-ambiguous");
+  assert.equal(replay.disposition, "replayed");
+  assert.equal(runtime.calls.start, 1);
+});
+
+test("a definitive Eve 4xx rejection becomes a failed run", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ startError: new ClientError(403, "forbidden") });
+  const outcome = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-123", message: "Rejected" }),
+    runtime,
+    store,
+  });
+  assert.equal(outcome.disposition, "rejected");
+  assert.equal(outcome.record.status, "failed");
+  assert.equal(outcome.record.failure?.code, "runtime-rejected");
+});
+
+function parseRequest(input: {
+  readonly idempotencyKey: string;
+  readonly message: string;
+  readonly policy?: AgentRunPolicy;
+}) {
+  const parsed = parseStartAgentRun({ ...input, profile: DEFAULT_AGENT_PROFILE });
+  assert.equal(parsed.ok, true);
+  return parsed.value;
+}
+
+function runningEvents(): readonly HandleMessageStreamEvent[] {
+  return [
+    { type: "session.started", data: {} },
+    { type: "turn.started", data: { sequence: 1, turnId: "turn-1" } },
+  ];
+}
+
+function completedEvents(): readonly HandleMessageStreamEvent[] {
+  return [
+    { type: "session.started", data: {} },
+    { type: "turn.started", data: { sequence: 1, turnId: "turn-1" } },
+    {
+      type: "message.completed",
+      data: { finishReason: "stop", message: "Done", sequence: 2, stepIndex: 0, turnId: "turn-1" },
+    },
+    {
+      type: "step.completed",
+      data: {
+        finishReason: "stop",
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn-1",
+        usage: {
+          cacheReadTokens: 7,
+          cacheWriteTokens: 3,
+          costUsd: 0.0125,
+          inputTokens: 21,
+          outputTokens: 8,
+        },
+      },
+    },
+    { type: "turn.completed", data: { sequence: 4, turnId: "turn-1" } },
+    { type: "session.waiting", data: { continuationToken: "continue-1", wait: "next-user-message" } },
+  ];
+}
+
+function cancelledEvents(): readonly HandleMessageStreamEvent[] {
+  return [
+    ...runningEvents(),
+    { type: "turn.cancelled", data: { sequence: 2, turnId: "turn-1" } },
+    { type: "session.waiting", data: { continuationToken: "continue-1", wait: "next-user-message" } },
+  ];
+}
+
+const immediateCancellation = {
+  graceMs: 0,
+  now: Date.now,
+  sleep: async () => undefined,
+} as const;
+
+function fakeRuntime(options: {
+  readonly cancelStatus?: "accepted" | "no_active_turn";
+  readonly events?: readonly HandleMessageStreamEvent[];
+  readonly startError?: Error;
+} = {}): AgentRunRuntime & { readonly calls: { cancel: number; read: number; reset: number; start: number } } {
+  const calls = { cancel: 0, read: 0, reset: 0, start: 0 };
+  return {
+    async cancel() {
+      calls.cancel += 1;
+      return options.cancelStatus ?? "accepted";
+    },
+    calls,
+    async readEvents() {
+      calls.read += 1;
+      return options.events ?? runningEvents();
+    },
+    async reset() {
+      calls.reset += 1;
+      return "reset";
+    },
+    async start() {
+      calls.start += 1;
+      if (options.startError) throw options.startError;
+      return { continuationToken: "continue-1", sessionId: `session-${calls.start}` };
+    },
+  };
+}
+
+class MemoryAgentRunStore implements AgentRunStore {
+  readonly records = new Map<string, AgentRunRecord>();
+  readonly idempotency = new Map<string, string>();
+  nextRun = 1;
+
+  async reserve(input: ReserveAgentRunInput): Promise<ReserveAgentRunResult> {
+    const key = `${input.tenantId}:${input.principalId}:${input.idempotencyKey}`;
+    const runId = this.idempotency.get(key);
+    if (runId) {
+      const record = this.require(runId);
+      return {
+        record,
+        status: record.requestFingerprint === input.requestFingerprint ? "replay" : "conflict",
+      };
+    }
+    const createdAt = new Date().toISOString();
+    const record: AgentRunRecord = {
+      correlationId: input.correlationId,
+      createdAt,
+      eventCount: 0,
+      idempotencyKey: input.idempotencyKey,
+      metadata: input.metadata,
+      ...(input.parent ? { parent: input.parent } : {}),
+      policy: input.policy,
+      principalId: input.principalId,
+      profile: input.profile,
+      requestFingerprint: input.requestFingerprint,
+      revision: 1,
+      runId: `arun_00000000-0000-4000-8000-${String(this.nextRun++).padStart(12, "0")}`,
+      status: "submitting",
+      tenantId: input.tenantId,
+      updatedAt: createdAt,
+      usage: emptyUsage(),
+    };
+    this.records.set(record.runId, record);
+    this.idempotency.set(key, record.runId);
+    return { record, status: "reserved" };
+  }
+
+  async attachSession(runId: string, sessionId: string, continuationToken?: string) {
+    return this.update(runId, {
+      ...(continuationToken ? { continuationToken } : {}),
+      sessionId,
+      status: "running",
+    });
+  }
+
+  async findOwned(tenantId: string, principalId: string, runId: string) {
+    const record = this.records.get(runId);
+    return record?.tenantId === tenantId && record.principalId === principalId ? record : undefined;
+  }
+
+  async markCancellationRequested(runId: string) {
+    const record = this.require(runId);
+    return record.cancellationRequestedAt
+      ? record
+      : this.update(runId, { cancellationRequestedAt: new Date().toISOString() });
+  }
+
+  async markCancelled(runId: string) {
+    const current = this.require(runId);
+    return current.status === "cancelled"
+      ? current
+      : this.update(runId, { failure: undefined, result: undefined, status: "cancelled" });
+  }
+
+  async markSubmissionFailed(runId: string, message: string) {
+    return this.update(runId, {
+      failure: { code: "runtime-rejected", message, retryable: false },
+      status: "failed",
+    });
+  }
+
+  async markSubmissionAmbiguous(runId: string, message: string) {
+    return this.update(runId, {
+      failure: { code: "submission-ambiguous", message, retryable: false },
+      status: "submission-ambiguous",
+    });
+  }
+
+  async updateProjection(runId: string, projection: AgentRunProjection) {
+    const current = this.require(runId);
+    const cancellationPending = Boolean(current.cancellationRequestedAt);
+    const status = isTerminal(current.status)
+      ? current.status
+      : cancellationPending && projection.status !== "cancelled"
+        ? current.status
+        : projection.status;
+    return this.update(runId, {
+      eventCount: Math.max(current.eventCount, projection.eventCount),
+      failure: cancellationPending || status === "cancelled" ? undefined : projection.failure,
+      result: cancellationPending || status === "cancelled" ? undefined : projection.result,
+      status,
+      usage: projection.usage,
+    });
+  }
+
+  private require(runId: string): AgentRunRecord {
+    const record = this.records.get(runId);
+    if (!record) throw new Error("missing test AgentRun");
+    return record;
+  }
+
+  private update(runId: string, patch: Partial<AgentRunRecord>): AgentRunRecord {
+    const current = this.require(runId);
+    const record: AgentRunRecord = {
+      ...current,
+      ...patch,
+      revision: current.revision + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    this.records.set(runId, record);
+    return record;
+  }
+}
+
+function emptyUsage() {
+  return {
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    steps: 0,
+  };
+}
+
+function isTerminal(status: AgentRunRecord["status"]): boolean {
+  return status === "cancelled"
+    || status === "completed"
+    || status === "failed"
+    || status === "submission-ambiguous";
+}
