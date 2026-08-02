@@ -245,9 +245,9 @@ The Muses Studio reference integration currently has two separate surfaces:
   API (`/api/agent/runs`). The Agent-to-host canvas bridge uses the signed
   `host_capabilities`/`host_invoke` protocol.
 
-The repository now builds `@muses/agent-contracts@0.1.0-alpha.5`,
-`@muses/agent-client@0.1.0-alpha.5`, `@muses/agent-host@0.1.0-alpha.5`, and
-`@muses/agent-ui@0.1.0-alpha.5` as real ESM/declaration packages with stable
+The repository now builds `@muses/agent-contracts@0.1.0-alpha.6`,
+`@muses/agent-client@0.1.0-alpha.6`, `@muses/agent-host@0.1.0-alpha.6`, and
+`@muses/agent-ui@0.1.0-alpha.6` as real ESM/declaration packages with stable
 subpath exports. A conformance command packs all four tarballs, installs them
 in an empty consumer, and imports their public entrypoints, an individual AI
 Element, and the stylesheet export. They remain private while the open-source

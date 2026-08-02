@@ -26,6 +26,7 @@ jobs:
         with:
           cache: npm
           node-version-file: .node-version
+      - run: npm install --global pnpm@10.0.0
       - run: npm ci
       - run: npm run verify:ci
 
@@ -66,4 +67,3 @@ jobs:
           if test -f /tmp/muses-agent-ci.pid; then
             kill "$(cat /tmp/muses-agent-ci.pid)" 2>/dev/null || true
           fi
-

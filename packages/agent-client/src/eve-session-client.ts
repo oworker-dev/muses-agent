@@ -18,7 +18,7 @@ import {
 import type { JsonValue } from "@muses/agent-contracts/agent-run";
 import type { AgentClientHeaders } from "./agent-run-client.js";
 
-export const EVE_AGENT_SESSION_ADAPTER_VERSION = "0.1.0-alpha.5" as const;
+export const EVE_AGENT_SESSION_ADAPTER_VERSION = "0.1.0-alpha.6" as const;
 
 export type AgentSessionClientOptions = {
   readonly baseUrl: string;
