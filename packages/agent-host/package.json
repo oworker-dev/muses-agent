@@ -1,6 +1,6 @@
 {
   "name": "@muses/agent-host",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "private": true,
   "description": "Server-side Host Capability SDK for Muses Agent integrations.",
   "type": "module",
@@ -35,7 +35,7 @@
     "check": "tsc --noEmit -p tsconfig.build.json"
   },
   "peerDependencies": {
-    "@muses/agent-contracts": "0.1.0-alpha.6"
+    "@muses/agent-contracts": "0.1.0-alpha.7"
   },
   "engines": {
     "node": ">=20"

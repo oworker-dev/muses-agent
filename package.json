@@ -1,6 +1,6 @@
 {
   "name": "muses-agent",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -41,10 +41,10 @@
     "verify:sandbox-reaper": "node scripts/verify-sandbox-reaper.mjs"
   },
   "dependencies": {
-    "@muses/agent-client": "0.1.0-alpha.6",
-    "@muses/agent-contracts": "0.1.0-alpha.6",
-    "@muses/agent-host": "0.1.0-alpha.6",
-    "@muses/agent-ui": "0.1.0-alpha.6",
+    "@muses/agent-client": "0.1.0-alpha.7",
+    "@muses/agent-contracts": "0.1.0-alpha.7",
+    "@muses/agent-host": "0.1.0-alpha.7",
+    "@muses/agent-ui": "0.1.0-alpha.7",
     "@ai-sdk/openai": "^4.0.24",
     "@opentelemetry/api": "1.9.1",
     "@radix-ui/react-use-controllable-state": "1.2.2",

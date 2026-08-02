@@ -29,8 +29,14 @@ jobs:
       - run: npm ci
       - run: npm run verify:ci
       - name: Verify tag matches package version
-        run: |
-          test "$GITHUB_REF_NAME" = "v$(node -p 'require(\"./package.json\").version')"
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          node -e 'const { version } = require("./package.json");
+          if (process.env.RELEASE_TAG !== `v${version}`) {
+          console.error(`Release tag ${process.env.RELEASE_TAG} does not match package version ${version}`);
+          process.exit(1);
+          }'
       - name: Pack installable SDK artifacts
         run: |
           mkdir -p release-artifacts

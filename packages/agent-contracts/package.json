@@ -1,6 +1,6 @@
 {
   "name": "@muses/agent-contracts",
-  "version": "0.1.0-alpha.6",
+  "version": "0.1.0-alpha.7",
   "private": true,
   "description": "Host-neutral public contracts for the Muses Agent service.",
   "type": "module",
