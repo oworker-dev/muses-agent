@@ -1,6 +1,6 @@
 {
   "name": "@muses/agent-ui",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "private": true,
   "description": "Reusable React workspace and AI Elements for the Muses Agent service.",
   "type": "module",

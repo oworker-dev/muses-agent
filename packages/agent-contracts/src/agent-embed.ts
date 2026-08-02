@@ -68,6 +68,45 @@ export type AgentEmbedEvent =
   | AgentEmbedTurnMessage
   | AgentEmbedHostCapabilityMessage;
 
+export function parseAgentEmbedEvent(value: unknown): AgentEmbedEvent | undefined {
+  if (!isRecord(value) || value.contractVersion !== AGENT_EMBED_CONTRACT_VERSION) {
+    return undefined;
+  }
+  if (value.type === "agent.embed.ready") return value as AgentEmbedReadyMessage;
+  if (
+    value.type === "agent.embed.configured" &&
+    isText(value.requestId, 200)
+  ) {
+    return value as AgentEmbedConfiguredMessage;
+  }
+  if (
+    value.type === "agent.embed.error" &&
+    (value.requestId === undefined || isText(value.requestId, 200)) &&
+    isText(value.code, 200) &&
+    isText(value.message, 4_000)
+  ) {
+    return value as AgentEmbedErrorMessage;
+  }
+  if (
+    (value.type === "agent.embed.turn-started" ||
+      value.type === "agent.embed.turn-completed" ||
+      value.type === "agent.embed.turn-failed" ||
+      value.type === "agent.embed.turn-cancelled") &&
+    isText(value.turnId, 200) &&
+    (value.message === undefined || isText(value.message, 4_000))
+  ) {
+    return value as AgentEmbedTurnMessage;
+  }
+  if (
+    value.type === "agent.embed.host-capability-completed" &&
+    isText(value.capability, 200) &&
+    isJsonValue(value.output)
+  ) {
+    return value as AgentEmbedHostCapabilityMessage;
+  }
+  return undefined;
+}
+
 export function parseAgentEmbedHostMessage(value: unknown): AgentEmbedHostMessage | undefined {
   if (!isRecord(value)) return undefined;
   if (
@@ -112,6 +151,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isText(value: unknown, maximum: number): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
+}
+
+function isJsonValue(value: unknown, depth = 0): value is JsonValue {
+  if (depth > 20) return false;
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    typeof value === "number" && Number.isFinite(value)
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.length <= 10_000 && value.every((item) => isJsonValue(item, depth + 1));
+  }
+  if (!isRecord(value) || Object.keys(value).length > 10_000) return false;
+  return Object.values(value).every((item) => isJsonValue(item, depth + 1));
 }
 
 function isIsoDate(value: unknown): value is string {

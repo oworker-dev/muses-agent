@@ -5,7 +5,7 @@ import {
   type StartAgentRunRequest,
 } from "@muses/agent-contracts/agent-run";
 
-export const AGENT_CLIENT_VERSION = "0.1.0-alpha.2" as const;
+export const AGENT_CLIENT_VERSION = "0.1.0-alpha.3" as const;
 export const AGENT_HOST_SDK_VERSION = "0.1.0-draft" as const;
 
 export type AgentClientHeaders =
