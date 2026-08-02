@@ -245,15 +245,20 @@ The Muses Studio reference integration currently has two separate surfaces:
   API (`/api/agent/runs`). The Agent-to-host canvas bridge uses the signed
   `host_capabilities`/`host_invoke` protocol.
 
-The repository now builds `@muses/agent-contracts@0.1.0-alpha.7`,
-`@muses/agent-client@0.1.0-alpha.7`, `@muses/agent-host@0.1.0-alpha.7`, and
-`@muses/agent-ui@0.1.0-alpha.7` as real ESM/declaration packages with stable
+The repository now builds `@muses/agent-contracts@0.1.0-alpha.8`,
+`@muses/agent-client@0.1.0-alpha.8`, `@muses/agent-host@0.1.0-alpha.8`, and
+`@muses/agent-ui@0.1.0-alpha.8` as real ESM/declaration packages with stable
 subpath exports. A conformance command packs all four tarballs, installs them
 in an empty consumer, and imports their public entrypoints, an individual AI
-Element, and the stylesheet export. They remain private while the open-source
-license decision and stable registry release pipeline are pending. Versioned
-GitHub prerelease tarballs are installable by npm and pnpm consumers, but the
-packages remain npm-private. Therefore the current state is **optional iframe +
+Element, and the stylesheet export. The compiled ESM, declarations, source
+maps, and stylesheet are committed with each release so pnpm consumers can pin
+an exact Git commit plus package subdirectory without running a build or
+persisting an expiring release-asset URL. CI rejects any drift between those
+committed artifacts and a clean SDK build. The packages remain private while
+the open-source license decision and stable registry release pipeline are
+pending. Versioned GitHub prerelease tarballs remain installable by npm and
+pnpm consumers, but the packages remain npm-private. Therefore the current
+state is **optional iframe +
 native React UI + custom UI SDK paths backed by open HTTP/protocol contracts and
 public alpha artifacts**. It is no longer iframe-only, but it is not yet a
 public production-stable release.

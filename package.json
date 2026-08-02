@@ -1,6 +1,6 @@
 {
   "name": "muses-agent",
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -26,10 +26,11 @@
     "start:eve": "eve start",
     "test:e2e": "playwright test",
     "test:unit": "npm run build:sdk && node --test tests/unit/*.test.ts",
-    "verify:ci": "npm run typecheck && npm run test:unit && npm run verify:provider-failures && npm run build:eve && npm run build && npm run verify:sdk-packages && npm run verify:custom-host-example",
+    "verify:ci": "npm run typecheck && npm run test:unit && npm run verify:provider-failures && npm run build:eve && npm run build && npm run verify:sdk-source-distribution && npm run verify:sdk-packages && npm run verify:custom-host-example",
     "verify:agent-run-api": "node scripts/verify-agent-run-api.mjs",
     "verify:custom-host-example": "npm run build:examples",
     "verify:sdk-packages": "npm run build:sdk && node scripts/verify-sdk-packages.mjs",
+    "verify:sdk-source-distribution": "node scripts/verify-sdk-source-distribution.mjs",
     "verify:sandbox": "node scripts/verify-sandbox-docker.mjs",
     "verify:muses-host-e2e": "node scripts/verify-muses-host-e2e.mjs",
     "mock:openai": "node scripts/mock-openai-responses.mjs",
@@ -41,10 +42,10 @@
     "verify:sandbox-reaper": "node scripts/verify-sandbox-reaper.mjs"
   },
   "dependencies": {
-    "@muses/agent-client": "0.1.0-alpha.7",
-    "@muses/agent-contracts": "0.1.0-alpha.7",
-    "@muses/agent-host": "0.1.0-alpha.7",
-    "@muses/agent-ui": "0.1.0-alpha.7",
+    "@muses/agent-client": "0.1.0-alpha.8",
+    "@muses/agent-contracts": "0.1.0-alpha.8",
+    "@muses/agent-host": "0.1.0-alpha.8",
+    "@muses/agent-ui": "0.1.0-alpha.8",
     "@ai-sdk/openai": "^4.0.24",
     "@opentelemetry/api": "1.9.1",
     "@radix-ui/react-use-controllable-state": "1.2.2",

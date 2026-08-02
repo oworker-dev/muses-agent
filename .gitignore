@@ -6,6 +6,8 @@ node_modules
 .output
 .nitro
 dist
+!packages/*/dist/
+!packages/*/dist/**
 playwright-report
 test-results
 .DS_Store
