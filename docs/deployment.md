@@ -104,3 +104,15 @@ the collector; the local mock collector is evidence tooling only.
 The selected production sandbox, MCP OAuth lifecycle, provider billing,
 deployed dashboards, SLO/load evidence, abuse controls, and deletion proof are
 still release gates tracked in the architecture document.
+
+Use `npm run verify:load` against the staged Agent Web and Eve deployment before
+traffic promotion. Record its concurrency and p50/p95/max completion latency.
+The deterministic local run is a regression baseline; production capacity still
+requires the target Provider, database, queue, sandbox backend, autoscaling, and
+collector configuration.
+
+Keep Eve pinned to an exact version. Before any cross-minor upgrade, replay
+representative persistent sessions against an isolated copy of the Workflow
+World and prove migration compatibility. Do not let a new runtime version take
+ownership of the production World until that replay gate passes and rollback has
+been rehearsed.

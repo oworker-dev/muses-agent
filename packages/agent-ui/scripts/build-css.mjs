@@ -8,7 +8,7 @@ const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const inputPath = new URL("../src/styles.css", import.meta.url);
 const outputPath = new URL("../dist/styles.css", import.meta.url);
 const source = await readFile(inputPath, "utf8");
-const result = await postcss([tailwind()]).process(source, {
+const result = await postcss([tailwind({ optimize: false })]).process(source, {
   from: fileURLToPath(inputPath),
   to: fileURLToPath(outputPath),
 });

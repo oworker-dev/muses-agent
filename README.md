@@ -208,6 +208,19 @@ The draft does not yet provide per-run credit reservations or deployed
 collector, dashboard, retention, and cost-reconciliation evidence. Those remain
 explicit release gates rather than hidden behavior.
 
+Against a running deterministic production topology, exercise concurrent
+Headless runs with:
+
+```bash
+AGENT_LOAD_BASE_URL=http://127.0.0.1:3111 \
+AGENT_LOAD_PROVIDER_DEBUG_URL=http://127.0.0.1:4291/debug/state \
+AGENT_LOAD_CONCURRENCY=8 npm run verify:load
+```
+
+The gate checks completion latency, per-run result and event isolation, Usage,
+cursor exhaustion, and idempotent replay without additional Provider calls.
+This is a repeatable single-host baseline, not target-deployment capacity proof.
+
 ## Docker sandbox retention
 
 Eve's Docker backend preserves `/workspace` in a long-lived container for each

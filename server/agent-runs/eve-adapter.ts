@@ -1,4 +1,4 @@
-import { Client, type HandleMessageStreamEvent } from "eve/client";
+import { Client, ClientError, type HandleMessageStreamEvent } from "eve/client";
 import type { AgentRunPolicy } from "../../contracts/agent-run";
 import type { ParsedStartAgentRun } from "./input";
 
@@ -49,17 +49,106 @@ export async function readEveAgentEvents(
   sessionId: string,
   accessToken: string,
 ): Promise<readonly HandleMessageStreamEvent[]> {
-  const session = createClient(accessToken, runId, correlationId).session({
-    sessionId,
-    streamIndex: 0,
-  });
+  const stop = new AbortController();
+  const signal = AbortSignal.any([AbortSignal.timeout(runtimeRequestTimeoutMs()), stop.signal]);
+  try {
+    const response = await createClient(
+      accessToken,
+      runId,
+      correlationId,
+      undefined,
+      undefined,
+      { includeTailIndex: "1", startIndex: "0" },
+    ).fetch(
+      `/eve/v1/session/${encodeURIComponent(sessionId)}/stream`,
+      {
+        cache: "no-store",
+        redirect: "error",
+        signal,
+      },
+    );
+    if (!response.ok) {
+      throw new ClientError(response.status, await response.text(), response.headers);
+    }
+    if (!response.body) {
+      throw new Error("The Eve runtime returned an empty Agent event stream.");
+    }
+    const tailIndex = parseTailIndex(response.headers.get("x-eve-stream-tail-index"));
+    if (tailIndex === undefined) {
+      void response.body.cancel().catch(() => undefined);
+      throw new Error("The Eve runtime did not return a valid bounded stream tail index.");
+    }
+    if (tailIndex < 0) {
+      void response.body.cancel().catch(() => undefined);
+      return [];
+    }
+    return await readBoundedNdjsonEvents(response.body, tailIndex, { signal });
+  } finally {
+    stop.abort();
+  }
+}
+
+async function readBoundedNdjsonEvents(
+  body: ReadableStream<Uint8Array>,
+  tailIndex: number,
+  options: { readonly signal: AbortSignal },
+): Promise<readonly HandleMessageStreamEvent[]> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
   const events: HandleMessageStreamEvent[] = [];
-  for await (const event of session.stream({
-    follow: false,
-    signal: AbortSignal.timeout(runtimeRequestTimeoutMs()),
-    streamReconnectPolicy: { reconnect: false },
-  })) events.push(event);
-  return events;
+  let buffer = "";
+  let reachedEnd = false;
+  const abort = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  options.signal.addEventListener("abort", abort, { once: true });
+  try {
+    while (!options.signal.aborted && events.length <= tailIndex) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        reachedEnd = true;
+        buffer += decoder.decode();
+        buffer = consumeNdjsonLines(buffer, events, tailIndex);
+        break;
+      }
+      if (chunk.value) buffer += decoder.decode(chunk.value, { stream: true });
+      buffer = consumeNdjsonLines(buffer, events, tailIndex);
+    }
+    if (events.length <= tailIndex && buffer.trim()) {
+      events.push(JSON.parse(buffer.trim()) as HandleMessageStreamEvent);
+    }
+    if (events.length <= tailIndex) {
+      options.signal.throwIfAborted();
+      throw new Error("The Eve Agent event stream ended before its declared durable tail.");
+    }
+    return events.slice(0, tailIndex + 1);
+  } finally {
+    options.signal.removeEventListener("abort", abort);
+    if (!reachedEnd) void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+function consumeNdjsonLines(
+  input: string,
+  events: HandleMessageStreamEvent[],
+  tailIndex: number,
+): string {
+  let buffer = input;
+  let newline = buffer.indexOf("\n");
+  while (newline >= 0 && events.length <= tailIndex) {
+    const line = buffer.slice(0, newline).trim();
+    buffer = buffer.slice(newline + 1);
+    if (line) events.push(JSON.parse(line) as HandleMessageStreamEvent);
+    newline = buffer.indexOf("\n");
+  }
+  return buffer;
+}
+
+function parseTailIndex(value: string | null): number | undefined {
+  if (value === null || !/^-?\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= -1 ? parsed : undefined;
 }
 
 export async function cancelEveAgentRun(
@@ -112,8 +201,10 @@ function createClient(
   correlationId: string,
   profile?: { readonly profileId: string; readonly version: string },
   policy?: AgentRunPolicy,
+  query?: Readonly<Record<string, string>>,
 ): Client {
-  const host = normalizeAgentRuntimeHost(process.env.AGENT_RUNTIME_URL);
+  const host = new URL(normalizeAgentRuntimeHost(process.env.AGENT_RUNTIME_URL));
+  for (const [name, value] of Object.entries(query ?? {})) host.searchParams.set(name, value);
   const hostHeader = process.env.AGENT_RUNTIME_HOST_HEADER?.trim();
   return new Client({
     auth: { bearer: accessToken },
@@ -129,7 +220,7 @@ function createClient(
         : {}),
       ...(policy ? { "x-agent-run-policy": Buffer.from(JSON.stringify(policy)).toString("base64url") } : {}),
     },
-    host,
+    host: host.toString(),
     preserveCompletedSessions: true,
     redirect: "error",
   });
