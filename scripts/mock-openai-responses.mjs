@@ -132,6 +132,9 @@ async function planResponse(body) {
     await new Promise((resolve) => setTimeout(resolve, 30_000));
     return { kind: "text", text: "TOO_LATE" };
   }
+  if (raw.includes("MUSES_IMAGE_E2E")) {
+    return planMusesImageResponse(input);
+  }
   if (!raw.includes("MUSES_HOST_E2E")) {
     if (raw.includes("BRIDGE_READY")) return { kind: "text", text: "BRIDGE_READY" };
     return { kind: "text", text: exactReply(input) || "HEADLESS_READY" };
@@ -214,6 +217,38 @@ async function planResponse(body) {
   };
 }
 
+function planMusesImageResponse(input) {
+  const calls = input.filter((item) => item?.type === "function_call");
+  const called = calls.map((item) => ({
+    callId: item.call_id,
+    name: item.name,
+    arguments: parseJson(item.arguments),
+  }));
+  const hostCapabilitiesCalled = called.some(({ name }) => name === "host_capabilities");
+  const invokedCapabilities = called
+    .filter(({ name }) => name === "host_invoke")
+    .map(({ arguments: args }) => args?.capability);
+
+  if (!hostCapabilitiesCalled) return toolCall("host_capabilities", {});
+  if (!invokedCapabilities.includes("image.generate")) {
+    return hostInvoke("image.generate", {
+      prompt: "A precise editorial still life of a cobalt glass vase and one red tulip on a white table, soft daylight, clean commercial photography",
+      title: "Agent first image verification",
+      aspectRatio: "4:3",
+      resolution: "1k",
+      quality: "low",
+    });
+  }
+
+  if (!invokedCapabilities.includes("canvas.inspect")) {
+    return hostInvoke("canvas.inspect", {});
+  }
+  return {
+    kind: "text",
+    text: "MUSES_IMAGE_E2E_COMPLETED",
+  };
+}
+
 function hasJsonSchema(body) {
   const format = body?.text?.format ?? body?.response_format ?? body?.output_format;
   return format?.type === "json_schema"
@@ -290,6 +325,12 @@ function parseJson(value) {
 }
 
 function deepFind(value, predicate) {
+  if (typeof value === "string") {
+    const parsed = parseJson(value);
+    return parsed === undefined || parsed === value
+      ? undefined
+      : deepFind(parsed, predicate);
+  }
   if (Array.isArray(value)) {
     for (const item of value) {
       const found = deepFind(item, predicate);

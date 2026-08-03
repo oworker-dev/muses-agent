@@ -7,9 +7,22 @@ import { verifyAgentHostCapabilityRequest } from "@muses/agent-host";
 import {
   invokeHostCapability,
   listHostCapabilities,
+  readHostCapabilityTimeoutMs,
 } from "../../agent/lib/host-capabilities.ts";
 
 const SECRET = "01234567890123456789012345678901";
+
+test("bounds the Host capability timeout and covers synchronous media by default", () => {
+  assert.equal(readHostCapabilityTimeoutMs({}), 120_000);
+  assert.equal(
+    readHostCapabilityTimeoutMs({ AGENT_HOST_TOOLS_TIMEOUT_MS: "45000" }),
+    45_000,
+  );
+  assert.throws(
+    () => readHostCapabilityTimeoutMs({ AGENT_HOST_TOOLS_TIMEOUT_MS: "120001" }),
+    /1000 to 120000/,
+  );
+});
 
 test("signs Host capability requests with raw host identity and project scope", async () => {
   const previousUrl = process.env.AGENT_HOST_TOOLS_URL;

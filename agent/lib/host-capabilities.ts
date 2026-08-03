@@ -5,7 +5,10 @@ import type { AgentHostCapabilityDescriptor } from "../../contracts/host-capabil
 import type { JsonValue } from "../../contracts/agent-run";
 import { allowedHostCapabilities } from "./run-policy.ts";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
+// Host-owned media and workflow calls can legitimately outlive a normal chat
+// turn. Keep the default inside the public upper bound so a host can still
+// choose a shorter timeout for read-only capabilities.
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 export function isHostCapabilityConfigured(
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -68,7 +71,7 @@ function hostClient(session: SessionContext) {
     baseUrl,
     identity: hostIdentity(session),
     secret,
-    timeoutMs: requestTimeoutMs(),
+    timeoutMs: readHostCapabilityTimeoutMs(),
   });
 }
 
@@ -101,8 +104,10 @@ function required(value: string | undefined, name: string): string {
   return normalized;
 }
 
-function requestTimeoutMs(): number {
-  const raw = process.env.AGENT_HOST_TOOLS_TIMEOUT_MS?.trim();
+export function readHostCapabilityTimeoutMs(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  const raw = environment.AGENT_HOST_TOOLS_TIMEOUT_MS?.trim();
   if (!raw) return DEFAULT_TIMEOUT_MS;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1_000 || parsed > 120_000) {

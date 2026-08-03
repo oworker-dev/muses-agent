@@ -118,12 +118,20 @@ identifier, is used for Muses membership checks. Viewer actors can discover and
 read but cannot mutate or invoke external capabilities. Every invocation uses
 the Eve tool call id as its idempotency correlation.
 
-The first capability set covers canvas inspection/placement and Workflow
-list/inspect/invoke/draft/validate/publish. Agent profiles are independently
+The first capability set covers canvas inspection/placement, one real
+`image.generate` media operation, and Workflow list/inspect/invoke/draft/validate/publish.
+The image capability performs the durable Muses Workflow, persists the Asset,
+and places it through the Operation Gateway before returning. Agent profiles are independently
 versioned: `general-purpose@0.1.0` remains host-neutral and
 `muses-platform@0.1.0` carries Muses host behavior. A Workflow `agent-run` node
 stores only the profile ref, schemas, permissions, budget, and output mode; Eve
 session identifiers and provider details stay outside the Workflow DSL.
+
+The Agent Host capability client defaults to a bounded 120-second request
+timeout, which covers the current synchronous image generation slice while
+remaining below the public 120-second maximum. Video, music, and other longer
+media operations must use an accepted durable operation plus a server-side wait
+or continuation instead of increasing this timeout without bound.
 
 Eve's Workflow spec 5 World is a separate infrastructure boundary from the
 Muses Workflow spec 4 World. They must use different PostgreSQL databases, not
@@ -262,6 +270,15 @@ state is **optional iframe +
 native React UI + custom UI SDK paths backed by open HTTP/protocol contracts and
 public alpha artifacts**. It is no longer iframe-only, but it is not yet a
 public production-stable release.
+
+On 2026-08-03 the Muses Host conformance slice also completed one real media
+outcome through the public protocol: the standalone Web Agent discovered
+`image.generate`, invoked it with a natural-language request, received a real
+OpenAI image Asset, inspected the authoritative canvas, and projected token
+usage. The Host-side acceptance additionally verified object bytes, Asset and
+Workflow receipts, credit settlement, and a fresh canvas read. This proves the
+first Muses outcome path; it does not close the remaining sandbox, OAuth, load,
+SLO, billing reconciliation, licensing, or public-release gates.
 
 The release boundary is intentionally split so the Agent remains host-neutral:
 
