@@ -2,6 +2,7 @@ import http from "node:http";
 
 const port = Number(process.env.MOCK_OPENAI_PORT || 4291);
 const deploymentId = process.env.MOCK_MUSES_DEPLOYMENT_ID || "";
+const workflowInputId = process.env.MOCK_MUSES_WORKFLOW_INPUT_ID || "prompt";
 let responseSequence = 0;
 let requestCount = 0;
 const scenarioAttempts = new Map();
@@ -33,7 +34,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 function injectFailure(response, body) {
-  const raw = JSON.stringify(Array.isArray(body.input) ? body.input : []);
+  const raw = JSON.stringify(body);
   const transient = [
     ["PROVIDER_429_RECOVER", 429, "rate_limit_exceeded"],
     ["PROVIDER_500_RECOVER", 500, "internal_server_error"],
@@ -123,7 +124,7 @@ server.listen(port, "127.0.0.1", () => {
 
 async function planResponse(body) {
   const input = Array.isArray(body.input) ? body.input : [];
-  const raw = JSON.stringify(input);
+  const raw = JSON.stringify(body);
   if (hasJsonSchema(body) || hasFinalOutputTool(body)) {
     return toolCall("final_output", { answer: "STRUCTURED_READY" });
   }
@@ -156,7 +157,7 @@ async function planResponse(body) {
     return hostInvoke("workflow.invoke", {
       deploymentId,
       inputs: {
-        message: { valueType: "text", value: "Return the word BRIDGE_READY." },
+        [workflowInputId]: { valueType: "text", value: "Return the word BRIDGE_READY." },
       },
     });
   }

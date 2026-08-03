@@ -4,6 +4,7 @@ const serviceUrl = required("MUSES_AGENT_SERVICE_URL").replace(/\/$/, "");
 const userId = required("MUSES_E2E_USER_ID");
 const workspaceId = required("MUSES_E2E_WORKSPACE_ID");
 const deploymentId = required("MUSES_E2E_DEPLOYMENT_ID");
+const agentNodeId = process.env.MUSES_E2E_AGENT_NODE_ID?.trim() || "agent-run-1";
 const token = createToken({ userId, workspaceId, actorType: "service" });
 const idempotencyKey = `muses-host-e2e:${Date.now()}:${randomUUID()}`;
 const request = {
@@ -58,7 +59,7 @@ const workflowInspection = hostResults.find(
 );
 assert(workflowInspection, "Platform Agent did not observe a completed Workflow run.");
 assert(
-  workflowInspection.output.completedNodeIds?.includes("agent-run-1"),
+  workflowInspection.output.completedNodeIds?.includes(agentNodeId),
   "The Workflow Agent node did not complete.",
 );
 assert(

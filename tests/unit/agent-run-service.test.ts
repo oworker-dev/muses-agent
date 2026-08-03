@@ -277,6 +277,54 @@ test("cancellation wins when the provider completes during the grace window", as
   assert.equal(runtime.calls.reset, 1);
 });
 
+test("persists cancellation before an Eve transport failure and reconciles later", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({
+    cancelError: new Error("Eve cancellation transport failed"),
+    events: runningEvents(),
+  });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({
+      idempotencyKey: "request-cancel-transport-failure",
+      message: "Keep working",
+    }),
+    runtime,
+    store,
+  });
+
+  await assert.rejects(
+    cancelAgentRun({
+      accessToken: "token",
+      identity: user,
+      runId: started.record.runId,
+      cancellationPolicy: immediateCancellation,
+      runtime,
+      store,
+    }),
+    /transport failed/,
+  );
+  const pending = await store.findOwned(
+    user.tenantId,
+    user.principalId,
+    started.record.runId,
+  );
+  assert.ok(pending?.cancellationRequestedAt);
+  assert.equal(pending.status, "running");
+
+  const reconciled = await inspectAgentRun({
+    accessToken: "token",
+    cancellationPolicy: immediateCancellation,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(reconciled?.status, "cancelled");
+  assert.equal(runtime.calls.reset, 1);
+});
+
 test("inspection reconciles an interrupted cancellation and reset is idempotent", async () => {
   const store = new MemoryAgentRunStore();
   const runtime = fakeRuntime({ events: runningEvents() });
@@ -440,6 +488,7 @@ const immediateCancellation = {
 } as const;
 
 function fakeRuntime(options: {
+  readonly cancelError?: Error;
   readonly cancelStatus?: "accepted" | "no_active_turn";
   readonly events?: readonly HandleMessageStreamEvent[];
   readonly startError?: Error;
@@ -448,6 +497,7 @@ function fakeRuntime(options: {
   return {
     async cancel() {
       calls.cancel += 1;
+      if (options.cancelError) throw options.cancelError;
       return options.cancelStatus ?? "accepted";
     },
     calls,

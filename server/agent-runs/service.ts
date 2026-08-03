@@ -238,25 +238,15 @@ export async function cancelAgentRun(options: {
     return { cancellation: "already_requested", record: synchronized.record };
   }
 
+  // Persist the caller's intent before crossing the Eve transport boundary.
+  // A hung request or process restart can then be reconciled by inspection.
+  const requested = await options.store.markCancellationRequested(record.runId);
   const cancellation = await runtime.cancel(
     record.runId,
     record.correlationId,
     record.sessionId,
     options.accessToken,
   );
-  if (cancellation === "no_active_turn") {
-    const synchronized = await synchronizeAgentRun(
-      options.store,
-      record,
-      options.accessToken,
-      runtime,
-      cancellationPolicy,
-    );
-    if (isTerminal(synchronized.record.status)) {
-      return { cancellation: "terminal", record: synchronized.record };
-    }
-  }
-  const requested = await options.store.markCancellationRequested(record.runId);
   await cancellationPolicy.sleep(cancellationPolicy.graceMs);
   const synchronized = await synchronizeAgentRun(
     options.store,
