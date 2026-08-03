@@ -1,9 +1,10 @@
 import { AgentEmbed } from "./embed-client";
+import { readAgentRuntimeStatus } from "@/lib/agent-runtime-status";
 
 export const dynamic = "force-dynamic";
 
 export default function EmbedPage() {
-  return <AgentEmbed allowedOrigins={allowedEmbedOrigins()} />;
+  return <AgentEmbed allowedOrigins={allowedEmbedOrigins()} runtimeStatus={readAgentRuntimeStatus()} />;
 }
 
 function allowedEmbedOrigins(): readonly string[] {

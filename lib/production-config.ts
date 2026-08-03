@@ -51,6 +51,12 @@ export function inspectProductionConfiguration(
       "AGENT_EVAL_CONTEXT_WINDOW_TOKENS is test-only and must not be configured in production.",
     );
   }
+  if (environment.AGENT_PROVIDER_MODE?.trim() === "mock") {
+    error(
+      "mock-provider",
+      "AGENT_PROVIDER_MODE=mock is test-only and must not be configured in production.",
+    );
+  }
   try {
     const approvalMode = environment.AGENT_BASH_APPROVAL_MODE?.trim() || "risky";
     if (approvalMode !== "always" && approvalMode !== "risky" && approvalMode !== "never") {
@@ -187,7 +193,7 @@ export function inspectProductionConfiguration(
   }
 
   inspectHttpUrl(environment.AGENT_RUNTIME_URL, "AGENT_RUNTIME_URL", { allowLoopbackHttp: true }, error);
-  inspectHttpUrl(environment.OPENAI_BASE_URL, "OPENAI_BASE_URL", { allowLoopbackHttp: false }, error);
+  inspectHttpUrl(environment.OPENAI_BASE_URL, "OPENAI_BASE_URL", { allowLoopbackHttp: true }, error);
   inspectInteger(
     environment.AGENT_PROVIDER_HTTP_TIMEOUT_MS,
     "AGENT_PROVIDER_HTTP_TIMEOUT_MS",

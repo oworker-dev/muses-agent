@@ -52,6 +52,8 @@ try {
     import { AGENT_HOST_SIGNATURE_VERSION, signAgentHostCapabilityRequest } from "@muses/agent-host";
     import { AGENT_UI_VERSION, AgentWorkspace } from "@muses/agent-ui";
     import { Conversation } from "@muses/agent-ui/ai-elements/conversation";
+    import { Context, ModelSelector } from "@muses/agent-ui/ai-elements";
+    import { Button } from "@muses/agent-ui/ui/button";
     assert.equal(AGENT_RUN_CONTRACT_VERSION, "0.1.0-draft");
     assert.equal(AGENT_SESSION_CONTRACT_VERSION, "0.1.0-draft");
     assert.equal(AGENT_EMBED_CONTRACT_VERSION, "0.1.0");
@@ -62,6 +64,9 @@ try {
     assert.equal(typeof signAgentHostCapabilityRequest, "function");
     assert.equal(typeof AgentWorkspace, "function");
     assert.equal(typeof Conversation, "function");
+    assert.equal(typeof Context, "function");
+    assert.equal(typeof ModelSelector, "function");
+    assert.equal(typeof Button, "function");
     assert.match(import.meta.resolve("@muses/agent-ui/styles.css"), /styles\.css$/);
   `;
   execFileSync("node", ["--input-type=module", "--eval", probe], {

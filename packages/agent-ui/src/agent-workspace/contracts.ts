@@ -22,6 +22,27 @@ export type AgentModelOption = {
   readonly label: string;
 };
 
+export type AgentPromptMenuItem = {
+  readonly description?: string;
+  readonly id: string;
+  readonly keywords?: readonly string[];
+  readonly label: string;
+  readonly value: string;
+};
+
+export type AgentExtensionInfo = {
+  readonly description?: string;
+  readonly id: string;
+  readonly kind: "mcp" | "skill";
+  readonly label: string;
+  readonly status: "available" | "disabled" | "unconfigured";
+  readonly version?: string;
+};
+
+export type AgentRuntimeStatus = {
+  readonly provider: "mock" | "ready" | "unconfigured";
+};
+
 export type AgentThread = {
   readonly createdAt: number;
   readonly events: readonly HandleMessageStreamEvent[];
@@ -51,14 +72,18 @@ export type AgentWorkspaceClientConfig = {
 export type AgentWorkspaceConfig = {
   readonly agentName: string;
   readonly client?: AgentWorkspaceClientConfig;
+  readonly commands?: readonly AgentPromptMenuItem[];
   readonly defaultPreferences: AgentThreadPreferences;
+  readonly extensions?: readonly AgentExtensionInfo[];
   readonly hostSlots?: AgentWorkspaceHostSlots;
   readonly models: readonly AgentModelOption[];
+  readonly mentions?: readonly AgentPromptMenuItem[];
   readonly onEvent?: (event: HandleMessageStreamEvent) => void;
   readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
   readonly onStorageError?: (error: unknown) => void;
   readonly productName: string;
   readonly reasoningLevels: readonly string[];
+  readonly runtimeStatus?: AgentRuntimeStatus;
   readonly storageKey?: string;
   readonly threadStorage?: AgentThreadStorage;
 };

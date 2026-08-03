@@ -6,9 +6,13 @@ import {
   AgentWorkspace,
   createHttpAgentThreadStorage,
   type AgentThread,
+  type AgentRuntimeStatus,
 } from "@muses/agent-ui";
 import {
   AGENT_UI_DEFAULT_PREFERENCES,
+  AGENT_UI_COMMANDS,
+  AGENT_UI_EXTENSIONS,
+  AGENT_UI_MENTIONS,
   AGENT_UI_MODELS,
   AGENT_UI_REASONING_LEVELS,
 } from "@/lib/agent-ui-config";
@@ -20,7 +24,7 @@ import {
   type AgentEmbedEvent,
 } from "@/contracts/agent-embed";
 
-export function AgentEmbed({ allowedOrigins }: { readonly allowedOrigins: readonly string[] }) {
+export function AgentEmbed({ allowedOrigins, runtimeStatus }: { readonly allowedOrigins: readonly string[]; readonly runtimeStatus: AgentRuntimeStatus }) {
   const [configuration, setConfiguration] = useState<AgentEmbedConfigureMessage>();
   const [fatalError, setFatalError] = useState<string>();
   const parentOriginRef = useRef<string | undefined>(undefined);
@@ -150,13 +154,17 @@ export function AgentEmbed({ allowedOrigins }: { readonly allowedOrigins: readon
     <AgentWorkspace
       agentName="muses-agent"
       client={client}
+      commands={AGENT_UI_COMMANDS}
       defaultPreferences={AGENT_UI_DEFAULT_PREFERENCES}
+      extensions={AGENT_UI_EXTENSIONS}
       key={`${configuration.storageKey}:${configuration.profile.id}@${configuration.profile.version}`}
       models={AGENT_UI_MODELS}
+      mentions={AGENT_UI_MENTIONS}
       onEvent={onEvent}
       onDeleteThread={onDeleteThread}
       productName="Agent"
       reasoningLevels={AGENT_UI_REASONING_LEVELS}
+      runtimeStatus={runtimeStatus}
       storageKey={configuration.storageKey}
       threadStorage={threadStorage}
     />

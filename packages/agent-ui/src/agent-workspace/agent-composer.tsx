@@ -1,5 +1,34 @@
 "use client";
 
+import type { LanguageModelUsage } from "ai";
+import {
+  AtSignIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  CommandIcon,
+  FileIcon,
+  PaperclipIcon,
+  XIcon,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Context,
+  ContextContent,
+  ContextContentBody,
+  ContextContentHeader,
+  ContextTrigger,
+} from "../ai-elements/context.js";
+import {
+  ModelSelector,
+  ModelSelectorContent,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorInput,
+  ModelSelectorItem,
+  ModelSelectorList,
+  ModelSelectorName,
+  ModelSelectorTrigger,
+} from "../ai-elements/model-selector.js";
 import {
   PromptInput,
   PromptInputActionAddAttachments,
@@ -7,6 +36,11 @@ import {
   PromptInputActionMenu,
   PromptInputActionMenuContent,
   PromptInputActionMenuTrigger,
+  PromptInputCommand,
+  PromptInputCommandEmpty,
+  PromptInputCommandGroup,
+  PromptInputCommandItem,
+  PromptInputCommandList,
   PromptInputFooter,
   PromptInputHeader,
   PromptInputSelect,
@@ -19,14 +53,27 @@ import {
   PromptInputTools,
   type PromptInputMessage,
   usePromptInputAttachments,
+  usePromptInputController,
 } from "../ai-elements/prompt-input.js";
-import { FileIcon, GaugeIcon, PaperclipIcon, XIcon } from "lucide-react";
+import { Button } from "../ui/button.js";
 import type { AgentMessages } from "./i18n.js";
-import type { AgentModelOption, AgentThreadPreferences } from "./contracts.js";
+import type {
+  AgentModelOption,
+  AgentPromptMenuItem,
+  AgentThreadPreferences,
+} from "./contracts.js";
+import {
+  filterPromptMenuItems,
+  findPromptTrigger,
+  replacePromptTrigger,
+} from "./prompt-menu.js";
 import type { AgentUsageSummary } from "./usage.js";
 import { formatTokenCount } from "./usage.js";
 
 export function AgentComposer({
+  commands = [],
+  disabled = false,
+  mentions = [],
   messages,
   models,
   onPreferencesChange,
@@ -37,6 +84,9 @@ export function AgentComposer({
   status,
   usage,
 }: {
+  readonly commands?: readonly AgentPromptMenuItem[];
+  readonly disabled?: boolean;
+  readonly mentions?: readonly AgentPromptMenuItem[];
   readonly messages: AgentMessages;
   readonly models: readonly AgentModelOption[];
   readonly onPreferencesChange: (preferences: AgentThreadPreferences) => void;
@@ -47,30 +97,39 @@ export function AgentComposer({
   readonly status: "error" | "ready" | "streaming" | "submitted";
   readonly usage: AgentUsageSummary;
 }) {
+  const attachments = usePromptInputAttachments();
+
   return (
     <PromptInput
-      className="border-border/80 bg-card/95 shadow-[0_10px_35px_-22px_rgba(0,0,0,0.45)]"
+      className="relative overflow-visible border-border/80 bg-card/95 shadow-[0_12px_38px_-24px_rgba(0,0,0,0.5)]"
       maxFileSize={10 * 1024 * 1024}
       multiple
-      onSubmit={(message) => onSubmit(message)}
+      onSubmit={(message) => {
+        // Eve projects an optimistic user message immediately. Do not keep the
+        // controlled composer populated for the lifetime of the remote turn.
+        void onSubmit(message).catch(() => undefined);
+      }}
     >
-      <PromptInputHeader>
-        <ComposerAttachments messages={messages} />
-      </PromptInputHeader>
-      <PromptInputTextarea aria-label={messages.inputPlaceholder} placeholder={messages.inputPlaceholder} />
-      <PromptInputFooter className="min-h-11">
-        <PromptInputTools>
+      {attachments.files.length > 0 ? (
+        <PromptInputHeader>
+          <ComposerAttachments messages={messages} />
+        </PromptInputHeader>
+      ) : null}
+      <ComposerTextarea commands={commands} disabled={disabled} mentions={mentions} messages={messages} />
+      <PromptInputFooter className="min-h-11 flex-wrap gap-1.5 pr-2">
+        <PromptInputTools className="min-w-0 flex-1 flex-wrap gap-0.5">
           <PromptInputActionMenu>
             <PromptInputActionMenuTrigger aria-label={messages.addFiles} tooltip={messages.addFiles}>
               <PaperclipIcon className="size-4" />
             </PromptInputActionMenuTrigger>
-            <PromptInputActionMenuContent>
+            <PromptInputActionMenuContent align="start" side="top">
               <PromptInputActionAddAttachments label={messages.addFiles} />
               <PromptInputActionAddScreenshot label={messages.takeScreenshot} />
             </PromptInputActionMenuContent>
           </PromptInputActionMenu>
           <ModelSelect
             label={messages.model}
+            messages={messages}
             models={models}
             onChange={(modelId) => onPreferencesChange({ ...preferences, modelId })}
             value={preferences.modelId}
@@ -82,13 +141,12 @@ export function AgentComposer({
             value={preferences.reasoning}
           />
         </PromptInputTools>
-        <div className="flex min-w-0 items-center gap-2 pr-1 text-muted-foreground text-xs">
-          <span className="flex items-center gap-1" title={formatContextTitle(messages.context, models, preferences.modelId, usage.contextInputTokens)}>
-            <GaugeIcon className="size-3.5" />
-            <span>{formatContextUsage(models, preferences.modelId, usage.contextInputTokens)}</span>
-          </span>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <ContextUsage messages={messages} models={models} modelId={preferences.modelId} usage={usage} />
           <PromptInputSubmit
             aria-label={status === "ready" || status === "error" ? messages.send : messages.cancel}
+            className="static size-8"
+            disabled={disabled}
             onStop={onStop}
             status={status}
           />
@@ -98,10 +156,96 @@ export function AgentComposer({
   );
 }
 
+function ComposerTextarea({
+  commands,
+  disabled,
+  mentions,
+  messages,
+}: {
+  readonly commands: readonly AgentPromptMenuItem[];
+  readonly disabled: boolean;
+  readonly mentions: readonly AgentPromptMenuItem[];
+  readonly messages: AgentMessages;
+}) {
+  const controller = usePromptInputController();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [dismissedInput, setDismissedInput] = useState<string>();
+  const trigger = findPromptTrigger(controller.textInput.value);
+  const sourceItems = trigger?.kind === "command" ? commands : mentions;
+  const items = useMemo(
+    () => trigger ? filterPromptMenuItems(sourceItems, trigger.query) : [],
+    [sourceItems, trigger],
+  );
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const isOpen = Boolean(trigger && controller.textInput.value !== dismissedInput && sourceItems.length > 0);
+
+  useEffect(() => setSelectedIndex(0), [controller.textInput.value]);
+
+  const choose = (item: AgentPromptMenuItem) => {
+    if (!trigger) return;
+    const next = replacePromptTrigger(controller.textInput.value, trigger, item.value);
+    controller.textInput.setInput(next);
+    setDismissedInput(next);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
+
+  return (
+    <>
+      {isOpen ? (
+        <div className="absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-40 overflow-hidden rounded-md border bg-popover shadow-lg">
+          <PromptInputCommand value={items[selectedIndex]?.id ?? ""}>
+            <PromptInputCommandList className="max-h-64">
+              <PromptInputCommandEmpty>{messages.noPromptItems}</PromptInputCommandEmpty>
+              <PromptInputCommandGroup heading={trigger?.kind === "command" ? messages.skillsAndCommands : messages.contextItems}>
+                {items.map((item, index) => (
+                  <PromptInputCommandItem
+                    key={item.id}
+                    onMouseEnter={() => setSelectedIndex(index)}
+                    onSelect={() => choose(item)}
+                    value={item.id}
+                  >
+                    {trigger?.kind === "command" ? <CommandIcon className="size-4" /> : <AtSignIcon className="size-4" />}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">{item.label}</span>
+                      {item.description ? <span className="block truncate text-xs text-muted-foreground">{item.description}</span> : null}
+                    </span>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{item.value}</span>
+                  </PromptInputCommandItem>
+                ))}
+              </PromptInputCommandGroup>
+            </PromptInputCommandList>
+          </PromptInputCommand>
+        </div>
+      ) : null}
+      <PromptInputTextarea
+        aria-label={messages.inputPlaceholder}
+        className="min-h-24 text-[15px] leading-6 sm:min-h-28"
+        disabled={disabled}
+        onKeyDown={(event) => {
+          if (!isOpen) return;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setSelectedIndex((current) => items.length === 0 ? 0 : (current + 1) % items.length);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setSelectedIndex((current) => items.length === 0 ? 0 : (current - 1 + items.length) % items.length);
+          } else if ((event.key === "Enter" || event.key === "Tab") && items[selectedIndex]) {
+            event.preventDefault();
+            choose(items[selectedIndex]);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            setDismissedInput(controller.textInput.value);
+          }
+        }}
+        placeholder={messages.inputPlaceholder}
+        ref={textareaRef}
+      />
+    </>
+  );
+}
+
 function ComposerAttachments({ messages }: { readonly messages: AgentMessages }) {
   const attachments = usePromptInputAttachments();
-  if (attachments.files.length === 0) return null;
-
   return (
     <div className="flex max-w-full flex-wrap gap-1.5">
       {attachments.files.map((file) => (
@@ -122,33 +266,96 @@ function ComposerAttachments({ messages }: { readonly messages: AgentMessages })
   );
 }
 
-function ModelSelect({ label, models, onChange, value }: { readonly label: string; readonly models: readonly AgentModelOption[]; readonly onChange: (id: string) => void; readonly value: string }) {
+function ModelSelect({
+  label,
+  messages,
+  models,
+  onChange,
+  value,
+}: {
+  readonly label: string;
+  readonly messages: AgentMessages;
+  readonly models: readonly AgentModelOption[];
+  readonly onChange: (id: string) => void;
+  readonly value: string;
+}) {
+  const [open, setOpen] = useState(false);
   const selected = models.find((option) => option.id === value) ?? models[0];
   return (
-    <PromptInputSelect onValueChange={(next) => { if (models.some((model) => model.id === next)) onChange(next); }} value={value}>
-      <PromptInputSelectTrigger aria-label={label} className="h-8 max-w-36 px-2 text-xs">
-        <PromptInputSelectValue>{selected.label}</PromptInputSelectValue>
-      </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="start">
-        {models.map((option) => (
-          <PromptInputSelectItem key={option.id} value={option.id}>
-            {option.label}
-          </PromptInputSelectItem>
-        ))}
-      </PromptInputSelectContent>
-    </PromptInputSelect>
+    <ModelSelector onOpenChange={setOpen} open={open}>
+      <ModelSelectorTrigger asChild>
+        <Button aria-label={label} className="h-8 max-w-44 gap-1.5 px-2 text-xs" type="button" variant="ghost">
+          <span className="truncate">{selected.label}</span>
+          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        </Button>
+      </ModelSelectorTrigger>
+      <ModelSelectorContent className="max-w-[calc(100%-2rem)] sm:max-w-md" title={label}>
+        <ModelSelectorInput placeholder={messages.searchModels} />
+        <ModelSelectorList>
+          <ModelSelectorEmpty>{messages.noModels}</ModelSelectorEmpty>
+          <ModelSelectorGroup heading={label}>
+            {models.map((option) => (
+              <ModelSelectorItem
+                key={option.id}
+                onSelect={() => {
+                  onChange(option.id);
+                  setOpen(false);
+                }}
+                value={`${option.label} ${option.id}`}
+              >
+                <ModelSelectorName>{option.label}</ModelSelectorName>
+                {option.id === selected.id ? <CheckIcon className="size-4" /> : null}
+              </ModelSelectorItem>
+            ))}
+          </ModelSelectorGroup>
+        </ModelSelectorList>
+      </ModelSelectorContent>
+    </ModelSelector>
   );
 }
 
-function formatContextUsage(models: readonly AgentModelOption[], modelId: string, inputTokens: number): string {
+function ContextUsage({
+  messages,
+  models,
+  modelId,
+  usage,
+}: {
+  readonly messages: AgentMessages;
+  readonly models: readonly AgentModelOption[];
+  readonly modelId: string;
+  readonly usage: AgentUsageSummary;
+}) {
   const model = models.find((option) => option.id === modelId) ?? models[0];
-  return `${formatTokenCount(inputTokens)} / ${formatTokenCount(model.contextWindowTokens)}`;
+  const languageUsage: LanguageModelUsage = {
+    inputTokens: usage.inputTokens,
+    inputTokenDetails: {
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      noCacheTokens: Math.max(0, usage.inputTokens - usage.cacheReadTokens),
+    },
+    outputTokens: usage.outputTokens,
+    outputTokenDetails: { reasoningTokens: undefined, textTokens: usage.outputTokens },
+    totalTokens: usage.inputTokens + usage.outputTokens,
+  };
+  return (
+    <Context maxTokens={model.contextWindowTokens} modelId={modelId} usedTokens={usage.contextInputTokens} usage={languageUsage}>
+      <ContextTrigger aria-label={messages.context} className="h-8 gap-1 px-1.5" />
+      <ContextContent align="end" side="top">
+        <ContextContentHeader />
+        <ContextContentBody className="space-y-2">
+          <UsageRow label={messages.inputTokens} value={usage.inputTokens} />
+          <UsageRow label={messages.outputTokens} value={usage.outputTokens} />
+          <UsageRow label={messages.cacheReadTokens} value={usage.cacheReadTokens} />
+          <UsageRow label={messages.cacheWriteTokens} value={usage.cacheWriteTokens} />
+          {usage.costUsd > 0 ? <div className="flex justify-between gap-4 border-t pt-2 text-xs"><span className="text-muted-foreground">{messages.estimatedCost}</span><span>${usage.costUsd.toFixed(4)}</span></div> : null}
+        </ContextContentBody>
+      </ContextContent>
+    </Context>
+  );
 }
 
-function formatContextTitle(label: string, models: readonly AgentModelOption[], modelId: string, inputTokens: number): string {
-  const model = models.find((option) => option.id === modelId) ?? models[0];
-  const percentage = (inputTokens / model.contextWindowTokens) * 100;
-  return `${label}: ${formatTokenCount(inputTokens)} / ${formatTokenCount(model.contextWindowTokens)} (${percentage.toFixed(1)}%)`;
+function UsageRow({ label, value }: { readonly label: string; readonly value: number }) {
+  return <div className="flex justify-between gap-4 text-xs"><span className="text-muted-foreground">{label}</span><span className="font-mono">{formatTokenCount(value)}</span></div>;
 }
 
 function ReasoningSelect({ label, onChange, reasoningLevels, value }: { readonly label: string; readonly onChange: (level: string) => void; readonly reasoningLevels: readonly string[]; readonly value: string }) {
@@ -157,11 +364,9 @@ function ReasoningSelect({ label, onChange, reasoningLevels, value }: { readonly
       <PromptInputSelectTrigger aria-label={label} className="h-8 max-w-28 px-2 text-xs">
         <PromptInputSelectValue>{value}</PromptInputSelectValue>
       </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="start">
+      <PromptInputSelectContent align="start" position="popper" side="top">
         {reasoningLevels.map((level) => (
-          <PromptInputSelectItem key={level} value={level}>
-            {level}
-          </PromptInputSelectItem>
+          <PromptInputSelectItem key={level} value={level}>{level}</PromptInputSelectItem>
         ))}
       </PromptInputSelectContent>
     </PromptInputSelect>

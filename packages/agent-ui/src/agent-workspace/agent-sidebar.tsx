@@ -1,9 +1,15 @@
 "use client";
 
-import { LoaderCircleIcon, SearchIcon, Settings2Icon, SparklesIcon, SquarePenIcon, Trash2Icon, XIcon } from "lucide-react";
+import { LoaderCircleIcon, MoreHorizontalIcon, PencilIcon, SearchIcon, Settings2Icon, SparklesIcon, SquarePenIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "../ui/button.js";
 import { Input } from "../ui/input.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu.js";
 import { cn } from "../utils.js";
 import type { AgentThread } from "./contracts.js";
 import type { AgentLocale, AgentMessages } from "./i18n.js";
@@ -17,6 +23,7 @@ export function AgentSidebar({
   onClose,
   onDelete,
   onNew,
+  onRename,
   onSelect,
   onSettings,
   open,
@@ -30,6 +37,7 @@ export function AgentSidebar({
   readonly onClose: () => void;
   readonly onDelete: (threadId: string) => void;
   readonly onNew: () => void;
+  readonly onRename: (threadId: string, title: string) => void;
   readonly onSelect: (threadId: string) => void;
   readonly onSettings: () => void;
   readonly open: boolean;
@@ -37,6 +45,8 @@ export function AgentSidebar({
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [editingThreadId, setEditingThreadId] = useState<string>();
+  const [editingTitle, setEditingTitle] = useState("");
   const filteredThreads = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase(locale);
     if (normalizedQuery.length === 0) return threads;
@@ -73,15 +83,58 @@ export function AgentSidebar({
             {threads.length > 0 && filteredThreads.length === 0 ? <p className="px-2 text-muted-foreground text-sm">{messages.noSearchResults}</p> : null}
             <div className="space-y-0.5">
               {filteredThreads.map((thread) => (
-                <div className="group flex items-center gap-1" key={thread.id}>
-                  <button className={cn("min-w-0 flex-1 rounded-md px-2.5 py-2.5 text-left text-sm transition-colors hover:bg-sidebar-accent", thread.id === activeThreadId && "bg-sidebar-accent font-medium")} onClick={() => onSelect(thread.id)} type="button">
+                <div className={cn("group flex items-center gap-1 rounded-md", thread.id === activeThreadId && "bg-sidebar-accent shadow-sm ring-1 ring-sidebar-border")} key={thread.id}>
+                  {editingThreadId === thread.id ? (
+                    <Input
+                      aria-label={messages.renameThread}
+                      autoFocus
+                      className="m-1 h-9 min-w-0 flex-1 bg-background text-sm"
+                      onBlur={() => {
+                        onRename(thread.id, editingTitle);
+                        setEditingThreadId(undefined);
+                      }}
+                      onChange={(event) => setEditingTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                        if (event.key === "Escape") {
+                          setEditingThreadId(undefined);
+                          setEditingTitle("");
+                        }
+                      }}
+                      value={editingTitle}
+                    />
+                  ) : <button
+                    aria-current={thread.id === activeThreadId ? "page" : undefined}
+                    className={cn("min-w-0 flex-1 border-l-2 border-transparent px-2.5 py-2.5 text-left text-sm transition-colors hover:bg-sidebar-accent", thread.id === activeThreadId && "border-l-foreground font-semibold text-foreground")}
+                    onClick={() => onSelect(thread.id)}
+                    onDoubleClick={() => {
+                      setEditingThreadId(thread.id);
+                      setEditingTitle(thread.title);
+                    }}
+                    type="button"
+                  >
                     <span className="flex items-center gap-2">
                       <span className={cn("size-1.5 shrink-0 rounded-full", thread.status === "error" ? "bg-destructive" : thread.status === "streaming" || thread.status === "submitted" ? "bg-emerald-500" : "bg-muted-foreground/30")} />
                       <span className="truncate">{thread.title}</span>
                     </span>
                     <span className="mt-1 block truncate pl-3.5 text-xs text-muted-foreground">{formatDate(thread.updatedAt, locale)}</span>
-                  </button>
-                  <Button aria-label={deletingThreadIds.has(thread.id) ? messages.deletingThread : messages.deleteThread} className="opacity-60 group-hover:opacity-100 sm:opacity-0" disabled={deletingThreadIds.has(thread.id)} onClick={() => onDelete(thread.id)} size="icon-sm" variant="ghost">{deletingThreadIds.has(thread.id) ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <Trash2Icon className="size-3.5" />}</Button>
+                  </button>}
+                  {editingThreadId !== thread.id ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button aria-label={messages.threadActions} className="mr-1 opacity-70 group-hover:opacity-100 sm:opacity-0" disabled={deletingThreadIds.has(thread.id)} size="icon-sm" variant="ghost">
+                          {deletingThreadIds.has(thread.id) ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <MoreHorizontalIcon className="size-4" />}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onSelect={() => {
+                          setEditingThreadId(thread.id);
+                          setEditingTitle(thread.title);
+                        }}><PencilIcon className="size-4" />{messages.renameThread}</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => onDelete(thread.id)}><Trash2Icon className="size-4" />{messages.deleteThread}</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
                 </div>
               ))}
             </div>

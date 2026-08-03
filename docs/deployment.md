@@ -51,6 +51,22 @@ Build and start Eve before Agent Web. The complete environment example and
 commands are in the root README. Health checks must verify the Eve health route,
 the Agent Web route, PostgreSQL connectivity, and telemetry export.
 
+For a Muses-hosted deployment, configure the Agent's OpenAI-compatible client
+against the private Host broker:
+
+```bash
+OPENAI_API_KEY="$MUSES_AGENT_PROVIDER_BROKER_SECRET"
+OPENAI_BASE_URL="https://muses.example.com/api/internal/agent-provider/v1"
+```
+
+The same-host self-hosted topology may use the loopback Muses origin over HTTP;
+non-loopback origins must use HTTPS. The broker secret is a service credential,
+not a model Provider key. Rotate it independently and never expose it to Web UI
+configuration, session state, tools, Skills, MCP connections, or sandboxes.
+Muses must have an active `llm` Provider Connection whose allowlist accepts the
+selected `AGENT_MODEL_ID`. A healthy Agent process with no such connection is
+not a successful production preflight.
+
 ## Rollout And Rollback
 
 - Deploy an immutable image and record its Git commit, package version, Eve

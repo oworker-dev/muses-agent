@@ -1,5 +1,7 @@
 import type { AgentLocale, AgentMessages } from "./i18n.js";
-export declare function AgentSettingsDialog({ locale, messages, onLocaleChange, onOpenChange, open, }: {
+import type { AgentExtensionInfo } from "./contracts.js";
+export declare function AgentSettingsDialog({ extensions, locale, messages, onLocaleChange, onOpenChange, open, }: {
+    readonly extensions: readonly AgentExtensionInfo[];
     readonly locale: AgentLocale;
     readonly messages: AgentMessages;
     readonly onLocaleChange: (locale: AgentLocale) => void;

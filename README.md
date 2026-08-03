@@ -15,12 +15,15 @@ The project has a working Eve runtime and a reusable AI Elements Web workspace:
 - model and reasoning selection;
 - reasoning, tools, human approval, authorization, usage, and cost projections;
 - multiple local threads, responsive navigation, English and Simplified Chinese;
+- immediate optimistic sending, visible thread selection, inline rename, and searchable model selection;
+- Context usage disclosure plus host-injected `/` Skill/command and `@` context discovery;
 - cancellation, failed-turn continuation, and hard-refresh recovery;
 - per-durable-session Eve sandbox behavior;
 - PostgreSQL-backed session ownership and injectable account thread storage;
 - Host JWT enforcement across create, continue, stream, cancel, and reset routes.
 - buildable Contracts, Client, Host, and React UI alpha SDK packages;
 - optional iframe, native `AgentWorkspace`, and custom-host UI integration paths.
+- complete AI Elements and shadcn/ui source registries exported for reusable host composition.
 
 This is an integration preview, not a completed production release. MCP and
 skill lifecycle management, billing reconciliation, deployed telemetry and
@@ -39,6 +42,14 @@ substitute for a real provider-backed production E2E. See
 - optional `OPENAI_BASE_URL` and `AGENT_MODEL_ID`
 
 Do not put credentials in the repository or browser storage.
+
+When Muses is the Host, `OPENAI_API_KEY` is the private Muses broker secret,
+not an upstream model credential, and `OPENAI_BASE_URL` points to
+`/api/internal/agent-provider/v1`. Muses resolves an Admin-managed `llm`
+Provider Connection for each requested model and streams the Responses API
+result back to Eve. The upstream credential remains inside the Muses server
+request and never enters Agent state, the browser, or the sandbox. A standalone
+deployment may still use its own OpenAI-compatible Provider directly.
 
 ## Development
 

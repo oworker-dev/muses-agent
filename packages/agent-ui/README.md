@@ -19,7 +19,10 @@ export function AgentPage() {
   return (
     <AgentWorkspace
       agentName="general-agent"
+      commands={[{ id: "software-task", label: "Software task", value: "/software-task" }]}
       defaultPreferences={{ modelId: "provider/model", reasoning: "high" }}
+      extensions={[{ id: "software-task", kind: "skill", label: "Software task", status: "available" }]}
+      mentions={[{ id: "workspace", label: "Workspace", value: "@workspace" }]}
       models={[{ id: "provider/model", label: "Model", contextWindowTokens: 128000 }]}
       productName="Agent"
       reasoningLevels={["low", "medium", "high"]}
@@ -28,7 +31,9 @@ export function AgentPage() {
 }
 ```
 
-Individual AI Elements are available from subpaths such as
-`@muses/agent-ui/ai-elements/message`. The package has explicit React, AI SDK,
-and Eve peer dependencies. Hosts that own their UI can omit this package and
-use `@muses/agent-client/eve-session` directly.
+The package carries the complete AI Elements and shadcn/ui registries used by
+the product. Import their barrels or stable subpaths such as
+`@muses/agent-ui/ai-elements/context` and `@muses/agent-ui/ui/button`.
+`commands`, `mentions`, and `extensions` are host-injected catalogs; Muses
+canvas concepts never become a dependency of this package. Hosts that own their
+UI can omit this package and use `@muses/agent-client/eve-session` directly.

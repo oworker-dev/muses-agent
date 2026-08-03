@@ -3,7 +3,7 @@
 import type { UserContent } from "ai";
 import type { HandleMessageStreamEvent } from "eve/client";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, ArrowDownIcon, CheckCircle2Icon, RotateCcwIcon, SparklesIcon } from "lucide-react";
+import { AlertCircleIcon, ArrowDownIcon, RotateCcwIcon, SparklesIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Conversation,
@@ -16,10 +16,10 @@ import { cn } from "../utils.js";
 import { AgentComposer } from "./agent-composer.js";
 import { createAgentSession } from "./agent-client.js";
 import { AgentMessage, type AgentInputResponse } from "./agent-message.js";
-import type { AgentModelOption, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig } from "./contracts.js";
+import type { AgentModelOption, AgentPromptMenuItem, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig } from "./contracts.js";
 import { messagesFor, type AgentLocale, type AgentMessages } from "./i18n.js";
 import { titleFromPrompt } from "./thread-storage.js";
-import { formatTokenCount, summarizeUsage } from "./usage.js";
+import { summarizeUsage } from "./usage.js";
 
 type Cancellation = {
   requested: boolean;
@@ -29,18 +29,24 @@ type Cancellation = {
 
 export function AgentThreadView({
   client,
+  commands,
   locale,
+  mentions,
   models,
   onChange,
   onEvent,
+  providerReady,
   reasoningLevels,
   thread,
 }: {
   readonly client?: AgentWorkspaceClientConfig;
+  readonly commands: readonly AgentPromptMenuItem[];
   readonly locale: AgentLocale;
+  readonly mentions: readonly AgentPromptMenuItem[];
   readonly models: readonly AgentModelOption[];
   readonly onChange: (patch: AgentThreadPatch) => void;
   readonly onEvent?: (event: HandleMessageStreamEvent) => void;
+  readonly providerReady: boolean;
   readonly reasoningLevels: readonly string[];
   readonly thread: AgentThread;
 }) {
@@ -130,7 +136,7 @@ export function AgentThreadView({
 
   const submit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isBusy) return;
+    if ((text.length === 0 && message.files.length === 0) || isBusy || !providerReady) return;
     prepareTurn();
     if (text.length > 0 && agent.data.messages.length === 0) {
       onChange({ title: titleFromPrompt(text) });
@@ -175,7 +181,7 @@ export function AgentThreadView({
         ) : null}
 
         {isEmpty ? (
-          <EmptyThread messages={messages} onPrompt={(prompt) => void submit({ files: [], text: prompt })} />
+          <EmptyThread disabled={!providerReady} messages={messages} onPrompt={(prompt) => void submit({ files: [], text: prompt })} />
         ) : (
           <Conversation className="min-h-0 flex-1">
             <ConversationContent className="mx-auto w-full max-w-4xl gap-8 px-4 py-8 sm:px-8">
@@ -189,13 +195,6 @@ export function AgentThreadView({
                   onInputResponses={respond}
                 />
               ))}
-              {agent.status === "ready" && latestTurnOutcome(agent.events) === "completed" ? (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-xs">
-                  <CheckCircle2Icon className="size-3.5 text-emerald-600" />
-                  <span>{usage.steps} {usage.steps === 1 ? messages.step : messages.steps} · {formatRunDuration(agent.events)}</span>
-                  <span>{messages.inputTokens} {formatTokenCount(usage.inputTokens)} · {messages.outputTokens} {formatTokenCount(usage.outputTokens)}{usage.cacheReadTokens > 0 ? ` · Cache ${formatTokenCount(usage.cacheReadTokens)}` : ""}{usage.costUsd > 0 ? ` · $${usage.costUsd.toFixed(4)}` : ""}</span>
-                </div>
-              ) : null}
             </ConversationContent>
             <ConversationScrollButton>
               <ArrowDownIcon className="size-4" />
@@ -205,6 +204,9 @@ export function AgentThreadView({
 
         <div className={cn("mx-auto w-full shrink-0 px-4 pb-4 sm:px-8", isEmpty ? "max-w-2xl pb-[10vh]" : "max-w-4xl")}>
         <AgentComposer
+          commands={commands}
+          disabled={!providerReady}
+          mentions={mentions}
           messages={messages}
           models={models}
             onPreferencesChange={(preferences) => onChange({ preferences })}
@@ -215,16 +217,13 @@ export function AgentThreadView({
             status={isBusy && cancellationState !== "idle" ? "submitted" : errorMessage ? "error" : agent.status}
             usage={usage}
           />
-          <div className="mt-2 text-center text-xs text-muted-foreground/70">
-            {formatFooter(agent.status, locale)}
-          </div>
         </div>
       </main>
     </PromptInputProvider>
   );
 }
 
-function EmptyThread({ messages, onPrompt }: { readonly messages: AgentMessages; readonly onPrompt: (prompt: string) => void }) {
+function EmptyThread({ disabled, messages, onPrompt }: { readonly disabled: boolean; readonly messages: AgentMessages; readonly onPrompt: (prompt: string) => void }) {
   const suggestions = [
     messages.suggestionInspect,
     messages.suggestionImplement,
@@ -242,29 +241,13 @@ function EmptyThread({ messages, onPrompt }: { readonly messages: AgentMessages;
       </div>
       <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
         {suggestions.map((suggestion) => (
-          <Button className="h-auto justify-start whitespace-normal px-4 py-3 text-left text-sm" key={suggestion} onClick={() => onPrompt(suggestion)} variant="outline">
+          <Button className="h-auto justify-start whitespace-normal px-4 py-3 text-left text-sm" disabled={disabled} key={suggestion} onClick={() => onPrompt(suggestion)} variant="outline">
             {suggestion}
           </Button>
         ))}
       </div>
     </div>
   );
-}
-
-function formatFooter(status: "error" | "ready" | "streaming" | "submitted", locale: AgentLocale): string {
-  if (status === "streaming" || status === "submitted") return locale === "zh-CN" ? "Agent 正在工作" : "Agent is working";
-  if (status === "error") return locale === "zh-CN" ? "可以继续当前任务" : "You can continue this task";
-  return locale === "zh-CN" ? "Agent 会根据当前权限执行操作" : "The agent acts within the permissions of this session";
-}
-
-function formatRunDuration(events: readonly HandleMessageStreamEvent[]): string {
-  const completedIndex = events.findLastIndex((event) => event.type === "turn.completed");
-  if (completedIndex < 0) return "";
-  const end = events[completedIndex]?.meta?.at;
-  const start = events.slice(0, completedIndex).findLast((event) => event.type === "turn.started")?.meta?.at;
-  if (!start || !end) return "";
-  const durationMs = Math.max(0, Date.parse(end) - Date.parse(start));
-  return `${(durationMs / 1000).toFixed(1)}s`;
 }
 
 function latestTurnOutcome(events: readonly HandleMessageStreamEvent[]): "cancelled" | "completed" | "failed" | undefined {

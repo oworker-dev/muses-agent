@@ -1,7 +1,7 @@
 "use client";
 
 import { defaultMessageReducer, type HandleMessageStreamEvent } from "eve/client";
-import { AlertCircleIcon, LanguagesIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon } from "lucide-react";
+import { AlertCircleIcon, LanguagesIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
 import { Conversation, ConversationContent } from "../ai-elements/conversation.js";
@@ -24,27 +24,35 @@ const DEFAULT_STORAGE_KEY = "muses-agent:threads:v1";
 export function AgentWorkspace({
   agentName = "muses-agent",
   client,
+  commands = [],
   defaultPreferences,
+  extensions = [],
   hostSlots,
   models,
+  mentions = [],
   onEvent,
   onDeleteThread,
   onStorageError,
   productName = "Agent",
   reasoningLevels,
+  runtimeStatus = { provider: "ready" },
   storageKey = DEFAULT_STORAGE_KEY,
   threadStorage = browserThreadStorage,
 }: {
   readonly agentName?: string;
   readonly client?: AgentWorkspaceClientConfig;
+  readonly commands?: readonly import("./contracts.js").AgentPromptMenuItem[];
   readonly defaultPreferences: AgentThreadPreferences;
+  readonly extensions?: readonly import("./contracts.js").AgentExtensionInfo[];
   readonly hostSlots?: { readonly sidebarFooter?: React.ReactNode; readonly threadHeaderEnd?: React.ReactNode };
   readonly models: readonly AgentModelOption[];
+  readonly mentions?: readonly import("./contracts.js").AgentPromptMenuItem[];
   readonly onEvent?: (event: HandleMessageStreamEvent) => void;
   readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
   readonly onStorageError?: (error: unknown) => void;
   readonly productName?: string;
   readonly reasoningLevels: readonly string[];
+  readonly runtimeStatus?: import("./contracts.js").AgentRuntimeStatus;
   readonly storageKey?: string;
   readonly threadStorage?: AgentThreadStorage;
 }) {
@@ -196,6 +204,12 @@ export function AgentWorkspace({
     }
   }, [threads]);
 
+  const renameThread = useCallback((threadId: string, title: string) => {
+    const normalized = title.trim();
+    if (!normalized) return;
+    updateThread(threadId, { title: normalized });
+  }, [updateThread]);
+
   const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? threads[0];
   const changeActiveThread = useCallback(
     (patch: AgentThreadPatch) => {
@@ -271,7 +285,7 @@ export function AgentWorkspace({
 
   return (
     <div className="muses-agent-ui flex h-dvh overflow-hidden bg-background text-foreground">
-      <AgentSidebar activeThreadId={activeThread.id} deletingThreadIds={deletingThreadIds} hostFooter={hostSlots?.sidebarFooter} locale={locale} messages={messages} onClose={() => setSidebarOpen(false)} onDelete={deleteThread} onNew={createThread} onSelect={selectThread} onSettings={() => setSettingsOpen(true)} open={sidebarOpen} threads={threads} />
+      <AgentSidebar activeThreadId={activeThread.id} deletingThreadIds={deletingThreadIds} hostFooter={hostSlots?.sidebarFooter} locale={locale} messages={messages} onClose={() => setSidebarOpen(false)} onDelete={deleteThread} onNew={createThread} onRename={renameThread} onSelect={selectThread} onSettings={() => setSettingsOpen(true)} open={sidebarOpen} threads={threads} />
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b px-3 sm:px-5">
           <div className="flex min-w-0 items-center gap-2">
@@ -307,6 +321,12 @@ export function AgentWorkspace({
             <Button onClick={() => setDeletionIssue(false)} size="sm" variant="outline">{messages.dismiss}</Button>
           </div>
         ) : null}
+        {runtimeStatus.provider !== "ready" ? (
+          <div className="flex shrink-0 items-start gap-3 border-b border-amber-500/30 bg-amber-500/8 px-4 py-2.5 text-sm" role="status">
+            <ServerOffIcon className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" />
+            <p className="min-w-0 flex-1 text-foreground">{runtimeStatus.provider === "mock" ? messages.mockProvider : messages.providerUnconfigured}</p>
+          </div>
+        ) : null}
         {activeIsRecovering ? (
           <RecoveryView
             error={recoveryErrors.get(activeThread.id)}
@@ -314,9 +334,9 @@ export function AgentWorkspace({
             locale={locale}
             onRetry={() => setRecoveringIds((current) => new Set(current).add(activeThread.id))}
           />
-        ) : <AgentThreadView client={client} key={activeThread.id} locale={locale} models={models} onChange={changeActiveThread} onEvent={onEvent} reasoningLevels={reasoningLevels} thread={activeThread} />}
+        ) : <AgentThreadView client={client} commands={commands} key={activeThread.id} locale={locale} mentions={mentions} models={models} onChange={changeActiveThread} onEvent={onEvent} providerReady={runtimeStatus.provider === "ready"} reasoningLevels={reasoningLevels} thread={activeThread} />}
       </section>
-      <AgentSettingsDialog locale={locale} messages={messages} onLocaleChange={setLocale} onOpenChange={setSettingsOpen} open={settingsOpen} />
+      <AgentSettingsDialog extensions={extensions} locale={locale} messages={messages} onLocaleChange={setLocale} onOpenChange={setSettingsOpen} open={settingsOpen} />
     </div>
   );
 }

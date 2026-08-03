@@ -1,8 +1,11 @@
 import { type PromptInputMessage } from "../ai-elements/prompt-input.js";
 import type { AgentMessages } from "./i18n.js";
-import type { AgentModelOption, AgentThreadPreferences } from "./contracts.js";
+import type { AgentModelOption, AgentPromptMenuItem, AgentThreadPreferences } from "./contracts.js";
 import type { AgentUsageSummary } from "./usage.js";
-export declare function AgentComposer({ messages, models, onPreferencesChange, onSubmit, onStop, preferences, reasoningLevels, status, usage, }: {
+export declare function AgentComposer({ commands, disabled, mentions, messages, models, onPreferencesChange, onSubmit, onStop, preferences, reasoningLevels, status, usage, }: {
+    readonly commands?: readonly AgentPromptMenuItem[];
+    readonly disabled?: boolean;
+    readonly mentions?: readonly AgentPromptMenuItem[];
     readonly messages: AgentMessages;
     readonly models: readonly AgentModelOption[];
     readonly onPreferencesChange: (preferences: AgentThreadPreferences) => void;

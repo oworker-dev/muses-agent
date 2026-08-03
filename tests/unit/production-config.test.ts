@@ -102,6 +102,28 @@ test("rejects fixture models and disabled Shell approval in production", () => {
   assert.ok(codes.includes("eval-fixture-model"));
 });
 
+test("rejects an explicitly mocked Provider in production", () => {
+  const diagnostics = inspectProductionConfiguration({
+    ...validEnvironment,
+    AGENT_PROVIDER_MODE: "mock",
+  }, "24.0.0");
+  assert.ok(diagnostics.some((diagnostic) => diagnostic.code === "mock-provider"));
+});
+
+test("allows a loopback Muses Provider broker but rejects plaintext remote Providers", () => {
+  const loopback = inspectProductionConfiguration({
+    ...validEnvironment,
+    OPENAI_BASE_URL: "http://127.0.0.1:4730/api/internal/agent-provider/v1",
+  }, "24.0.0");
+  assert.equal(loopback.some((diagnostic) => diagnostic.code === "insecure-url"), false);
+
+  const remote = inspectProductionConfiguration({
+    ...validEnvironment,
+    OPENAI_BASE_URL: "http://muses.internal/api/internal/agent-provider/v1",
+  }, "24.0.0");
+  assert.ok(remote.some((diagnostic) => diagnostic.code === "insecure-url"));
+});
+
 test("bounds the test-only context window override", () => {
   assert.equal(readAgentEvalContextWindowTokens({}), 128_000);
   assert.equal(

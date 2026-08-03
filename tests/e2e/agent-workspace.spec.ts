@@ -13,6 +13,7 @@ test("wide workspace supports navigation, search, settings, and multiple threads
 
   await page.getByRole("button", { name: "New task", exact: true }).click();
   await expect(page.locator("aside").getByText("New task", { exact: true })).toHaveCount(3);
+  await expect(page.locator('aside [aria-current="page"]')).toHaveCount(1);
 
   await page.getByRole("button", { name: "Search tasks" }).click();
   await page.getByPlaceholder("Search task history").fill("missing task");
@@ -20,12 +21,50 @@ test("wide workspace supports navigation, search, settings, and multiple threads
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByText("Software task", { exact: true })).toBeVisible();
+  await expect(page.getByText("No MCP connections are configured.")).toBeVisible();
   await page.getByRole("button", { name: "简体中文" }).click();
   await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("textbox", { name: "描述一个任务" })).toBeVisible();
 
+  const composer = page.getByRole("textbox", { name: "描述一个任务" });
+  await composer.fill("/");
+  await expect(page.getByText("技能与命令")).toBeVisible();
+  await expect(page.getByText("/software-task", { exact: true })).toBeVisible();
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("/software-task ");
+  await composer.fill("@");
+  await expect(page.getByText("工作区上下文")).toBeVisible();
+  await composer.press("Tab");
+  await expect(composer).toHaveValue("@workspace ");
+
   await page.screenshot({ fullPage: true, path: "/tmp/muses-agent-wide.png" });
+});
+
+test("composer clears immediately while a turn is still being accepted", async ({ page }) => {
+  await page.route("**/eve/v1/session", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "slow-token", sessionId: "slow-session" }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route("**/eve/v1/session/slow-session/stream**", async (route) => {
+    await route.fulfill({
+      body: mockSuccessfulTurn("A delayed request", "Accepted."),
+      contentType: "application/x-ndjson",
+      status: 200,
+    });
+  });
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("A delayed request");
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("", { timeout: 300 });
+  await expect(page.getByRole("log").getByText("A delayed request", { exact: true })).toBeVisible({ timeout: 300 });
+  await expect(page.getByText("Accepted.", { exact: true })).toBeVisible({ timeout: 5_000 });
 });
 
 test("small workspace keeps the conversation focused and opens navigation on demand", async ({ page }) => {
@@ -45,6 +84,25 @@ test("small workspace keeps the conversation focused and opens navigation on dem
   await page.screenshot({ fullPage: true, path: "/tmp/muses-agent-small.png" });
 });
 
+test("narrow mobile workspace keeps menus inside the viewport", async ({ page }) => {
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Model" }).click();
+  const modelDialog = page.getByRole("dialog");
+  await expect(modelDialog).toBeVisible();
+  const dialogBox = await modelDialog.boundingBox();
+  expect(dialogBox?.x).toBeGreaterThanOrEqual(0);
+  expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  await page.keyboard.press("Escape");
+
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("/");
+  await expect(page.getByText("Skills and commands")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ fullPage: true, path: "/tmp/muses-agent-mobile.png" });
+});
+
 test("a real conversation survives refresh and continues with the latest token", async ({ page }) => {
   test.skip(process.env.RUN_AGENT_LIVE_E2E !== "1", "Requires a healthy live model provider.");
   await page.goto("/");
@@ -53,7 +111,8 @@ test("a real conversation survives refresh and continues with the latest token",
   await composer.fill("Reply with exactly: web agent ready");
   await composer.press("Enter");
   await expect(page.getByText("web agent ready", { exact: true })).toBeVisible({ timeout: 90_000 });
-  await expect(page.getByText(/Input \d/)).toBeVisible();
+  await page.getByRole("button", { name: "Context" }).hover();
+  await expect(page.getByText("Cache read", { exact: true })).toBeVisible();
 
   await page.reload();
   await expect(page.getByText("web agent ready", { exact: true })).toBeVisible();
@@ -93,7 +152,7 @@ test("a transport failure exposes same-thread recovery", async ({ page }) => {
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByText("This turn failed")).toBeHidden({ timeout: 90_000 });
   await expect(page.getByText("Transport recovered.", { exact: true })).toBeVisible();
-  await expect(page.getByText("The agent acts within the permissions of this session")).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 90_000 });
 });
 
 test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
@@ -148,7 +207,7 @@ test("stop cancels server work and returns the thread to an interactive state", 
   await stop.click();
 
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("The agent acts within the permissions of this session")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
 });
 
 function mockSuccessfulTurn(message: string, reply: string): string {
