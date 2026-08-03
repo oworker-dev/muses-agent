@@ -99,6 +99,12 @@ AGENT_EMBED_ALLOWED_ORIGINS=https://muses.example.com \
 EVE_NEXT_PRODUCTION_PORT=4275 npm run build
 ```
 
+`npm run build` verifies the generated Next.js route manifest after compilation.
+It fails if `/embed` does not contain the exact origins from
+`AGENT_EMBED_ALLOWED_ORIGINS`; this prevents a fail-closed
+`frame-ancestors 'none'` artifact from being promoted as a working Host
+integration.
+
 Eve 0.27.8 documents automatic local runtime startup from `next start`, but the
 installed Next.js 16.3 preview does not currently invoke that resolver reliably.
 For local production verification, start the two official services explicitly:

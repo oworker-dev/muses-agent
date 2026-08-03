@@ -32,6 +32,9 @@ npm run doctor:production
 
 The doctor must pass in the same environment used for the build. In particular,
 `AGENT_EMBED_ALLOWED_ORIGINS` and `EVE_NEXT_PRODUCTION_PORT` are build inputs.
+The standard build checks the generated route manifest and fails unless
+`/embed` contains those exact frame ancestors. Keep this artifact check in the
+release pipeline; a healthy standalone page does not prove Host embedding works.
 Do not continue when the doctor reports a shared Workflow database, implicit
 sandbox backend, missing telemetry, test fixture model, or disabled Shell
 approval.
@@ -101,4 +104,3 @@ the collector; the local mock collector is evidence tooling only.
 The selected production sandbox, MCP OAuth lifecycle, provider billing,
 deployed dashboards, SLO/load evidence, abuse controls, and deletion proof are
 still release gates tracked in the architecture document.
-

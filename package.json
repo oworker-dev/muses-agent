@@ -12,7 +12,7 @@
     "#evals/*": "./evals/*"
   },
   "scripts": {
-    "build": "npm run build:sdk && next build",
+    "build": "npm run build:sdk && next build && npm run verify:embed-build",
     "build:sdk": "npm run build --workspace @muses/agent-contracts && npm run build --workspace @muses/agent-client && npm run build --workspace @muses/agent-host && npm run build --workspace @muses/agent-ui",
     "db:migrate": "node scripts/migrate-agent-data.mjs",
     "dev": "npm run build:sdk && next dev",
@@ -27,6 +27,7 @@
     "test:e2e": "playwright test",
     "test:unit": "npm run build:sdk && node --test tests/unit/*.test.ts",
     "verify:ci": "npm run typecheck && npm run test:unit && npm run verify:provider-failures && npm run build:eve && npm run build && npm run verify:sdk-source-distribution && npm run verify:sdk-packages && npm run verify:custom-host-example",
+    "verify:embed-build": "node scripts/verify-embed-build.mjs",
     "verify:agent-run-api": "node scripts/verify-agent-run-api.mjs",
     "verify:custom-host-example": "npm run build:examples",
     "verify:sdk-packages": "npm run build:sdk && node scripts/verify-sdk-packages.mjs",
