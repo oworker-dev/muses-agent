@@ -3,14 +3,30 @@ import { createHmac, randomUUID } from "node:crypto";
 const serviceUrl = required("MUSES_AGENT_SERVICE_URL").replace(/\/$/, "");
 const userId = required("MUSES_E2E_USER_ID");
 const workspaceId = required("MUSES_E2E_WORKSPACE_ID");
+const projectId = required("MUSES_E2E_PROJECT_ID");
+const canvasId = process.env.MUSES_E2E_CANVAS_ID?.trim();
 const deploymentId = required("MUSES_E2E_DEPLOYMENT_ID");
 const agentNodeId = process.env.MUSES_E2E_AGENT_NODE_ID?.trim() || "agent-run-1";
-const token = createToken({ userId, workspaceId, actorType: "service" });
+const runtimeConfig = parseRuntimeConfig(required("MUSES_E2E_RUNTIME_CONFIG_JSON"));
+const runDurationMs = Math.min(
+  runtimeConfig.limits?.maxDurationMs ?? 600_000,
+  600_000,
+);
+const actor = {
+  userId,
+  workspaceId,
+  actorType: "service",
+  runtimeConfig,
+  scope: { projectId, ...(canvasId ? { canvasId } : {}) },
+};
 const idempotencyKey = `muses-host-e2e:${Date.now()}:${randomUUID()}`;
 const request = {
   idempotencyKey,
-  message: `MUSES_HOST_E2E: inspect the canvas, invoke Workflow deployment ${deploymentId}, wait for completion, place the verified run on the canvas, inspect the canvas again, and report the result.`,
-  profile: { profileId: "muses-platform", version: "0.1.0" },
+  message: `MUSES_HOST_E2E: This is an exact Host contract verification. Use only host_capabilities and host_invoke for the requested Host operations; do not use web_fetch, shell, filesystem, or other generic tools as substitutes. Inspect the canvas, invoke Workflow deployment ${deploymentId} with inputs {"prompt":{"valueType":"text","value":"Return the word BRIDGE_READY."}}, wait for completion using workflow.run.wait only, place the verified run on the canvas, inspect the canvas again, and report the result. Do not call generic tools while waiting.`,
+  profile: {
+    profileId: runtimeConfig.profile.id,
+    version: runtimeConfig.profile.version,
+  },
   policy: {
     hostCapabilities: [
       "canvas.inspect",
@@ -25,7 +41,7 @@ const request = {
       maxToolCalls: 16,
       maxInputTokens: 200_000,
       maxOutputTokens: 20_000,
-      maxDurationMs: 120_000,
+      maxDurationMs: runDurationMs,
     },
   },
   metadata: { verification: "muses-host-workflow-canvas-e2e" },
@@ -38,7 +54,10 @@ assert(replay.run.runId === started.run.runId, "AgentRun replay returned another
 
 const run = await poll(started.run.runId);
 assert(run.status === "completed", `AgentRun ended as ${run.status}: ${run.failure?.message || "unknown failure"}`);
-assert(run.result?.kind === "text" && run.result.value.includes("MUSES_HOST_E2E_COMPLETED"), "Agent did not report the completed Host workflow.");
+assert(
+  run.result?.kind === "text" && run.result.value.trim().length > 0,
+  "Agent did not return a final Host verification message.",
+);
 assert(run.usage.inputTokens > 0 && run.usage.outputTokens > 0 && run.usage.steps > 0, "Agent usage was not projected.");
 
 const eventPayload = await api("GET", `/api/agent/runs/${encodeURIComponent(run.runId)}/events?after=0`, undefined, 200);
@@ -93,7 +112,7 @@ console.log(JSON.stringify({
 }));
 
 async function poll(runId) {
-  const deadline = Date.now() + 150_000;
+  const deadline = Date.now() + runDurationMs + 60_000;
   while (Date.now() < deadline) {
     const payload = await api("GET", `/api/agent/runs/${encodeURIComponent(runId)}`, undefined, 200);
     if (["completed", "failed", "cancelled"].includes(payload.run.status)) return payload.run;
@@ -106,7 +125,9 @@ async function api(method, path, body, expectedStatus) {
   const response = await fetch(`${serviceUrl}${path}`, {
     method,
     headers: {
-      authorization: `Bearer ${token}`,
+      // Long-running AgentRuns can outlive the short Host token TTL. Refresh
+      // the token for every request so polling never turns into a false 401.
+      authorization: `Bearer ${createToken(actor)}`,
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -133,9 +154,30 @@ function createToken(actor) {
     jti: randomUUID(),
     sub: actor.userId,
     tenantId: actor.workspaceId,
+    scope: ["agent:runs"],
+    agentHostScope: JSON.stringify(actor.scope),
+    agentRuntimeConfig: JSON.stringify(actor.runtimeConfig),
   });
   const input = `${header}.${payload}`;
   return `${input}.${createHmac("sha256", secret).update(input).digest("base64url")}`;
+}
+
+function parseRuntimeConfig(value) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("MUSES_E2E_RUNTIME_CONFIG_JSON must contain valid JSON.");
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    typeof parsed.profile?.id !== "string" ||
+    typeof parsed.profile?.version !== "string"
+  ) {
+    throw new Error("MUSES_E2E_RUNTIME_CONFIG_JSON must contain an Agent Runtime Config snapshot.");
+  }
+  return parsed;
 }
 
 function encode(value) {

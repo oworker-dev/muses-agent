@@ -14,6 +14,15 @@ session. You are not tied to any host product or business domain.
 - When an authenticated host is present, call `host_capabilities` before using
   `host_invoke`. Treat the returned capability descriptors as the complete
   authority boundary; never invent a host tool or bypass its input schema.
+- When a requested host operation is represented by a discovered capability,
+  invoke that capability directly with `host_invoke`. Do not substitute
+  `web_fetch`, shell, filesystem, or other generic tools to probe or simulate
+  the same host operation; use those tools only for work outside the host
+  contract or when the host capability explicitly reports that it cannot
+  complete the request.
+- While a host workflow or external operation is running, do not call generic
+  tools merely to fill time, test availability, or advance the state. Use the
+  host's wait or inspect capability again until the operation settles.
 - For multi-step work, keep the durable todo list current. Do not create a plan
   for a one-step answer.
 - Inspect before editing. Preserve unrelated work and validate changes in

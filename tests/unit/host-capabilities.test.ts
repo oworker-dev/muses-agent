@@ -5,6 +5,7 @@ import type { SessionContext } from "eve/context";
 import { verifyAgentHostCapabilityRequest } from "@oworker/open-agent-host";
 
 import {
+  approvalForHostCapability,
   invokeHostCapability,
   listHostCapabilities,
   readHostCapabilityTimeoutMs,
@@ -12,6 +13,25 @@ import {
 } from "../../agent/lib/host-capabilities.ts";
 
 const SECRET = "01234567890123456789012345678901";
+
+test("auto-approves service grants and discovered read-only Host capabilities", () => {
+  assert.equal(
+    approvalForHostCapability({ actorType: "service", sideEffect: "external" }),
+    "not-applicable",
+  );
+  assert.equal(
+    approvalForHostCapability({ actorType: "user", sideEffect: "none" }),
+    "not-applicable",
+  );
+  assert.equal(
+    approvalForHostCapability({ actorType: "user", sideEffect: "project-write" }),
+    "user-approval",
+  );
+  assert.equal(
+    approvalForHostCapability({ actorType: "user", sideEffect: undefined }),
+    "user-approval",
+  );
+});
 
 test("bounds the Host capability timeout and covers synchronous media by default", () => {
   assert.equal(readHostCapabilityTimeoutMs({}), 120_000);

@@ -1,4 +1,4 @@
-import type { SessionContext } from "eve/context";
+import { defineState, type SessionContext } from "eve/context";
 import { createAgentHostCapabilityClient } from "@oworker/open-agent-host/client";
 import type { AgentHostInvocationIdentity } from "@oworker/open-agent-contracts/host";
 import type { AgentHostCapabilityDescriptor } from "../../contracts/host-capability";
@@ -9,6 +9,10 @@ import { allowedHostCapabilities, readAgentRunPolicy } from "./run-policy.ts";
 // turn. Keep the default inside the public upper bound so a host can still
 // choose a shorter timeout for read-only capabilities.
 const DEFAULT_TIMEOUT_MS = 120_000;
+
+export const hostCapabilityCatalogState = defineState<
+  readonly AgentHostCapabilityDescriptor[]
+>("open-agent.host-capability-catalog.v1", () => []);
 
 export function isHostCapabilityConfigured(
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -47,9 +51,40 @@ export async function listHostCapabilities(
 ): Promise<readonly AgentHostCapabilityDescriptor[]> {
   const capabilities = await hostClient(session).list({ signal });
   const allowed = allowedHostCapabilities(session);
-  return allowed
+  const visible = allowed
     ? capabilities.filter((capability) => allowed.has(capability.name))
     : capabilities;
+  return visible;
+}
+
+export function rememberHostCapabilities(
+  capabilities: readonly AgentHostCapabilityDescriptor[],
+): void {
+  hostCapabilityCatalogState.update(() => capabilities);
+}
+
+export function hostCapabilityApprovalDecision(input: {
+  readonly actorType: unknown;
+  readonly capability: unknown;
+}): "not-applicable" | "user-approval" {
+  if (input.actorType === "service") return "not-applicable";
+  if (typeof input.capability !== "string") return "user-approval";
+  const descriptor = hostCapabilityCatalogState
+    .get()
+    .find((candidate) => candidate.name === input.capability);
+  return approvalForHostCapability({
+    actorType: input.actorType,
+    sideEffect: descriptor?.sideEffect,
+  });
+}
+
+export function approvalForHostCapability(input: {
+  readonly actorType: unknown;
+  readonly sideEffect: AgentHostCapabilityDescriptor["sideEffect"] | undefined;
+}): "not-applicable" | "user-approval" {
+  return input.actorType === "service" || input.sideEffect === "none"
+    ? "not-applicable"
+    : "user-approval";
 }
 
 export async function invokeHostCapability(

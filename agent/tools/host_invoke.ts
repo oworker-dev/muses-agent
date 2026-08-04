@@ -2,6 +2,7 @@ import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
 import {
+  hostCapabilityApprovalDecision,
   invokeHostCapability,
   shouldExposeHostCapabilities,
 } from "../lib/host-capabilities";
@@ -13,10 +14,14 @@ const tool = defineTool({
     capability: z.string().trim().min(1).max(160),
     input: z.record(z.string(), z.unknown()).default({}),
   }),
-  approval: ({ session }) =>
-    session.auth.current?.attributes.actorType === "service"
-      ? "not-applicable"
-      : "user-approval",
+  approval: ({ session, toolInput }) =>
+    hostCapabilityApprovalDecision({
+      actorType: session.auth.current?.attributes.actorType,
+      capability:
+        toolInput && typeof toolInput === "object" && "capability" in toolInput
+          ? toolInput.capability
+          : undefined,
+    }),
   async execute(input, ctx) {
     return {
       capability: input.capability,

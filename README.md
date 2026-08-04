@@ -88,6 +88,28 @@ proves that a hung request and a stream interrupted after Provider output emit
 `step.failed` and `turn.failed`, park at `session.waiting`, and accept a
 successful follow-up in the same durable session without `session.failed`.
 
+The Muses bridge verification is an explicit live-provider check, not a
+deterministic unit test:
+
+```bash
+MUSES_AGENT_SERVICE_URL=http://127.0.0.1:3100 \
+MUSES_E2E_USER_ID=... \
+MUSES_E2E_WORKSPACE_ID=... \
+MUSES_E2E_PROJECT_ID=... \
+MUSES_E2E_CANVAS_ID=... \
+MUSES_E2E_DEPLOYMENT_ID=... \
+MUSES_E2E_RUNTIME_CONFIG_JSON='{"contractVersion":"0.1.0",...}' \
+MUSES_AGENT_HOST_JWT_SECRET=... \
+MUSES_AGENT_HOST_JWT_ISSUER=... \
+MUSES_AGENT_HOST_JWT_AUDIENCE=... \
+npm run verify:muses-host-e2e
+```
+
+The script refreshes its short-lived Host JWT on every request, verifies
+idempotent replay, and asserts the semantic Host event chain and Workflow
+output. A live Provider may still reject or time out a model request; use
+`scripts/mock-openai-responses.mjs` for a deterministic protocol check.
+
 ## Production build
 
 For a self-hosted production build, use the PostgreSQL Workflow World during
@@ -416,8 +438,10 @@ gates are complete.
 
 ## Host Capability bridge
 
-When `AGENT_HOST_TOOLS_URL` and `AGENT_HOST_TOOLS_SECRET` are configured, the
-runtime exposes `host_capabilities` and `host_invoke` as dynamic tools. They are
+When `AGENT_HOST_TOOLS_URL` and `AGENT_HOST_TOOLS_SECRET` are configured in the
+Eve runtime, the runtime exposes `host_capabilities` and `host_invoke` as
+dynamic tools. Both the Web process and the separate Eve process must receive
+the same URL and secret. They are
 absent from standalone sessions when the bridge is not configured, so the Agent
 remains useful without Muses. Requests use a short-lived HMAC signature over
 timestamp, method, path, and body, and carry tenant, raw principal, project, and
