@@ -25,10 +25,11 @@ The project has a working Eve runtime and a reusable AI Elements Web workspace:
 - optional iframe, native `AgentWorkspace`, and custom-host UI integration paths.
 - complete AI Elements and shadcn/ui source registries exported for reusable host composition.
 
-This is an integration preview, not a completed production release. MCP and
-skill lifecycle management, billing reconciliation, deployed telemetry and
-security evidence remain release gates. The standalone Agent runtime and Muses
-Host Capability bridge are implemented and build-tested; they are not a
+This is an integration preview, not a completed production release. MCP
+execution/lifecycle management, billing reconciliation, deployed telemetry and
+security evidence remain release gates. Host-published Skill manifests and
+content are now part of the versioned Runtime Config contract. The standalone
+Agent runtime and Host Capability bridge are implemented and build-tested; they are not a
 substitute for a real provider-backed production E2E. See
 [Architecture](docs/architecture.md), the
 [deployment runbook](docs/deployment.md), and the
@@ -330,7 +331,7 @@ and billing. Browser headers and `clientContext` are untrusted input.
 ## Tools and fixed evals
 
 Eve supplies the general-purpose file, Shell, Web, todo, clarification,
-Skill, and subagent loop. Muses Agent preserves those framework executors and
+Skill, and subagent loop. Open Agent preserves those framework executors and
 overrides only the `bash` approval policy. `AGENT_BASH_APPROVAL_MODE=risky`
 parks destructive, publishing, infrastructure-mutating, and external write
 commands for durable user approval. Unattended service/runtime principals are

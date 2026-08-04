@@ -203,6 +203,19 @@ Production still requires evidence on the selected deployment backend. Remaining
 Skills add instructions; they do not add authority. MCP connections and tools
 must be scoped by the current principal, session, and approval policy.
 
+Host-published Skill manifests and procedure markdown may be carried in the
+credential-free `AgentRuntimeConfigSnapshot.extensions` field. The Agent pins
+that snapshot at session start, validates that Profile grants have matching
+manifests, and resolves the Skill dynamically for the session. MCP entries may
+currently be declared as HTTPS endpoint metadata only; the runtime does not
+turn that metadata into a live connection until a host-provided auth and tool
+adapter is installed.
+
+Eve compaction remains deployment-level configuration. The Runtime Config
+contract exposes the selected threshold for UI and audit consistency, but it
+does not claim that a tenant can change Eve's compaction algorithm or threshold
+for an already compiled deployment.
+
 The extension control plane separates four facts that must not be conflated:
 
 1. the deployment catalog declares reviewed, immutable code and versions;
