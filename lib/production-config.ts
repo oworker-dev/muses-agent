@@ -81,6 +81,7 @@ export function inspectProductionConfiguration(
   }
 
   requireValue(environment, "OPENAI_API_KEY", error);
+  requireValue(environment, "AGENT_MODEL_MAX_OUTPUT_TOKENS", error);
   requireValue(environment, "AGENT_PROVIDER_HTTP_TIMEOUT_MS", error);
   requireValue(environment, "AGENT_DATABASE_URL", error);
   requireValue(environment, "AGENT_RUNTIME_URL", error);
@@ -194,6 +195,13 @@ export function inspectProductionConfiguration(
 
   inspectHttpUrl(environment.AGENT_RUNTIME_URL, "AGENT_RUNTIME_URL", { allowLoopbackHttp: true }, error);
   inspectHttpUrl(environment.OPENAI_BASE_URL, "OPENAI_BASE_URL", { allowLoopbackHttp: true }, error);
+  inspectInteger(
+    environment.AGENT_MODEL_MAX_OUTPUT_TOKENS,
+    "AGENT_MODEL_MAX_OUTPUT_TOKENS",
+    256,
+    128_000,
+    error,
+  );
   inspectInteger(
     environment.AGENT_PROVIDER_HTTP_TIMEOUT_MS,
     "AGENT_PROVIDER_HTTP_TIMEOUT_MS",

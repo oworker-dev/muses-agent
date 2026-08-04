@@ -20,6 +20,21 @@ export type AgentProfileOption = {
 };
 
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
+export const DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 4_096;
+
+export function readAgentModelMaxOutputTokens(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  const configured = environment.AGENT_MODEL_MAX_OUTPUT_TOKENS?.trim();
+  if (!configured) return DEFAULT_MODEL_MAX_OUTPUT_TOKENS;
+  const tokens = Number(configured);
+  if (!Number.isInteger(tokens) || tokens < 256 || tokens > 128_000) {
+    throw new Error(
+      "AGENT_MODEL_MAX_OUTPUT_TOKENS must be an integer from 256 to 128000.",
+    );
+  }
+  return tokens;
+}
 
 export function readAgentEvalContextWindowTokens(
   environment: Readonly<Record<string, string | undefined>> = process.env,

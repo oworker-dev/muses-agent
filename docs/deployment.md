@@ -67,6 +67,11 @@ Muses must have an active `llm` Provider Connection whose allowlist accepts the
 selected `AGENT_MODEL_ID`. A healthy Agent process with no such connection is
 not a successful production preflight.
 
+Set `AGENT_MODEL_MAX_OUTPUT_TOKENS` to the maximum output budget for one model
+step. The default deployment value is 4096. Keep it distinct from cumulative
+session and AgentRun budgets: compatible gateways may reserve or reject quota
+from this per-request value before any output is generated.
+
 ## Rollout And Rollback
 
 - Deploy an immutable image and record its Git commit, package version, Eve

@@ -5,7 +5,10 @@ import {
   inspectProductionConfiguration,
   readAgentSandboxBackend,
 } from "../../lib/production-config.ts";
-import { readAgentEvalContextWindowTokens } from "../../lib/agent-profile.ts";
+import {
+  readAgentEvalContextWindowTokens,
+  readAgentModelMaxOutputTokens,
+} from "../../lib/agent-profile.ts";
 
 const validEnvironment = {
   AGENT_DATABASE_SCHEMA: "muses_agent",
@@ -15,6 +18,7 @@ const validEnvironment = {
   AGENT_HOST_JWT_AUDIENCE: "muses-agent",
   AGENT_HOST_JWT_ISSUER: "https://muses.example.com",
   AGENT_HOST_JWT_SECRET: "a-production-secret-at-least-32-bytes-long",
+  AGENT_MODEL_MAX_OUTPUT_TOKENS: "4096",
   AGENT_PROVIDER_HTTP_TIMEOUT_MS: "120000",
   AGENT_RUNTIME_URL: "https://agent-runtime.example.com",
   AGENT_SANDBOX_BACKEND: "microsandbox",
@@ -140,6 +144,29 @@ test("requires a bounded provider HTTP timeout", () => {
   const diagnostics = inspectProductionConfiguration({
     ...validEnvironment,
     AGENT_PROVIDER_HTTP_TIMEOUT_MS: "0",
+  }, "24.18.1");
+  assert.ok(
+    diagnostics.some(
+      (diagnostic) => diagnostic.code === "integer-range" && diagnostic.level === "error",
+    ),
+  );
+});
+
+test("uses and validates a bounded per-request model output limit", () => {
+  assert.equal(readAgentModelMaxOutputTokens({}), 4_096);
+  assert.equal(
+    readAgentModelMaxOutputTokens({ AGENT_MODEL_MAX_OUTPUT_TOKENS: "8192" }),
+    8_192,
+  );
+  assert.throws(
+    () =>
+      readAgentModelMaxOutputTokens({ AGENT_MODEL_MAX_OUTPUT_TOKENS: "200" }),
+    /must be an integer from 256 to 128000/,
+  );
+
+  const diagnostics = inspectProductionConfiguration({
+    ...validEnvironment,
+    AGENT_MODEL_MAX_OUTPUT_TOKENS: "0",
   }, "24.18.1");
   assert.ok(
     diagnostics.some(

@@ -161,6 +161,12 @@ the user to continue or retry explicitly; the runtime does not automatically
 replay a possibly completed tool or external side effect. Caller cancellation
 remains distinct and propagates as Eve's normal cancellation flow.
 
+`AGENT_MODEL_MAX_OUTPUT_TOKENS` (4096 by default) bounds one Provider request.
+It prevents compatible gateways from reserving an unnecessarily large output
+budget before every Agent step. This is independent from Eve's cumulative
+session limits and the Host-owned AgentRun policy budget; deployments may tune
+it to a model's real output capacity and commercial policy.
+
 Production browser traffic must carry a short-lived host JWT. Configure
 `AGENT_HOST_JWT_SECRET`, `AGENT_HOST_JWT_ISSUER`, and
 `AGENT_HOST_JWT_AUDIENCE` from the deployment secret manager. Tokens must

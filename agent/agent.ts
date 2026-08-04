@@ -12,10 +12,12 @@ import {
   isAgentModelId,
   isAgentReasoningLevel,
   readAgentEvalContextWindowTokens,
+  readAgentModelMaxOutputTokens,
   type AgentModelId,
   type AgentReasoningLevel,
 } from "../lib/agent-profile";
 import { createProviderFetch } from "../lib/provider-http";
+import { providerOutputBudgetMiddleware } from "../lib/provider-output-budget";
 import { eveOwnedProviderRetryMiddleware } from "../lib/provider-retry-boundary";
 
 const openai = createOpenAI({
@@ -35,6 +37,7 @@ const evalFixtureModel = process.env.AGENT_EVAL_FIXTURE_MODEL === AUTONOMY_EVAL_
 const evalContextWindowTokens = evalFixtureModel
   ? readAgentEvalContextWindowTokens()
   : DEFAULT_CONTEXT_WINDOW_TOKENS;
+const modelMaxOutputTokens = readAgentModelMaxOutputTokens();
 
 function createAgentModel(modelId: AgentModelId, reasoning?: AgentReasoningLevel) {
   return wrapLanguageModel({
@@ -49,6 +52,7 @@ function createAgentModel(modelId: AgentModelId, reasoning?: AgentReasoningLevel
           },
         },
       }),
+      providerOutputBudgetMiddleware(modelMaxOutputTokens),
       eveOwnedProviderRetryMiddleware,
     ],
     model: openai(modelId),
