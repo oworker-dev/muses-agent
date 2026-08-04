@@ -2,7 +2,7 @@
   "name": "@oworker/open-agent-contracts",
   "version": "0.1.0-alpha.9",
   "private": true,
-  "description": "Host-neutral public contracts for the Muses Agent service.",
+  "description": "Host-neutral public contracts for the standalone Open Agent service.",
   "type": "module",
   "sideEffects": false,
   "files": [

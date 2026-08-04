@@ -2,7 +2,7 @@
   "name": "@oworker/open-agent-client",
   "version": "0.1.0-alpha.9",
   "private": true,
-  "description": "Headless TypeScript client for the Muses Agent service.",
+  "description": "Headless TypeScript client for the standalone Open Agent service.",
   "type": "module",
   "sideEffects": false,
   "files": [

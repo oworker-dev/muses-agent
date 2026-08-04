@@ -1,8 +1,8 @@
 # @oworker/open-agent-ui
 
-Reusable React workspace and AI Elements for the independent Muses Agent
+Reusable React workspace and AI Elements for the independent Open Agent
 service. The package owns presentation and durable Eve session projection, but
-does not own host identity, model entitlement, billing, or Muses canvas state.
+does not own host identity, model entitlement, billing, or host business state.
 
 Import the precompiled stylesheet once in the host application:
 

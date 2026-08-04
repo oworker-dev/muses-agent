@@ -2,7 +2,7 @@
   "name": "@oworker/open-agent-example-custom-host-react",
   "version": "0.1.0-alpha.9",
   "private": true,
-  "description": "A non-iframe React host that owns its UI and consumes the Muses AgentSession SDK.",
+  "description": "A non-iframe React host that owns its UI and consumes the Open AgentSession SDK.",
   "type": "module",
   "files": [
     "dist",

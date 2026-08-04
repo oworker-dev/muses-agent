@@ -2,7 +2,7 @@
   "name": "@oworker/open-agent-ui",
   "version": "0.1.0-alpha.9",
   "private": true,
-  "description": "Reusable React workspace and AI Elements for the Muses Agent service.",
+  "description": "Reusable React workspace and AI Elements for the Open Agent service.",
   "type": "module",
   "sideEffects": [
     "./dist/styles.css"

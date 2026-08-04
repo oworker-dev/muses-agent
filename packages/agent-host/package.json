@@ -2,7 +2,7 @@
   "name": "@oworker/open-agent-host",
   "version": "0.1.0-alpha.9",
   "private": true,
-  "description": "Server-side Host Capability SDK for Muses Agent integrations.",
+  "description": "Server-side Host Capability SDK for Open Agent integrations.",
   "type": "module",
   "sideEffects": false,
   "files": [
