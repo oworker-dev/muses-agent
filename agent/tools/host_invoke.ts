@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import {
   invokeHostCapability,
-  isHostCapabilityConfigured,
+  shouldExposeHostCapabilities,
 } from "../lib/host-capabilities";
 
 const tool = defineTool({
@@ -31,6 +31,6 @@ const tool = defineTool({
 
 export default defineDynamic({
   events: {
-    "session.started": () => (isHostCapabilityConfigured() ? tool : null),
+    "session.started": (_event, ctx) => (shouldExposeHostCapabilities(ctx) ? tool : null),
   },
 });

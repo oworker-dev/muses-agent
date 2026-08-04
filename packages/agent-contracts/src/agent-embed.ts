@@ -1,4 +1,8 @@
 import type { AgentRunPolicy, JsonValue } from "./agent-run.js";
+import {
+  parseAgentRuntimeConfigSnapshot,
+  type AgentRuntimeConfigSnapshot,
+} from "./runtime-config.js";
 
 export const AGENT_EMBED_CONTRACT_VERSION = "0.1.0" as const;
 
@@ -16,6 +20,8 @@ export type AgentEmbedConfigureMessage = {
     readonly id: string;
     readonly version: string;
   };
+  /** UI catalog hint. Runtime authorization still comes from the access token. */
+  readonly runtimeConfig?: AgentRuntimeConfigSnapshot;
   readonly runPolicy?: AgentRunPolicy;
   readonly clientContext?: string | readonly string[] | Readonly<Record<string, JsonValue>>;
   readonly locale?: "en" | "zh-CN";
@@ -128,6 +134,13 @@ export function parseAgentEmbedHostMessage(value: unknown): AgentEmbedHostMessag
     value.theme !== undefined && value.theme !== "dark" && value.theme !== "light" && value.theme !== "system"
   ) {
     return undefined;
+  }
+  if (value.runtimeConfig !== undefined) {
+    try {
+      parseAgentRuntimeConfigSnapshot(value.runtimeConfig);
+    } catch {
+      return undefined;
+    }
   }
   return value as AgentEmbedHostMessage;
 }

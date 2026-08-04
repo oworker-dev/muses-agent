@@ -7,15 +7,9 @@ import {
   createHttpAgentThreadStorage,
   type AgentThread,
   type AgentRuntimeStatus,
-} from "@muses/agent-ui";
-import {
-  AGENT_UI_DEFAULT_PREFERENCES,
-  AGENT_UI_COMMANDS,
-  AGENT_UI_EXTENSIONS,
-  AGENT_UI_MENTIONS,
-  AGENT_UI_MODELS,
-  AGENT_UI_REASONING_LEVELS,
-} from "@/lib/agent-ui-config";
+} from "@oworker/open-agent-ui";
+import { createAgentUiConfig, AGENT_UI_MENTIONS } from "@/lib/agent-ui-config";
+import { DEFAULT_AGENT_RUNTIME_CONFIG } from "@/lib/agent-runtime-config";
 import {
   AGENT_EMBED_CONTRACT_VERSION,
   isAllowedAgentEmbedParentOrigin,
@@ -150,20 +144,21 @@ export function AgentEmbed({ allowedOrigins, runtimeStatus }: { readonly allowed
   if (!configuration || !client || !threadStorage) {
     return <main className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">Connecting to host…</main>;
   }
+  const ui = createAgentUiConfig(configuration.runtimeConfig ?? DEFAULT_AGENT_RUNTIME_CONFIG);
   return (
     <AgentWorkspace
-      agentName="muses-agent"
+      agentName="open-agent"
       client={client}
-      commands={AGENT_UI_COMMANDS}
-      defaultPreferences={AGENT_UI_DEFAULT_PREFERENCES}
-      extensions={AGENT_UI_EXTENSIONS}
+      commands={ui.commands}
+      defaultPreferences={ui.defaultPreferences}
+      extensions={ui.extensions}
       key={`${configuration.storageKey}:${configuration.profile.id}@${configuration.profile.version}`}
-      models={AGENT_UI_MODELS}
+      models={ui.models}
       mentions={AGENT_UI_MENTIONS}
       onEvent={onEvent}
       onDeleteThread={onDeleteThread}
       productName="Agent"
-      reasoningLevels={AGENT_UI_REASONING_LEVELS}
+      reasoningLevels={ui.reasoningLevels}
       runtimeStatus={runtimeStatus}
       storageKey={configuration.storageKey}
       threadStorage={threadStorage}

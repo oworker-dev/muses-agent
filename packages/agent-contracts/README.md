@@ -1,4 +1,4 @@
-# @muses/agent-contracts
+# @oworker/open-agent-contracts
 
 Versioned, host-neutral TypeScript contracts for AgentRun, Agent embed, and
 Host Capability integrations.

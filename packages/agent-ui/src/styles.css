@@ -41,7 +41,7 @@
   --color-sidebar: var(--sidebar);
 }
 
-.muses-agent-ui {
+.open-agent-ui {
   background: var(--background, oklch(0.971 0 0));
   color: var(--foreground, oklch(0.16 0 0));
   font-family: var(--agent-ui-font-sans, ui-sans-serif, system-ui, sans-serif);

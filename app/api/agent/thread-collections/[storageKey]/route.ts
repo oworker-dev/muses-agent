@@ -1,5 +1,5 @@
-import type { AgentThreadCollection } from "@muses/agent-ui/agent-workspace";
-import { parseThreadCollection } from "@muses/agent-ui/agent-workspace";
+import type { AgentThreadCollection } from "@oworker/open-agent-ui/agent-workspace";
+import { parseThreadCollection } from "@oworker/open-agent-ui/agent-workspace";
 import { createPostgresThreadCollectionStoreFromEnvironment } from "@/server/data/thread-collection-store";
 import { authenticateHostRequest } from "@/server/http/host-request-auth";
 

@@ -1,2 +1,2 @@
-/** @deprecated Import from @muses/agent-contracts/host-capability. */
-export * from "@muses/agent-contracts/host-capability";
+/** @deprecated Import from @oworker/open-agent-contracts/host-capability. */
+export * from "@oworker/open-agent-contracts/host-capability";

@@ -2,32 +2,55 @@ import type {
   AgentExtensionInfo,
   AgentPromptMenuItem,
   AgentThreadPreferences,
-} from "@muses/agent-ui";
+} from "@oworker/open-agent-ui";
 import {
-  AGENT_MODEL_OPTIONS,
-  AGENT_REASONING_LEVELS,
-  DEFAULT_AGENT_MODEL_ID,
-  DEFAULT_AGENT_REASONING,
-} from "./agent-profile.ts";
+  DEFAULT_AGENT_RUNTIME_CONFIG,
+  findAgentRuntimeModel,
+  type AgentRuntimeConfigSnapshot,
+} from "./agent-runtime-config.ts";
 
-export const AGENT_UI_MODELS = AGENT_MODEL_OPTIONS;
+export function createAgentUiConfig(config: AgentRuntimeConfigSnapshot = DEFAULT_AGENT_RUNTIME_CONFIG) {
+  const modelOptions = config.models.map(({ contextWindowTokens, id, label }) => ({
+    contextWindowTokens,
+    id,
+    label,
+  }));
+  const defaultModel = findAgentRuntimeModel(config, config.defaultModelId) ?? config.models[0]!;
+  const skills = config.profile.allowedSkills.filter((extension) => extension.id === "software-task");
+  return {
+    models: modelOptions,
+    reasoningLevels: defaultModel.reasoningLevels,
+    defaultPreferences: {
+      modelId: defaultModel.id,
+      reasoning: defaultModel.defaultReasoning,
+    },
+    commands: skills.map((skill) => ({
+      id: skill.id,
+      label: skill.id,
+      value: `/${skill.id}`,
+      description: `Load the ${skill.id} skill.`,
+      keywords: ["skill"],
+    })),
+    extensions: skills.map((skill) => ({
+      id: skill.id,
+      kind: "skill" as const,
+      label: skill.id,
+      status: "available" as const,
+      version: skill.version,
+      description: `Published ${skill.id} skill.`,
+    })),
+  } as const;
+}
 
-export const AGENT_UI_REASONING_LEVELS: readonly string[] = AGENT_REASONING_LEVELS;
+const DEFAULT_UI_CONFIG = createAgentUiConfig();
 
-export const AGENT_UI_DEFAULT_PREFERENCES: AgentThreadPreferences = {
-  modelId: DEFAULT_AGENT_MODEL_ID,
-  reasoning: DEFAULT_AGENT_REASONING,
-};
+export const AGENT_UI_MODELS = DEFAULT_UI_CONFIG.models;
 
-export const AGENT_UI_COMMANDS: readonly AgentPromptMenuItem[] = [
-  {
-    id: "software-task",
-    label: "Software task",
-    value: "/software-task",
-    description: "Load the published software workspace procedure.",
-    keywords: ["skill", "code", "debug", "review"],
-  },
-];
+export const AGENT_UI_REASONING_LEVELS: readonly string[] = DEFAULT_UI_CONFIG.reasoningLevels;
+
+export const AGENT_UI_DEFAULT_PREFERENCES: AgentThreadPreferences = DEFAULT_UI_CONFIG.defaultPreferences;
+
+export const AGENT_UI_COMMANDS: readonly AgentPromptMenuItem[] = DEFAULT_UI_CONFIG.commands;
 
 export const AGENT_UI_MENTIONS: readonly AgentPromptMenuItem[] = [
   {
@@ -39,13 +62,4 @@ export const AGENT_UI_MENTIONS: readonly AgentPromptMenuItem[] = [
   },
 ];
 
-export const AGENT_UI_EXTENSIONS: readonly AgentExtensionInfo[] = [
-  {
-    id: "software-task",
-    kind: "skill",
-    label: "Software task",
-    status: "available",
-    version: "1.0.0",
-    description: "Inspect, implement, test, and report a software workspace change.",
-  },
-];
+export const AGENT_UI_EXTENSIONS: readonly AgentExtensionInfo[] = DEFAULT_UI_CONFIG.extensions;

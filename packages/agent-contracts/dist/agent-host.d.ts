@@ -4,16 +4,16 @@ export type AgentHostTokenClaims = {
     readonly sub: string;
     readonly tenantId: string;
     readonly actorType: "user" | "service";
-    readonly projectId?: string;
-    readonly canvasId?: string;
-    readonly scope?: readonly string[];
+    /** Opaque host-defined scope values. The Agent never interprets their keys. */
+    readonly hostScope?: Readonly<Record<string, string>>;
+    readonly permissions?: readonly string[];
 };
 export type AgentHostInvocationIdentity = {
     readonly tenantId: string;
     readonly principalId: string;
     readonly actorType: "user" | "service";
-    readonly projectId?: string;
-    readonly canvasId?: string;
+    /** Opaque host-defined scope values carried through the signed adapter call. */
+    readonly scope?: Readonly<Record<string, string>>;
 };
 export type AgentHostToolDescriptor = {
     readonly name: string;

@@ -16,7 +16,7 @@ import { authenticateHostRequest } from "../../server/http/host-request-auth.ts"
 
 const SECRET = "01234567890123456789012345678901";
 const ISSUER = "https://muses.extension-routes.test";
-const AUDIENCE = "muses-agent";
+const AUDIENCE = "open-agent";
 const MANAGE_SCOPE = "agent.extensions.manage";
 const params = { extensionId: "software-task", version: "1.0.0" } as const;
 

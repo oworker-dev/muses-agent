@@ -40,8 +40,6 @@ test("projects AgentRun correlation fields without prompt or output content", ()
           agentProfileVersion: "0.1.0",
           agentRunId: "arun_12345678",
           agentUpstreamTraceParent: TRACE_PARENT,
-          canvasId: "canvas-123",
-          projectId: "project-123",
           tenantId: "tenant-123",
         },
       },
@@ -50,14 +48,12 @@ test("projects AgentRun correlation fields without prompt or output content", ()
   } as const;
 
   assert.deepEqual(agentCorrelationAttributes(session), {
-    "muses.agent.canvas_id": "canvas-123",
-    "muses.agent.correlation_id": "corr-123",
-    "muses.agent.profile_id": "general-purpose",
-    "muses.agent.profile_version": "0.1.0",
-    "muses.agent.project_id": "project-123",
-    "muses.agent.run_id": "arun_12345678",
-    "muses.agent.session_id": "session-123",
-    "muses.agent.tenant_id": "tenant-123",
+    "open_agent.correlation_id": "corr-123",
+    "open_agent.profile_id": "general-purpose",
+    "open_agent.profile_version": "0.1.0",
+    "open_agent.run_id": "arun_12345678",
+    "open_agent.session_id": "session-123",
+    "open_agent.tenant_id": "tenant-123",
   });
   assert.equal(upstreamTraceContext(session)?.traceId, "4bf92f3577b34da6a3ce929d0e0e4736");
 });

@@ -40,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
   } catch {
     return problem(400, "invalid_json", "The request body must be valid JSON.");
   }
-  const parsed = parseStartAgentRun(input);
+  const parsed = parseStartAgentRun(input, authenticated.runtimeConfig);
   if (!parsed.ok) return problem(400, "invalid_agent_run", parsed.error);
   if (!extensionStore) return databaseUnavailable();
 

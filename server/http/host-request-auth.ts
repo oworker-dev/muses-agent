@@ -7,12 +7,17 @@ import {
 import { hostJwtAuthFromEnvironment } from "../../agent/lib/host-auth.ts";
 import { sessionOwnerFromAuth } from "../../agent/lib/session-ownership-auth.ts";
 import type { AgentSessionOwner } from "../data/session-ownership-store.ts";
+import {
+  resolveAgentRuntimeConfig,
+  type AgentRuntimeConfigSnapshot,
+} from "../../lib/agent-runtime-config.ts";
 
 export type HostRequestAuthentication =
   | {
       readonly accessToken: string;
       readonly identity: AgentSessionOwner;
       readonly ok: true;
+      readonly runtimeConfig: AgentRuntimeConfigSnapshot;
       readonly scopes: ReadonlySet<string>;
     }
   | { readonly ok: false; readonly response: Response };
@@ -37,6 +42,7 @@ export async function authenticateHostRequest(
       accessToken,
       identity: sessionOwnerFromAuth(auth),
       ok: true,
+      runtimeConfig: resolveAgentRuntimeConfig(auth.attributes),
       scopes: authScopes(auth.attributes.scope),
     };
   } catch (error) {

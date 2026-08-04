@@ -1,9 +1,11 @@
 import type {
   AgentExtensionRef,
+  AgentRunLimits,
   AgentRunPolicy,
   AgentProfileRef as ContractAgentProfileRef,
 } from "../contracts/agent-run.ts";
-import { AGENT_PROFILE_OPTIONS } from "./agent-profile.ts";
+import type { AgentRuntimeConfigSnapshot } from "@oworker/open-agent-contracts/runtime-config";
+import { DEFAULT_AGENT_RUNTIME_CONFIG } from "./agent-runtime-config.ts";
 
 export type AgentExtensionKind = "mcp" | "skill";
 export type AgentExtensionStatus = "published" | "revoked";
@@ -41,12 +43,12 @@ export function resolveAgentRunPolicy(
   profileRef: ContractAgentProfileRef,
   requested: AgentRunPolicy,
   revokedRefs: ReadonlySet<string> = revokedExtensionRefsFromEnvironment(),
+  config: AgentRuntimeConfigSnapshot = DEFAULT_AGENT_RUNTIME_CONFIG,
 ): AgentRunPolicy {
-  const profile = AGENT_PROFILE_OPTIONS.find(
-    (candidate) =>
-      candidate.profileId === profileRef.profileId && candidate.version === profileRef.version,
-  );
-  if (!profile) throw new Error("The Agent profile is not published.");
+  const profile = config.profile;
+  if (profile.id !== profileRef.profileId || profile.version !== profileRef.version) {
+    throw new Error("The Agent profile is not published by the active runtime config.");
+  }
 
   const skills = resolveExtensionRefs(
     "skill",
@@ -60,13 +62,41 @@ export function resolveAgentRunPolicy(
     profile.allowedMcpConnections,
     revokedRefs,
   );
+  const limits = mergeAgentRunLimits(config.limits, requested.limits);
 
   return {
     ...(requested.hostCapabilities ? { hostCapabilities: requested.hostCapabilities } : {}),
-    ...(requested.limits ? { limits: requested.limits } : {}),
+    ...(limits ? { limits } : {}),
     mcpConnections,
     skills,
   };
+}
+
+export function mergeAgentRunLimits(
+  configured: AgentRunLimits | undefined,
+  requested: AgentRunLimits | undefined,
+): AgentRunLimits | undefined {
+  if (!configured && !requested) return undefined;
+  const merged: Partial<Record<keyof AgentRunLimits, number>> = {};
+  for (const name of [
+    "maxDurationMs",
+    "maxInputTokens",
+    "maxModelCalls",
+    "maxOutputTokens",
+    "maxToolCalls",
+    "maxTurns",
+  ] as const) {
+    const configuredValue = configured?.[name];
+    const requestedValue = requested?.[name];
+    if (configuredValue !== undefined && requestedValue !== undefined) {
+      merged[name] = Math.min(configuredValue, requestedValue);
+    } else if (configuredValue !== undefined) {
+      merged[name] = configuredValue;
+    } else if (requestedValue !== undefined) {
+      merged[name] = requestedValue;
+    }
+  }
+  return Object.keys(merged).length ? merged : undefined;
 }
 
 export function extensionRefKey(ref: AgentExtensionRef): string {

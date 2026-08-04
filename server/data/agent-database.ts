@@ -6,7 +6,7 @@ export type AgentDatabaseConfig = {
   readonly schema: string;
 };
 
-const DEFAULT_SCHEMA = "muses_agent";
+const DEFAULT_SCHEMA = "open_agent";
 const globalAgentDatabase = globalThis as typeof globalThis & {
   __musesAgentDatabasePools?: Map<string, Pool>;
 };
@@ -38,7 +38,7 @@ export function getAgentDatabasePool(config: AgentDatabaseConfig): Pool {
   if (existing) return existing;
 
   const pool = new Pool({
-    application_name: "muses-agent",
+    application_name: "open-agent",
     connectionString: config.connectionString,
     max: config.maxPoolSize,
   });

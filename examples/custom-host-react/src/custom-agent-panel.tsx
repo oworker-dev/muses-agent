@@ -3,12 +3,12 @@
 import {
   createEveAgentSessionClient,
   type AgentSession,
-} from "@muses/agent-client/eve-session";
+} from "@oworker/open-agent-client/eve-session";
 import type {
   AgentSessionCursor,
   AgentSessionEvent,
   AgentSessionInputRequest,
-} from "@muses/agent-contracts/agent-session";
+} from "@oworker/open-agent-contracts/agent-session";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 export type CustomAgentPanelProps = {
@@ -30,7 +30,7 @@ const EMPTY_SESSION: PersistedSession = { events: [] };
 export function CustomAgentPanel({
   baseUrl,
   getAccessToken,
-  storageKey = "muses-agent:custom-host:v1",
+  storageKey = "open-agent:custom-host:v1",
   title = "Agent",
 }: CustomAgentPanelProps) {
   const restored = useMemo(() => loadSession(storageKey), [storageKey]);

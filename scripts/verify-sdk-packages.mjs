@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const workspaceRoot = new URL("../", import.meta.url).pathname;
-const temporaryRoot = await mkdtemp(join(tmpdir(), "muses-agent-sdk-"));
+const temporaryRoot = await mkdtemp(join(tmpdir(), "open-agent-sdk-"));
 const packageDirectory = join(temporaryRoot, "packages");
 const consumerDirectory = join(temporaryRoot, "consumer");
 const pnpmConsumerDirectory = join(temporaryRoot, "pnpm-consumer");
@@ -17,10 +17,10 @@ try {
     mkdir(pnpmConsumerDirectory, { recursive: true }),
   ]);
   for (const workspace of [
-    "@muses/agent-contracts",
-    "@muses/agent-client",
-    "@muses/agent-host",
-    "@muses/agent-ui",
+    "@oworker/open-agent-contracts",
+    "@oworker/open-agent-client",
+    "@oworker/open-agent-host",
+    "@oworker/open-agent-ui",
   ]) {
     execFileSync(
       "npm",
@@ -45,15 +45,15 @@ try {
 
   const probe = `
     import assert from "node:assert/strict";
-    import { AGENT_RUN_CONTRACT_VERSION } from "@muses/agent-contracts";
-    import { AGENT_SESSION_CONTRACT_VERSION } from "@muses/agent-contracts/agent-session";
-    import { AGENT_EMBED_CONTRACT_VERSION } from "@muses/agent-contracts/embed";
-    import { AGENT_CLIENT_VERSION, createAgentRunClient } from "@muses/agent-client";
-    import { AGENT_HOST_SIGNATURE_VERSION, signAgentHostCapabilityRequest } from "@muses/agent-host";
-    import { AGENT_UI_VERSION, AgentWorkspace } from "@muses/agent-ui";
-    import { Conversation } from "@muses/agent-ui/ai-elements/conversation";
-    import { Context, ModelSelector } from "@muses/agent-ui/ai-elements";
-    import { Button } from "@muses/agent-ui/ui/button";
+    import { AGENT_RUN_CONTRACT_VERSION } from "@oworker/open-agent-contracts";
+    import { AGENT_SESSION_CONTRACT_VERSION } from "@oworker/open-agent-contracts/agent-session";
+    import { AGENT_EMBED_CONTRACT_VERSION } from "@oworker/open-agent-contracts/embed";
+    import { AGENT_CLIENT_VERSION, createAgentRunClient } from "@oworker/open-agent-client";
+    import { AGENT_HOST_SIGNATURE_VERSION, signAgentHostCapabilityRequest } from "@oworker/open-agent-host";
+    import { AGENT_UI_VERSION, AgentWorkspace } from "@oworker/open-agent-ui";
+    import { Conversation } from "@oworker/open-agent-ui/ai-elements/conversation";
+    import { Context, ModelSelector } from "@oworker/open-agent-ui/ai-elements";
+    import { Button } from "@oworker/open-agent-ui/ui/button";
     assert.equal(AGENT_RUN_CONTRACT_VERSION, "0.1.0-draft");
     assert.equal(AGENT_SESSION_CONTRACT_VERSION, "0.1.0-draft");
     assert.equal(AGENT_EMBED_CONTRACT_VERSION, "0.1.0");
@@ -67,7 +67,7 @@ try {
     assert.equal(typeof Context, "function");
     assert.equal(typeof ModelSelector, "function");
     assert.equal(typeof Button, "function");
-    assert.match(import.meta.resolve("@muses/agent-ui/styles.css"), /styles\.css$/);
+    assert.match(import.meta.resolve("@oworker/open-agent-ui/styles.css"), /styles\.css$/);
   `;
   execFileSync("node", ["--input-type=module", "--eval", probe], {
     cwd: consumerDirectory,

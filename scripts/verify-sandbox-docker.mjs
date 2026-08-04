@@ -11,9 +11,9 @@ if (process.env.RUN_SANDBOX_DOCKER_EVAL !== "1") {
 assertDockerAvailable();
 
 const suffix = randomUUID().replaceAll("-", "");
-const templateKey = `muses-agent-sandbox-eval-${suffix}`;
-const sessionAKey = `muses-agent-sandbox-eval-a-${suffix}`;
-const sessionBKey = `muses-agent-sandbox-eval-b-${suffix}`;
+const templateKey = `open-agent-sandbox-eval-${suffix}`;
+const sessionAKey = `open-agent-sandbox-eval-a-${suffix}`;
+const sessionBKey = `open-agent-sandbox-eval-b-${suffix}`;
 const backend = docker({ networkPolicy: "deny-all", pullPolicy: "never" });
 const handles = [];
 
@@ -21,7 +21,7 @@ try {
   const prewarm = await backend.prewarm({
     templateKey,
     runtimeContext: { appRoot: process.cwd() },
-    seedFiles: [{ path: "seed/README.txt", content: "seeded by muses-agent\n" }],
+    seedFiles: [{ path: "seed/README.txt", content: "seeded by open-agent\n" }],
   });
   assert.equal(prewarm.reused, false, "the isolated eval must build a fresh template");
 
@@ -36,7 +36,7 @@ try {
   assert.equal(first.session.resolvePath("notes/result.txt"), "/workspace/notes/result.txt");
   assert.equal(
     await first.session.readTextFile({ path: "seed/README.txt" }),
-    "seeded by muses-agent\n",
+    "seeded by open-agent\n",
   );
 
   await first.session.writeTextFile({ path: "notes/result.txt", content: "session-a-secret\n" });
@@ -65,7 +65,7 @@ try {
   assert.equal(crossSession.exitCode, 0, "session B observed session A's workspace");
   assert.equal(
     await second.session.readTextFile({ path: "seed/README.txt" }),
-    "seeded by muses-agent\n",
+    "seeded by open-agent\n",
   );
 
   const network = await first.session.run({

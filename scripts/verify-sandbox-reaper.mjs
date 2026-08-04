@@ -12,8 +12,8 @@ assertDockerAvailable();
 const suffix = randomUUID().replaceAll("-", "");
 const connectionString = process.env.AGENT_DATABASE_URL?.trim();
 if (!connectionString) throw new Error("AGENT_DATABASE_URL is required for sandbox reaper verification.");
-const schema = `muses_agent_reaper_${suffix}`;
-const database = new pg.Pool({ application_name: "muses-agent-reaper-eval", connectionString, max: 1 });
+const schema = `open_agent_reaper_${suffix}`;
+const database = new pg.Pool({ application_name: "open-agent-reaper-eval", connectionString, max: 1 });
 await migrate(schema, database);
 const deletionStore = createPostgresSandboxDeletionStore({ connectionString, maxPoolSize: 1, schema });
 const owner = {

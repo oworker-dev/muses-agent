@@ -20,7 +20,7 @@ export default defineSandbox({
     const sandbox = await use();
     await sandbox.setNetworkPolicy("deny-all");
     await sandbox.writeTextFile({
-      path: "/workspace/.muses-agent-session",
+      path: "/workspace/.open-agent-session",
       content: `${ctx.session.id}\n`,
     });
   },

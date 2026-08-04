@@ -4,7 +4,7 @@ import {
   AgentClientContractError,
   AgentClientHttpError,
   createAgentRunClient,
-} from "@muses/agent-client";
+} from "@oworker/open-agent-client";
 
 const run = {
   contractVersion: "0.1.0-draft",

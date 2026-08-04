@@ -6,19 +6,18 @@ import {
   createAgentHostCapabilityRegistry,
   signAgentHostCapabilityRequest,
   verifyAgentHostCapabilityRequest,
-} from "@muses/agent-host";
+} from "@oworker/open-agent-host";
 
 const SECRET = "host-capability-secret-32-characters-minimum";
 const NOW = 1_786_000_000_000;
 const IDENTITY = {
   actorType: "service",
-  canvasId: "canvas-1",
   principalId: "user-1",
-  projectId: "project-1",
+  scope: { workspace: "project-1", surface: "canvas-1" },
   tenantId: "workspace-1",
 } as const;
 
-test("Host SDK signs and verifies one scoped capability request", () => {
+test("Host SDK signs and verifies one opaque scoped capability request", () => {
   const body = JSON.stringify({ capability: "canvas.inspect" });
   const headers = signAgentHostCapabilityRequest({
     body,
@@ -41,7 +40,7 @@ test("Host SDK signs and verifies one scoped capability request", () => {
 
 test("Host SDK rejects tampering, stale requests, and invalid scope", () => {
   const headers = signAgentHostCapabilityRequest({
-    identity: { ...IDENTITY, canvasId: undefined },
+    identity: { ...IDENTITY, scope: undefined },
     method: "GET",
     secret: SECRET,
     timestamp: NOW,
@@ -83,13 +82,13 @@ test("Host SDK rejects tampering, stale requests, and invalid scope", () => {
   );
   assert.throws(
     () => signAgentHostCapabilityRequest({
-      identity: { actorType: "user", canvasId: "canvas-1", principalId: "user-1", tenantId: "workspace-1" },
+      identity: { actorType: "user", principalId: "user-1", scope: { "bad scope": "value" }, tenantId: "workspace-1" },
       method: "GET",
       secret: SECRET,
       url: "https://host.example/capabilities",
     }),
     (error: unknown) => error instanceof AgentHostCapabilityAuthError
-      && error.code === "host-capability-project-required",
+      && error.code === "host-capability-scope-invalid",
   );
 });
 
@@ -112,14 +111,17 @@ test("Host SDK client rotates scope and validates capability responses", async (
         contractVersion: "0.1.0-draft",
       });
     },
-    identity: async () => ({ ...IDENTITY, projectId: `project-${++identityReads}`, canvasId: undefined }),
+    identity: async () => ({
+      ...IDENTITY,
+      scope: { workspace: `project-${++identityReads}`, surface: "canvas-1" },
+    }),
     now: () => NOW,
     secret: SECRET,
   });
 
   const capabilities = await client.list();
   assert.equal(capabilities[0]?.name, "canvas.inspect");
-  assert.equal(requests[0]?.headers.get("x-agent-host-project"), "project-1");
+  assert.ok(requests[0]?.headers.get("x-agent-host-scope"));
   assert.equal(requests[0]?.redirect, "error");
 });
 

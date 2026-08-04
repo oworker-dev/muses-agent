@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
-import { TooltipProvider } from "@muses/agent-ui";
+import { TooltipProvider } from "@oworker/open-agent-ui";
 import "./globals.css";
-import "@muses/agent-ui/styles.css";
+import "@oworker/open-agent-ui/styles.css";
 
 const sans = Geist({
   variable: "--font-sans",
@@ -20,7 +20,7 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "muses-agent",
+  title: "open-agent",
   description: "A Next.js starter for eve agents with AI Elements.",
 };
 

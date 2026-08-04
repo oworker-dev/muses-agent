@@ -4,7 +4,7 @@ const diagnostics = inspectProductionConfiguration(process.env);
 const errors = diagnostics.filter((diagnostic) => diagnostic.level === "error");
 const warnings = diagnostics.filter((diagnostic) => diagnostic.level === "warning");
 
-console.log(`muses-agent production doctor ${errors.length === 0 ? "pass" : "fail"}.`);
+console.log(`open-agent production doctor ${errors.length === 0 ? "pass" : "fail"}.`);
 
 if (warnings.length > 0) {
   console.log("\nWarnings:");

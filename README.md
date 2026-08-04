@@ -1,6 +1,6 @@
-# muses-agent
+# open-agent
 
-`muses-agent` is a standalone, Web-first autonomous agent. It targets a Codex-like
+`open-agent` is a standalone, Web-first autonomous agent. It targets a Codex-like
 product shape while keeping the runtime independent of Muses, canvases, image
 generation, presentations, and other host-specific domains.
 
@@ -103,7 +103,7 @@ Build both services with the same Eve port baked into the Next rewrite:
 AGENT_SANDBOX_BACKEND=docker \
 WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
 WORKFLOW_POSTGRES_URL=postgres://... \
-WORKFLOW_POSTGRES_JOB_PREFIX=muses_agent_ \
+WORKFLOW_POSTGRES_JOB_PREFIX=open_agent_ \
   npm run build:eve
 AGENT_SANDBOX_BACKEND=docker \
 AGENT_EMBED_ALLOWED_ORIGINS=https://muses.example.com \
@@ -124,7 +124,7 @@ For local production verification, start the two official services explicitly:
 AGENT_SANDBOX_BACKEND=docker \
 WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
 WORKFLOW_POSTGRES_URL=postgres://... \
-WORKFLOW_POSTGRES_JOB_PREFIX=muses_agent_ \
+WORKFLOW_POSTGRES_JOB_PREFIX=open_agent_ \
   npm run start:eve -- --port 4275
 AGENT_RUNTIME_URL=http://127.0.0.1:4275 \
 EVE_NEXT_PRODUCTION_PORT=4275 npm start -- -p 3100
@@ -177,7 +177,7 @@ contain `sub` and a non-empty `tenantId`; optional `actorType` is `user` or
 `AGENT_DATABASE_URL` is mandatory whenever Host JWT auth is enabled. Eve records
 the immutable `tenantId + principalId` owner on `session.started`; every later
 session-specific request checks that owner before exposing events or accepting
-work. Agent product tables use `AGENT_DATABASE_SCHEMA` (default `muses_agent`)
+work. Agent product tables use `AGENT_DATABASE_SCHEMA` (default `open_agent`)
 and may live in the host product database. The Eve Workflow World must use a
 physically separate database: Workflow runtime generations with incompatible
 spec versions cannot safely share a `workflow` schema or worker queue.
@@ -274,8 +274,8 @@ its JSON plus the persisted tombstone lifecycle to durable audit storage.
 host product into the Agent core:
 
 ```tsx
-import { AgentWorkspace, createHttpAgentThreadStorage } from "@muses/agent-ui";
-import "@muses/agent-ui/styles.css";
+import { AgentWorkspace, createHttpAgentThreadStorage } from "@oworker/open-agent-ui";
+import "@oworker/open-agent-ui/styles.css";
 
 const threadStorage = createHttpAgentThreadStorage({
   getAccessToken: () => hostSession.agentAccessToken(),
@@ -378,7 +378,7 @@ connection, allowlist, auth provider, approval policy, and eval are compiled
 into the deployment.
 
 Headless hosts use the same versioned Run contract through the buildable
-`@muses/agent-contracts` and `@muses/agent-client` workspace packages.
+`@oworker/open-agent-contracts` and `@oworker/open-agent-client` workspace packages.
 `createAgentRunClient()` provides start, inspect, incremental events, and
 cancellation without exposing Eve session identifiers or importing a host
 product. It resolves a short-lived token for every request, rejects credential
@@ -386,16 +386,16 @@ forwarding redirects by default, and validates successful responses against the
 advertised contract version. The host is responsible for issuing a JWT whose
 `sub`, `tenantId`, and `actorType` identify the immutable owner.
 
-The `@muses/agent-client/eve-session` subpath adapts Eve's interactive session
+The `@oworker/open-agent-client/eve-session` subpath adapts Eve's interactive session
 implementation to a host-neutral cursor, turn, event, continuation,
 cancellation, and reset interface. Hosts that own their UI can use this path
 without importing `AgentWorkspace` or loading the iframe.
 
-`@muses/agent-host` owns the signed Host Capability client, verification, and
+`@oworker/open-agent-host` owns the signed Host Capability client, verification, and
 registry primitives. Application membership and business authorization remain
 the host's responsibility.
 
-`@muses/agent-ui` owns the host-neutral React `AgentWorkspace`, thread storage,
+`@oworker/open-agent-ui` owns the host-neutral React `AgentWorkspace`, thread storage,
 event projection, individual AI Elements subpaths, and a precompiled stylesheet.
 The host must inject its reviewed model catalog and defaults; identity,
 entitlement, billing, and tool policy remain server-authoritative. Both the
@@ -404,7 +404,7 @@ private component source.
 
 [`examples/custom-host-react`](examples/custom-host-react) is the inverse proof:
 it imports no UI package and owns every DOM element while using
-`@muses/agent-client/eve-session` for rotating credentials, streaming,
+`@oworker/open-agent-client/eve-session` for rotating credentials, streaming,
 continuation, approval, cancellation, and refresh recovery.
 
 Run `npm run verify:sdk-packages` to build, pack, install, and import all SDK

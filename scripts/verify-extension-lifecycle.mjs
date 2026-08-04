@@ -19,8 +19,8 @@ const policy = { skills: [{ id: "software-task", version: "1.0.0" }] };
 const store = createPostgresAgentExtensionStore(config);
 const params = { extensionId: "software-task", version: "1.0.0" };
 process.env.AGENT_HOST_JWT_SECRET = hostJwtSecret();
-process.env.AGENT_HOST_JWT_ISSUER = "https://muses-agent.extension-verification";
-process.env.AGENT_HOST_JWT_AUDIENCE = "muses-agent-extension-verification";
+process.env.AGENT_HOST_JWT_ISSUER = "https://open-agent.extension-verification";
+process.env.AGENT_HOST_JWT_AUDIENCE = "open-agent-extension-verification";
 
 const unauthorized = await listAgentExtensions(
   new Request("https://agent.test/api/agent/extensions"),
@@ -62,7 +62,7 @@ const enabled = JSON.parse(enableText).extension;
 assert(enabled.effectiveStatus === "enabled", "The Skill was not re-enabled.");
 await store.assertPolicyAllowed(tenantId, policy);
 
-const client = new pg.Client({ connectionString, application_name: "muses-agent-extension-verify" });
+const client = new pg.Client({ connectionString, application_name: "open-agent-extension-verify" });
 await client.connect();
 try {
   const audit = await client.query(
@@ -96,9 +96,9 @@ function hostRequest(method, requestTenantId, scope = "agent.extensions.manage",
   const serialized = body === undefined ? undefined : JSON.stringify(body);
   const token = signJwt({
     actorType: "user",
-    aud: "muses-agent-extension-verification",
+    aud: "open-agent-extension-verification",
     exp: Math.floor(Date.now() / 1000) + 300,
-    iss: "https://muses-agent.extension-verification",
+    iss: "https://open-agent.extension-verification",
     scope,
     sub: actorId,
     tenantId: requestTenantId,

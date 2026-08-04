@@ -126,7 +126,7 @@ export function inspectProductionConfiguration(
     error("host-jwt-algorithm", "Only AGENT_HOST_JWT_ALGORITHM=HS256 is currently supported.");
   }
 
-  const schema = environment.AGENT_DATABASE_SCHEMA?.trim() || "muses_agent";
+  const schema = environment.AGENT_DATABASE_SCHEMA?.trim() || "open_agent";
   if (!/^[a-z_][a-z0-9_]*$/i.test(schema) || schema.toLowerCase() === "workflow") {
     error(
       "agent-database-schema",
@@ -160,10 +160,10 @@ export function inspectProductionConfiguration(
       "workflow-job-prefix",
       "WORKFLOW_POSTGRES_JOB_PREFIX must not reuse the Muses or default Workflow queue prefix.",
     );
-  } else if (jobPrefix && jobPrefix !== "muses_agent_") {
+  } else if (jobPrefix && jobPrefix !== "open_agent_") {
     warning(
       "workflow-job-prefix-convention",
-      "The verified Muses Agent queue prefix is muses_agent_; keep custom prefixes unique per Workflow World.",
+      "The verified Muses Agent queue prefix is open_agent_; keep custom prefixes unique per Workflow World.",
     );
   }
 

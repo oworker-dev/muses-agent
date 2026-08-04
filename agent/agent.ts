@@ -6,16 +6,18 @@ import {
   createAutonomyEvalModel,
 } from "../evals/fixture-model";
 import {
-  AGENT_MODEL_OPTIONS,
-  DEFAULT_AGENT_MODEL_ID,
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
-  isAgentModelId,
-  isAgentReasoningLevel,
   readAgentEvalContextWindowTokens,
   readAgentModelMaxOutputTokens,
-  type AgentModelId,
-  type AgentReasoningLevel,
 } from "../lib/agent-profile";
+import type { AgentReasoningLevel } from "@oworker/open-agent-contracts/runtime-config";
+import {
+  findAgentRuntimeModel,
+  isAgentReasoningLevelForModel,
+  readDeploymentAgentRuntimeConfig,
+  resolveAgentRuntimeModel,
+  runtimeDefinitionLimits,
+} from "../lib/agent-runtime-config";
+import { readAgentRuntimeConfig } from "./lib/runtime-config.ts";
 import { createProviderFetch } from "../lib/provider-http";
 import { providerOutputBudgetMiddleware } from "../lib/provider-output-budget";
 import { eveOwnedProviderRetryMiddleware } from "../lib/provider-retry-boundary";
@@ -26,20 +28,26 @@ const openai = createOpenAI({
   fetch: createProviderFetch(),
 });
 
-const configuredDefaultModel = process.env.AGENT_MODEL_ID;
-const defaultModelId = isAgentModelId(configuredDefaultModel)
-  ? configuredDefaultModel
-  : DEFAULT_AGENT_MODEL_ID;
+const deploymentConfig = readDeploymentAgentRuntimeConfig();
+const deploymentDefaultModel = resolveAgentRuntimeModel(
+  deploymentConfig,
+  deploymentConfig.defaultModelId,
+);
 const workflowWorld = process.env.WORKFLOW_TARGET_WORLD?.trim();
 const evalFixtureModel = process.env.AGENT_EVAL_FIXTURE_MODEL === AUTONOMY_EVAL_FIXTURE
   ? createAutonomyEvalModel()
   : undefined;
 const evalContextWindowTokens = evalFixtureModel
   ? readAgentEvalContextWindowTokens()
-  : DEFAULT_CONTEXT_WINDOW_TOKENS;
+  : deploymentDefaultModel.contextWindowTokens;
 const modelMaxOutputTokens = readAgentModelMaxOutputTokens();
+const definitionLimits = runtimeDefinitionLimits(deploymentConfig);
 
-function createAgentModel(modelId: AgentModelId, reasoning?: AgentReasoningLevel) {
+function createAgentModel(
+  providerModelId: string,
+  reasoning?: AgentReasoningLevel,
+  maxOutputTokens = modelMaxOutputTokens,
+) {
   return wrapLanguageModel({
     middleware: [
       defaultSettingsMiddleware({
@@ -52,17 +60,21 @@ function createAgentModel(modelId: AgentModelId, reasoning?: AgentReasoningLevel
           },
         },
       }),
-      providerOutputBudgetMiddleware(modelMaxOutputTokens),
+      providerOutputBudgetMiddleware(Math.min(modelMaxOutputTokens, maxOutputTokens)),
       eveOwnedProviderRetryMiddleware,
     ],
-    model: openai(modelId),
+    model: openai(providerModelId),
   });
 }
 
 export default defineAgent({
   description: "A general-purpose autonomous agent for research, software, and knowledge work.",
   model: defineDynamic({
-    fallback: evalFixtureModel ?? createAgentModel(defaultModelId),
+    fallback: evalFixtureModel ?? createAgentModel(
+      deploymentDefaultModel.providerModelId,
+      deploymentDefaultModel.defaultReasoning,
+      deploymentDefaultModel.maxOutputTokens,
+    ),
     events: {
       "step.started": (_event, ctx) => {
         if (evalFixtureModel) {
@@ -71,21 +83,23 @@ export default defineAgent({
             modelContextWindowTokens: evalContextWindowTokens,
           };
         }
+        const config = readAgentRuntimeConfig(ctx);
         const attributes = ctx.session.auth.current?.attributes;
         const requestedModel = attributes?.agentModelId;
         const requestedReasoning = attributes?.agentReasoning;
-        const modelId = isAgentModelId(requestedModel) ? requestedModel : defaultModelId;
-        const model = AGENT_MODEL_OPTIONS.find((option) => option.id === modelId);
+        const model = findAgentRuntimeModel(config, requestedModel) ??
+          resolveAgentRuntimeModel(config, config.defaultModelId);
+        const reasoning = isAgentReasoningLevelForModel(model, requestedReasoning)
+          ? requestedReasoning
+          : model.defaultReasoning;
 
         return {
-          model: createAgentModel(modelId, isAgentReasoningLevel(requestedReasoning) ? requestedReasoning : undefined),
-          modelContextWindowTokens: model?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS,
+          model: createAgentModel(model.providerModelId, reasoning, model.maxOutputTokens),
+          modelContextWindowTokens: model.contextWindowTokens,
           modelOptions: {
             providerOptions: {
               openai: {
-                ...(isAgentReasoningLevel(requestedReasoning)
-                  ? { reasoningEffort: requestedReasoning }
-                  : {}),
+                reasoningEffort: reasoning,
                 // Eve owns durable history, so never depend on provider-side item storage.
                 store: false,
               },
@@ -103,11 +117,10 @@ export default defineAgent({
   },
   reasoning: "provider-default",
   compaction: {
-    thresholdPercent: 0.82,
+    thresholdPercent: deploymentConfig.compaction.thresholdPercent,
   },
   limits: {
-    maxInputTokensPerSession: 2_000_000,
-    maxOutputTokensPerSession: 200_000,
+    ...definitionLimits,
   },
   ...(workflowWorld
     ? {

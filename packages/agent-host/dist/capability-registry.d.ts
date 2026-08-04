@@ -1,5 +1,5 @@
-import type { AgentHostCapabilityDescriptor } from "@muses/agent-contracts/host-capability";
-import type { JsonValue } from "@muses/agent-contracts/agent-run";
+import type { AgentHostCapabilityDescriptor } from "@oworker/open-agent-contracts/host-capability";
+import type { JsonValue } from "@oworker/open-agent-contracts/agent-run";
 export type AgentHostCapabilityRegistration<TContext> = {
     readonly descriptor: AgentHostCapabilityDescriptor;
     readonly invoke: (input: Readonly<Record<string, JsonValue>>, context: TContext) => JsonValue | Promise<JsonValue>;

@@ -1,9 +1,9 @@
 import type { SessionContext } from "eve/context";
-import { createAgentHostCapabilityClient } from "@muses/agent-host/client";
-import type { AgentHostInvocationIdentity } from "@muses/agent-contracts/host";
+import { createAgentHostCapabilityClient } from "@oworker/open-agent-host/client";
+import type { AgentHostInvocationIdentity } from "@oworker/open-agent-contracts/host";
 import type { AgentHostCapabilityDescriptor } from "../../contracts/host-capability";
 import type { JsonValue } from "../../contracts/agent-run";
-import { allowedHostCapabilities } from "./run-policy.ts";
+import { allowedHostCapabilities, readAgentRunPolicy } from "./run-policy.ts";
 
 // Host-owned media and workflow calls can legitimately outlive a normal chat
 // turn. Keep the default inside the public upper bound so a host can still
@@ -16,6 +16,28 @@ export function isHostCapabilityConfigured(
   return Boolean(
     environment.AGENT_HOST_TOOLS_URL?.trim() &&
       environment.AGENT_HOST_TOOLS_SECRET?.trim(),
+  );
+}
+
+type HostCapabilityResolverContext = {
+  readonly session: {
+    readonly auth: {
+      readonly current?: { readonly attributes: Readonly<Record<string, unknown>> } | null;
+      readonly initiator?: { readonly attributes: Readonly<Record<string, unknown>> } | null;
+    };
+  };
+};
+
+export function shouldExposeHostCapabilities(
+  session: HostCapabilityResolverContext,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  const principal = session.session.auth.initiator ?? session.session.auth.current;
+  const allowed = readAgentRunPolicy(session).hostCapabilities;
+  return Boolean(
+    principal &&
+      allowed?.length &&
+      isHostCapabilityConfigured(environment),
   );
 }
 
@@ -85,17 +107,25 @@ function hostIdentity(session: SessionContext): AgentHostInvocationIdentity {
   if (typeof principalId !== "string" || !principalId.trim()) {
     throw new Error("An authenticated Agent principal is required for Host capabilities.");
   }
+  const scope = parseScopeAttribute(auth?.attributes.agentHostScope);
   return {
     actorType: auth?.attributes.actorType === "service" ? "service" : "user",
     principalId,
     tenantId,
-    ...(typeof auth?.attributes.projectId === "string"
-      ? { projectId: auth.attributes.projectId }
-      : {}),
-    ...(typeof auth?.attributes.canvasId === "string"
-      ? { canvasId: auth.attributes.canvasId }
-      : {}),
+    ...(scope ? { scope } : {}),
   };
+}
+
+function parseScopeAttribute(value: unknown): Readonly<Record<string, string>> | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    if (!Object.values(parsed).every((item) => typeof item === "string")) return undefined;
+    return parsed as Readonly<Record<string, string>>;
+  } catch {
+    return undefined;
+  }
 }
 
 function required(value: string | undefined, name: string): string {

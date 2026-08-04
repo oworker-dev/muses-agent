@@ -2,9 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export const AGENT_HOST_SIGNATURE_VERSION = "0.2.0";
 export const AGENT_HOST_HEADER = {
     actorType: "x-agent-host-actor-type",
-    canvas: "x-agent-host-canvas",
     principal: "x-agent-host-principal",
-    project: "x-agent-host-project",
+    scope: "x-agent-host-scope",
     signature: "x-agent-host-signature",
     tenant: "x-agent-host-tenant",
     timestamp: "x-agent-host-timestamp",
@@ -23,8 +22,7 @@ export function signAgentHostCapabilityRequest(input) {
         [AGENT_HOST_HEADER.signature]: signature(input.secret, timestamp, method, pathname, body, identity),
         [AGENT_HOST_HEADER.tenant]: identity.tenantId,
         [AGENT_HOST_HEADER.timestamp]: timestamp,
-        ...(identity.projectId ? { [AGENT_HOST_HEADER.project]: identity.projectId } : {}),
-        ...(identity.canvasId ? { [AGENT_HOST_HEADER.canvas]: identity.canvasId } : {}),
+        ...(identity.scope ? { [AGENT_HOST_HEADER.scope]: encodeScope(identity.scope) } : {}),
     };
 }
 export function verifyAgentHostCapabilityRequest(input) {
@@ -47,11 +45,8 @@ export function verifyAgentHostCapabilityRequest(input) {
         actorType: requiredHeader(headers, AGENT_HOST_HEADER.actorType),
         principalId: requiredHeader(headers, AGENT_HOST_HEADER.principal),
         tenantId: requiredHeader(headers, AGENT_HOST_HEADER.tenant),
-        ...(optionalHeader(headers, AGENT_HOST_HEADER.project)
-            ? { projectId: optionalHeader(headers, AGENT_HOST_HEADER.project) }
-            : {}),
-        ...(optionalHeader(headers, AGENT_HOST_HEADER.canvas)
-            ? { canvasId: optionalHeader(headers, AGENT_HOST_HEADER.canvas) }
+        ...(optionalHeader(headers, AGENT_HOST_HEADER.scope)
+            ? { scope: decodeScope(optionalHeader(headers, AGENT_HOST_HEADER.scope)) }
             : {}),
     });
     const method = normalizeMethod(input.method);
@@ -88,17 +83,12 @@ function validateIdentity(identity) {
     if (identity.actorType !== "user" && identity.actorType !== "service") {
         throw authError("host-capability-actor-invalid", "The Host capability actor type is invalid.");
     }
-    const projectId = normalizeIdentityText(identity.projectId);
-    const canvasId = normalizeIdentityText(identity.canvasId);
-    if (canvasId && !projectId) {
-        throw authError("host-capability-project-required", "A Canvas scope requires a Project scope.");
-    }
+    const scope = normalizeScope(identity.scope);
     return {
         actorType: identity.actorType,
         principalId,
         tenantId,
-        ...(projectId ? { projectId } : {}),
-        ...(canvasId ? { canvasId } : {}),
+        ...(scope ? { scope } : {}),
     };
 }
 function canonicalIdentity(identity) {
@@ -106,9 +96,51 @@ function canonicalIdentity(identity) {
         identity.tenantId,
         identity.principalId,
         identity.actorType,
-        identity.projectId ?? "",
-        identity.canvasId ?? "",
+        identity.scope ?? {},
     ]), "utf8").toString("base64url");
+}
+function normalizeScope(value) {
+    if (value === undefined)
+        return undefined;
+    const entries = Object.entries(value).map(([key, item]) => {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(key)) {
+            throw authError("host-capability-scope-invalid", "Host capability scope keys are invalid.");
+        }
+        const normalized = normalizeIdentityText(item);
+        if (!normalized)
+            throw authError("host-capability-scope-invalid", "Host capability scope values are invalid.");
+        return [key, normalized];
+    });
+    if (entries.length > 32)
+        throw authError("host-capability-scope-invalid", "Host capability scope is too large.");
+    return Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right)));
+}
+function encodeScope(scope) {
+    return Buffer.from(JSON.stringify(normalizeScope(scope) ?? {}), "utf8").toString("base64url");
+}
+function decodeScope(value) {
+    if (value.length > 8_192)
+        throw authError("host-capability-scope-invalid", "Host capability scope is too large.");
+    try {
+        const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+        if (!isStringRecord(decoded))
+            throw new Error();
+        const normalized = normalizeScope(decoded);
+        if (!normalized)
+            throw new Error();
+        return normalized;
+    }
+    catch (error) {
+        if (error instanceof AgentHostCapabilityAuthError)
+            throw error;
+        throw authError("host-capability-scope-invalid", "Host capability scope is invalid.");
+    }
+}
+function isStringRecord(value) {
+    return Boolean(value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.values(value).every((item) => typeof item === "string"));
 }
 function normalizeIdentityText(value) {
     const normalized = value?.trim();

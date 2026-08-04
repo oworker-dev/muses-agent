@@ -4,11 +4,11 @@ import test from "node:test";
 import {
   AgentThreadStorageConflictError,
   createHttpAgentThreadStorage,
-} from "@muses/agent-ui/agent-workspace";
+} from "@oworker/open-agent-ui/agent-workspace";
 import {
   AGENT_THREAD_STORAGE_VERSION,
   createAgentThread,
-} from "@muses/agent-ui/agent-workspace";
+} from "@oworker/open-agent-ui/agent-workspace";
 
 test("persists a loaded collection and advances its optimistic revision", async () => {
   const server = fakeThreadServer();

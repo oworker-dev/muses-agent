@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { AgentRuntimeStatus } from "@muses/agent-ui";
+import type { AgentRuntimeStatus } from "@oworker/open-agent-ui";
 
 export function readAgentRuntimeStatus(
   environment: Readonly<Record<string, string | undefined>> = process.env,

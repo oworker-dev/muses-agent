@@ -2,7 +2,7 @@ import { registerOTel } from "@vercel/otel";
 
 export function register(): void {
   registerOTel({
-    serviceName: "muses-agent-web",
+    serviceName: "open-agent-web",
     instrumentationConfig: {
       fetch: {
         propagateContextUrls: configuredOrigins([

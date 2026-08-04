@@ -1,3 +1,4 @@
+import { parseAgentRuntimeConfigSnapshot, } from "./runtime-config.js";
 export const AGENT_EMBED_CONTRACT_VERSION = "0.1.0";
 export function parseAgentEmbedEvent(value) {
     if (!isRecord(value) || value.contractVersion !== AGENT_EMBED_CONTRACT_VERSION) {
@@ -48,6 +49,14 @@ export function parseAgentEmbedHostMessage(value) {
     if (value.locale !== undefined && value.locale !== "en" && value.locale !== "zh-CN" ||
         value.theme !== undefined && value.theme !== "dark" && value.theme !== "light" && value.theme !== "system") {
         return undefined;
+    }
+    if (value.runtimeConfig !== undefined) {
+        try {
+            parseAgentRuntimeConfigSnapshot(value.runtimeConfig);
+        }
+        catch {
+            return undefined;
+        }
     }
     return value;
 }

@@ -19,10 +19,10 @@ import {
   type AgentThreadStorage,
 } from "./thread-storage.js";
 
-const DEFAULT_STORAGE_KEY = "muses-agent:threads:v1";
+const DEFAULT_STORAGE_KEY = "open-agent:threads:v1";
 
 export function AgentWorkspace({
-  agentName = "muses-agent",
+  agentName = "open-agent",
   client,
   commands = [],
   defaultPreferences,
@@ -284,7 +284,7 @@ export function AgentWorkspace({
   if (!isHydrated || !activeThread) return <div className="flex h-dvh items-center justify-center bg-background text-muted-foreground">{messages.loading}</div>;
 
   return (
-    <div className="muses-agent-ui flex h-dvh overflow-hidden bg-background text-foreground">
+    <div className="open-agent-ui flex h-dvh overflow-hidden bg-background text-foreground">
       <AgentSidebar activeThreadId={activeThread.id} deletingThreadIds={deletingThreadIds} hostFooter={hostSlots?.sidebarFooter} locale={locale} messages={messages} onClose={() => setSidebarOpen(false)} onDelete={deleteThread} onNew={createThread} onRename={renameThread} onSelect={selectThread} onSettings={() => setSettingsOpen(true)} open={sidebarOpen} threads={threads} />
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b px-3 sm:px-5">

@@ -1,4 +1,4 @@
-import { AGENT_RUN_CONTRACT_VERSION, } from "@muses/agent-contracts/agent-run";
+import { AGENT_RUN_CONTRACT_VERSION, } from "@oworker/open-agent-contracts/agent-run";
 export const AGENT_CLIENT_VERSION = "0.1.0-alpha.8";
 export const AGENT_HOST_SDK_VERSION = "0.1.0-draft";
 export function createAgentRunClient(options) {

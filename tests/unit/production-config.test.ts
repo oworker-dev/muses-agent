@@ -11,11 +11,11 @@ import {
 } from "../../lib/agent-profile.ts";
 
 const validEnvironment = {
-  AGENT_DATABASE_SCHEMA: "muses_agent",
+  AGENT_DATABASE_SCHEMA: "open_agent",
   AGENT_DATABASE_URL: "postgresql://agent:secret@db.internal:5432/muses_product",
   AGENT_EMBED_ALLOWED_ORIGINS: "https://muses.example.com",
   AGENT_HOST_JWT_ALGORITHM: "HS256",
-  AGENT_HOST_JWT_AUDIENCE: "muses-agent",
+  AGENT_HOST_JWT_AUDIENCE: "open-agent",
   AGENT_HOST_JWT_ISSUER: "https://muses.example.com",
   AGENT_HOST_JWT_SECRET: "a-production-secret-at-least-32-bytes-long",
   AGENT_MODEL_MAX_OUTPUT_TOKENS: "4096",
@@ -27,9 +27,9 @@ const validEnvironment = {
   NODE_ENV: "production",
   OPENAI_API_KEY: "provider-key",
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://otel.example.com/v1/traces",
-  WORKFLOW_POSTGRES_JOB_PREFIX: "muses_agent_",
+  WORKFLOW_POSTGRES_JOB_PREFIX: "open_agent_",
   WORKFLOW_POSTGRES_MAX_POOL_SIZE: "22",
-  WORKFLOW_POSTGRES_URL: "postgresql://agent:secret@db.internal:5432/muses_agent_world",
+  WORKFLOW_POSTGRES_URL: "postgresql://agent:secret@db.internal:5432/open_agent_world",
   WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "20",
   WORKFLOW_TARGET_WORLD: "@workflow/world-postgres",
 } as const;

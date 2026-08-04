@@ -1,5 +1,7 @@
-import { AgentWorkspace } from "@muses/agent-ui";
+import { AgentWorkspace } from "@oworker/open-agent-ui";
 import { readAgentRuntimeStatus } from "@/lib/agent-runtime-status";
+import { createAgentUiConfig } from "@/lib/agent-ui-config";
+import { readDeploymentAgentRuntimeConfig } from "@/lib/agent-runtime-config";
 import {
   AGENT_UI_DEFAULT_PREFERENCES,
   AGENT_UI_COMMANDS,
@@ -12,16 +14,17 @@ import {
 export const dynamic = "force-dynamic";
 
 export default function Page() {
+  const ui = createAgentUiConfig(readDeploymentAgentRuntimeConfig());
   return (
     <AgentWorkspace
-      agentName="muses-agent"
-      commands={AGENT_UI_COMMANDS}
-      defaultPreferences={AGENT_UI_DEFAULT_PREFERENCES}
-      extensions={AGENT_UI_EXTENSIONS}
+      agentName="open-agent"
+      commands={ui.commands}
+      defaultPreferences={ui.defaultPreferences}
+      extensions={ui.extensions}
       mentions={AGENT_UI_MENTIONS}
-      models={AGENT_UI_MODELS}
+      models={ui.models}
       productName="Agent"
-      reasoningLevels={AGENT_UI_REASONING_LEVELS}
+      reasoningLevels={ui.reasoningLevels}
       runtimeStatus={readAgentRuntimeStatus()}
     />
   );

@@ -1,2 +1,2 @@
-/** @deprecated Import from @muses/agent-contracts/agent-run. */
-export * from "@muses/agent-contracts/agent-run";
+/** @deprecated Import from @oworker/open-agent-contracts/agent-run. */
+export * from "@oworker/open-agent-contracts/agent-run";

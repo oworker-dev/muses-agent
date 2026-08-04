@@ -5,7 +5,7 @@ export const AUTONOMY_EVAL_FIXTURE = "autonomy-v1";
 export function createAutonomyEvalModel() {
   return mockModel({
     modelId: AUTONOMY_EVAL_FIXTURE,
-    provider: "muses-agent-eval",
+    provider: "open-agent-eval",
     respond: respond,
   });
 }
@@ -139,7 +139,7 @@ function autonomyFile(request: MockModelRequest) {
   }
   if (!hasResult(request, "write_file")) {
     return tool("write_file", {
-      content: "muses-agent autonomy fixture\n",
+      content: "open-agent autonomy fixture\n",
       filePath: "/workspace/autonomy.txt",
     }, "eval-write-file");
   }

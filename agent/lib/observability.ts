@@ -29,14 +29,12 @@ export function parseRemoteTraceParent(value: unknown): SpanContext | undefined 
 
 export function agentCorrelationAttributes(session: ObservableSession): Record<string, string> {
   return {
-    "muses.agent.canvas_id": stringAttribute(session, "canvasId"),
-    "muses.agent.correlation_id": stringAttribute(session, "agentCorrelationId"),
-    "muses.agent.profile_id": stringAttribute(session, "agentProfileId"),
-    "muses.agent.profile_version": stringAttribute(session, "agentProfileVersion"),
-    "muses.agent.project_id": stringAttribute(session, "projectId"),
-    "muses.agent.run_id": stringAttribute(session, "agentRunId"),
-    "muses.agent.session_id": session.id,
-    "muses.agent.tenant_id": stringAttribute(session, "tenantId"),
+    "open_agent.correlation_id": stringAttribute(session, "agentCorrelationId"),
+    "open_agent.profile_id": stringAttribute(session, "agentProfileId"),
+    "open_agent.profile_version": stringAttribute(session, "agentProfileVersion"),
+    "open_agent.run_id": stringAttribute(session, "agentRunId"),
+    "open_agent.session_id": session.id,
+    "open_agent.tenant_id": stringAttribute(session, "tenantId"),
   };
 }
 

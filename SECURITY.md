@@ -14,7 +14,7 @@ service, or publish exploit details before a fix and disclosure plan exist.
 
 ## Supported State
 
-`muses-agent` is an alpha integration preview. Security fixes target the current
+`open-agent` is an alpha integration preview. Security fixes target the current
 `main` branch and the newest GitHub prerelease. Older alpha artifacts may be
 replaced rather than patched. A stable support window will be published before
 the first stable release.

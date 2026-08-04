@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-`muses-agent` is a general-purpose autonomous Agent product and integration
+`open-agent` is a general-purpose autonomous Agent product and integration
 kernel. It must be able to run without Muses and must not encode a canvas,
 presentation, image, video, music, or workflow-specific execution sequence.
 
@@ -55,7 +55,7 @@ or overwriting another client's state.
 The public host boundary has two independent projections:
 
 - `AgentWorkspace` is the reusable Web UI projection over Eve sessions.
-- `AgentRunClient` (exported from `@muses/agent-client`) is the headless service
+- `AgentRunClient` (exported from `@oworker/open-agent-client`) is the headless service
   projection used by servers and durable Workflow steps.
 
 Both use the same Host JWT identity. Neither interface imports Muses domain
@@ -63,7 +63,7 @@ types, owns host billing, or gives browser-supplied metadata authorization
 meaning. Eve session and continuation identifiers remain internal harness
 details behind stable AgentRun ids and events.
 
-`muses-agent` exposes a host-facing run API without making hosts depend on Eve's
+`open-agent` exposes a host-facing run API without making hosts depend on Eve's
 session protocol. `runId` is the durable public identity; Eve `sessionId` and
 `continuationToken` remain internal harness handles. The API currently supports
 start, inspection, incremental event reads, and cancellation under the draft
@@ -138,7 +138,7 @@ Muses Workflow spec 4 World. They must use different PostgreSQL databases, not
 merely different application schemas: both runtimes own the `workflow` schema
 and background queue, and a shared database can replay runs with an incompatible
 runtime generation. Agent product records may still live in the Muses database
-under `muses_agent`; only the durable Workflow World is physically isolated.
+under `open_agent`; only the durable Workflow World is physically isolated.
 
 ## Model routing
 
@@ -253,9 +253,9 @@ The Muses Studio reference integration currently has two separate surfaces:
   API (`/api/agent/runs`). The Agent-to-host canvas bridge uses the signed
   `host_capabilities`/`host_invoke` protocol.
 
-The repository now builds `@muses/agent-contracts@0.1.0-alpha.8`,
-`@muses/agent-client@0.1.0-alpha.8`, `@muses/agent-host@0.1.0-alpha.8`, and
-`@muses/agent-ui@0.1.0-alpha.8` as real ESM/declaration packages with stable
+The repository now builds `@oworker/open-agent-contracts@0.1.0-alpha.8`,
+`@oworker/open-agent-client@0.1.0-alpha.8`, `@oworker/open-agent-host@0.1.0-alpha.8`, and
+`@oworker/open-agent-ui@0.1.0-alpha.8` as real ESM/declaration packages with stable
 subpath exports. A conformance command packs all four tarballs, installs them
 in an empty consumer, and imports their public entrypoints, an individual AI
 Element, and the stylesheet export. The compiled ESM, declarations, source
@@ -282,15 +282,15 @@ SLO, billing reconciliation, licensing, or public-release gates.
 
 The release boundary is intentionally split so the Agent remains host-neutral:
 
-1. `@muses/agent-contracts`: versioned AgentRun, event, Host Capability, and
+1. `@oworker/open-agent-contracts`: versioned AgentRun, event, Host Capability, and
    embed schemas.
-2. `@muses/agent-client`: headless HTTP AgentRun client for Workflow and other
+2. `@oworker/open-agent-client`: headless HTTP AgentRun client for Workflow and other
    backends plus an optional `eve-session` adapter implementing the
    host-neutral interactive AgentSession surface. The root entrypoint imports
    neither React nor Eve.
-3. `@muses/agent-host`: server-side capability registration/signing and host
+3. `@oworker/open-agent-host`: server-side capability registration/signing and host
    adapter primitives; Muses provides the first implementation.
-4. `@muses/agent-ui`: host-neutral React workspace exports based on the
+4. `@oworker/open-agent-ui`: host-neutral React workspace exports based on the
    shared AI Elements components. The iframe remains an adapter built on this
    package, not its dependency.
 
@@ -340,7 +340,7 @@ input tokens, output tokens, cache reads, cost, steps, and duration.
 The Agent Web API and Eve runtime now register the same standard OpenTelemetry
 export path and propagate W3C trace context only to configured Runtime and Host
 origins. Synchronous HTTP hops keep parent-child context. The Eve Workflow queue
-is a durable asynchronous boundary, so `muses.agent.turn.accepted` records a
+is a durable asynchronous boundary, so `open_agent.turn.accepted` records a
 Span Link to the originating Web request and stays in the Agent execution trace.
 Eve spans carry AgentRun, correlation, session, Profile, Project and Canvas ids
 while full prompts and outputs remain disabled. A local Postgres World

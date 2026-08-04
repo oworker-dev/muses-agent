@@ -1,6 +1,6 @@
 {
-  "name": "@muses/agent-contracts",
-  "version": "0.1.0-alpha.8",
+  "name": "@oworker/open-agent-contracts",
+  "version": "0.1.0-alpha.9",
   "private": true,
   "description": "Host-neutral public contracts for the Muses Agent service.",
   "type": "module",
@@ -35,6 +35,10 @@
     "./host-capability": {
       "types": "./dist/host-capability.d.ts",
       "import": "./dist/host-capability.js"
+    },
+    "./runtime-config": {
+      "types": "./dist/runtime-config.d.ts",
+      "import": "./dist/runtime-config.js"
     },
     "./package.json": "./package.json"
   },

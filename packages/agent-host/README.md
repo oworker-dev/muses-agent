@@ -1,4 +1,4 @@
-# @muses/agent-host
+# @oworker/open-agent-host
 
 Server-side primitives for exposing capabilities to a standalone Agent.
 

@@ -5,7 +5,7 @@ import pg from "pg";
 const connectionString = process.env.AGENT_DATABASE_URL?.trim();
 if (!connectionString) throw new Error("AGENT_DATABASE_URL is required.");
 
-const schema = process.env.AGENT_DATABASE_SCHEMA?.trim() || "muses_agent";
+const schema = process.env.AGENT_DATABASE_SCHEMA?.trim() || "open_agent";
 if (!/^[a-z_][a-z0-9_]*$/i.test(schema)) {
   throw new Error("AGENT_DATABASE_SCHEMA must be a valid PostgreSQL identifier.");
 }
@@ -16,7 +16,7 @@ const migrationUrl = new URL(
 );
 const source = await readFile(fileURLToPath(migrationUrl), "utf8");
 const sql = source.replaceAll("__AGENT_SCHEMA__", schema);
-const pool = new pg.Pool({ application_name: "muses-agent-migrate", connectionString, max: 1 });
+const pool = new pg.Pool({ application_name: "open-agent-migrate", connectionString, max: 1 });
 
 try {
   await pool.query(sql);

@@ -39,7 +39,7 @@ test("wide workspace supports navigation, search, settings, and multiple threads
   await composer.press("Tab");
   await expect(composer).toHaveValue("@workspace ");
 
-  await page.screenshot({ fullPage: true, path: "/tmp/muses-agent-wide.png" });
+  await page.screenshot({ fullPage: true, path: "/tmp/open-agent-wide.png" });
 });
 
 test("composer clears immediately while a turn is still being accepted", async ({ page }) => {
@@ -81,7 +81,7 @@ test("small workspace keeps the conversation focused and opens navigation on dem
   await page.getByRole("button", { name: "Close navigation" }).click();
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
 
-  await page.screenshot({ fullPage: true, path: "/tmp/muses-agent-small.png" });
+  await page.screenshot({ fullPage: true, path: "/tmp/open-agent-small.png" });
 });
 
 test("narrow mobile workspace keeps menus inside the viewport", async ({ page }) => {
@@ -100,7 +100,7 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
   await composer.fill("/");
   await expect(page.getByText("Skills and commands")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.screenshot({ fullPage: true, path: "/tmp/muses-agent-mobile.png" });
+  await page.screenshot({ fullPage: true, path: "/tmp/open-agent-mobile.png" });
 });
 
 test("a real conversation survives refresh and continues with the latest token", async ({ page }) => {
@@ -186,13 +186,13 @@ test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
     version: 1,
   });
   await page.goto("/");
-  await page.evaluate((value) => localStorage.setItem("muses-agent:threads:v1", value), storedCollection);
+  await page.evaluate((value) => localStorage.setItem("open-agent:threads:v1", value), storedCollection);
 
   await page.reload();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText("Reconnecting to the active run...")).toBeHidden();
   await expect.poll(async () => page.evaluate(() => {
-    const raw = localStorage.getItem("muses-agent:threads:v1");
+    const raw = localStorage.getItem("open-agent:threads:v1");
     return raw?.includes('"session.waiting"');
   })).toBeTruthy();
 });
@@ -214,7 +214,7 @@ function mockSuccessfulTurn(message: string, reply: string): string {
   const at = new Date().toISOString();
   const turnId = "turn_0";
   const events = [
-    { data: { runtime: { agentId: "muses-agent", agentName: "muses-agent", eveVersion: "test", modelId: "mock/model" } }, meta: { at }, type: "session.started" },
+    { data: { runtime: { agentId: "open-agent", agentName: "open-agent", eveVersion: "test", modelId: "mock/model" } }, meta: { at }, type: "session.started" },
     { data: { sequence: 0, turnId }, meta: { at }, type: "turn.started" },
     { data: { message, parts: [{ text: message, type: "text" }], sequence: 0, turnId }, meta: { at }, type: "message.received" },
     { data: { sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "step.started" },

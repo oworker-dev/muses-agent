@@ -1,7 +1,7 @@
 # Custom React host (no iframe)
 
-This example owns every DOM element and imports no `@muses/agent-ui` code. It
-uses `@muses/agent-client/eve-session` to prove that the Agent service is usable
+This example owns every DOM element and imports no `@oworker/open-agent-ui` code. It
+uses `@oworker/open-agent-client/eve-session` to prove that the Agent service is usable
 without the reference workspace or iframe adapter.
 
 The host supplies `getAccessToken`; the Eve adapter calls it again for every
@@ -11,8 +11,8 @@ and event log, reconnects an interrupted turn, streams events, replies to HITL
 options, and requests cooperative turn cancellation.
 
 ```tsx
-import { CustomAgentPanel } from "@muses/example-custom-host-react";
-import "@muses/example-custom-host-react/styles.css";
+import { CustomAgentPanel } from "@oworker/open-agent-example-custom-host-react";
+import "@oworker/open-agent-example-custom-host-react/styles.css";
 
 <CustomAgentPanel
   baseUrl="https://agent.example.com"

@@ -10,7 +10,7 @@ const SECRET = "01234567890123456789012345678901";
 
 test("accepts a host JWT and projects tenant identity", async () => {
   const auth = hostJwtAuth({
-    audiences: ["muses-agent"],
+    audiences: ["open-agent"],
     issuer: "https://muses.example.test",
     secret: SECRET,
   });
@@ -19,11 +19,10 @@ test("accepts a host JWT and projects tenant identity", async () => {
     headers: {
       authorization: `Bearer ${signJwt({
         actorType: "user",
-        aud: "muses-agent",
+        aud: "open-agent",
         exp: Math.floor(Date.now() / 1000) + 300,
         iss: "https://muses.example.test",
-        projectId: "project-123",
-        canvasId: "canvas-123",
+        agentHostScope: JSON.stringify({ projectId: "project-123", canvasId: "canvas-123" }),
         sub: "user-123",
         tenantId: "workspace-123",
       })}`,
@@ -34,15 +33,14 @@ test("accepts a host JWT and projects tenant identity", async () => {
   assert.equal(result.authenticator, "host-jwt");
   assert.equal(result.principalType, "user");
   assert.equal(result.attributes.tenantId, "workspace-123");
-  assert.equal(result.attributes.projectId, "project-123");
-  assert.equal(result.attributes.canvasId, "canvas-123");
+  assert.deepEqual(JSON.parse(String(result.attributes.agentHostScope)), { projectId: "project-123", canvasId: "canvas-123" });
   assert.equal(result.subject, "user-123");
   assert.equal(result.principalId, "https://muses.example.test:user-123");
 });
 
 test("rejects a verified host token without a tenant scope", async () => {
   const auth = hostJwtAuth({
-    audiences: ["muses-agent"],
+    audiences: ["open-agent"],
     issuer: "https://muses.example.test",
     secret: SECRET,
   });
@@ -51,7 +49,7 @@ test("rejects a verified host token without a tenant scope", async () => {
     async () => await auth(new Request("https://agent.example.test/eve/v1/session", {
       headers: {
         authorization: `Bearer ${signJwt({
-          aud: "muses-agent",
+          aud: "open-agent",
           exp: Math.floor(Date.now() / 1000) + 300,
           iss: "https://muses.example.test",
           sub: "user-123",
@@ -67,7 +65,7 @@ test("allows local development to fall through when host JWT auth is not configu
   assert.equal(await auth(new Request("http://127.0.0.1:3100/eve/v1/session")), null);
 });
 
-function signJwt(payload: Record<string, string | number>): string {
+function signJwt(payload: Record<string, unknown>): string {
   const header = { alg: "HS256", typ: "JWT" };
   const encodedHeader = encodePart(header);
   const encodedPayload = encodePart(payload);

@@ -1,2 +1,2 @@
-/** @deprecated Import from @muses/agent-contracts/embed. */
-export * from "@muses/agent-contracts/embed";
+/** @deprecated Import from @oworker/open-agent-contracts/embed. */
+export * from "@oworker/open-agent-contracts/embed";

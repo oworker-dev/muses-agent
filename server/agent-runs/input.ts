@@ -5,9 +5,10 @@ import {
   type StartAgentRunRequest,
 } from "../../contracts/agent-run.ts";
 import {
-  AGENT_PROFILE_OPTIONS,
-  isAgentProfileRef,
-} from "../../lib/agent-profile.ts";
+  DEFAULT_AGENT_RUNTIME_CONFIG,
+  isAgentProfileForConfig,
+  type AgentRuntimeConfigSnapshot,
+} from "../../lib/agent-runtime-config.ts";
 import { parseAgentRunPolicy } from "../../agent/lib/run-policy.ts";
 import { resolveAgentRunPolicy } from "../../lib/agent-extension-catalog.ts";
 
@@ -49,17 +50,27 @@ const startSchema = z.object({
   profile: z.object({
     profileId: z.string().trim().min(1).max(120),
     version: z.string().trim().min(1).max(40),
-  }).strict().refine(isAgentProfileRef, {
-    message: `The profile must be one of: ${AGENT_PROFILE_OPTIONS.map((profile) => `${profile.profileId}@${profile.version}`).join(", ")}.`,
-  }),
+  }).strict(),
 }).strict();
 
 export type ParsedStartAgentRun = StartAgentRunRequest & { readonly correlationId: string };
 
-export function parseStartAgentRun(value: unknown):
+export function parseStartAgentRun(
+  value: unknown,
+  config: AgentRuntimeConfigSnapshot = DEFAULT_AGENT_RUNTIME_CONFIG,
+):
   | { readonly ok: true; readonly value: ParsedStartAgentRun }
   | { readonly error: string; readonly ok: false } {
-  const parsed = startSchema.safeParse(value);
+  const schema = startSchema.superRefine((candidate, context) => {
+    if (!isAgentProfileForConfig(config, candidate.profile)) {
+      context.addIssue({
+        code: "custom",
+        path: ["profile"],
+        message: `The profile must be ${config.profile.id}@${config.profile.version}.`,
+      });
+    }
+  });
+  const parsed = schema.safeParse(value);
   if (!parsed.success) {
     return { error: "The AgentRun request does not match contract 0.1.0-draft.", ok: false };
   }
@@ -77,6 +88,8 @@ export function parseStartAgentRun(value: unknown):
     const policy = resolveAgentRunPolicy(
       parsed.data.profile,
       parseAgentRunPolicy(parsed.data.policy ?? {}),
+      undefined,
+      config,
     );
     return {
       ok: true,

@@ -1,13 +1,13 @@
 import { defineDynamic, defineTool } from "eve/tools";
 
 import {
-  isHostCapabilityConfigured,
   listHostCapabilities,
+  shouldExposeHostCapabilities,
 } from "../lib/host-capabilities";
 
 const tool = defineTool({
   description:
-    "List the authenticated host capabilities available in this Agent session. Use this before invoking a host-owned canvas, workflow, asset, or media capability.",
+    "List the capabilities explicitly exposed by the authenticated host for this Agent session. Discover the active contract before invoking a host capability.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   async execute(_input, ctx) {
     return {
@@ -18,6 +18,6 @@ const tool = defineTool({
 
 export default defineDynamic({
   events: {
-    "session.started": () => (isHostCapabilityConfigured() ? tool : null),
+    "session.started": (_event, ctx) => (shouldExposeHostCapabilities(ctx) ? tool : null),
   },
 });

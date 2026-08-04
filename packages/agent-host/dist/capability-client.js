@@ -1,4 +1,4 @@
-import { AGENT_HOST_CAPABILITY_CONTRACT_VERSION, } from "@muses/agent-contracts/host-capability";
+import { AGENT_HOST_CAPABILITY_CONTRACT_VERSION, } from "@oworker/open-agent-contracts/host-capability";
 import { signAgentHostCapabilityRequest } from "./capability-signature.js";
 export function createAgentHostCapabilityClient(options) {
     const fetchImplementation = options.fetch ?? globalThis.fetch;

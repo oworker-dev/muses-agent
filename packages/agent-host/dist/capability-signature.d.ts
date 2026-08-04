@@ -1,10 +1,9 @@
-import type { AgentHostInvocationIdentity } from "@muses/agent-contracts/host";
+import type { AgentHostInvocationIdentity } from "@oworker/open-agent-contracts/host";
 export declare const AGENT_HOST_SIGNATURE_VERSION: "0.2.0";
 export declare const AGENT_HOST_HEADER: {
     readonly actorType: "x-agent-host-actor-type";
-    readonly canvas: "x-agent-host-canvas";
     readonly principal: "x-agent-host-principal";
-    readonly project: "x-agent-host-project";
+    readonly scope: "x-agent-host-scope";
     readonly signature: "x-agent-host-signature";
     readonly tenant: "x-agent-host-tenant";
     readonly timestamp: "x-agent-host-timestamp";

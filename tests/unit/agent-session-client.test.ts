@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createEveAgentSessionClient } from "@muses/agent-client/eve-session";
+import { createEveAgentSessionClient } from "@oworker/open-agent-client/eve-session";
 
 test("Eve session adapter exposes a host-neutral durable cursor and events", async () => {
   const originalFetch = globalThis.fetch;

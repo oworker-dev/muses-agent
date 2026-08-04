@@ -35,13 +35,13 @@ if (serialized.includes(probe)) {
   throw new Error("A private prompt or model output was exported in an OpenTelemetry span.");
 }
 
-const agentSpans = spans.filter((span) => span.serviceName === "muses-agent");
-const webSpans = spans.filter((span) => span.serviceName === "muses-agent-web");
+const agentSpans = spans.filter((span) => span.serviceName === "open-agent");
+const webSpans = spans.filter((span) => span.serviceName === "open-agent-web");
 if (agentSpans.length === 0) throw new Error("No Eve Agent runtime spans were exported.");
 if (webSpans.length === 0) throw new Error("No Agent Web service spans were exported.");
 
 const webSpanContexts = new Set(webSpans.map((span) => `${span.traceId}:${span.spanId}`));
-const ingressSpans = agentSpans.filter((span) => span.name === "muses.agent.turn.accepted");
+const ingressSpans = agentSpans.filter((span) => span.name === "open_agent.turn.accepted");
 const linkedIngress = ingressSpans.find((span) =>
   (span.links || []).some((link) => webSpanContexts.has(`${link.traceId}:${link.spanId}`)),
 );
@@ -57,10 +57,10 @@ if (!turnTraceJoined) {
 
 const runtimeAttributes = linkedIngress.attributes || [];
 for (const name of [
-  "muses.agent.run_id",
-  "muses.agent.correlation_id",
-  "muses.agent.profile_id",
-  "muses.agent.session_id",
+  "open_agent.run_id",
+  "open_agent.correlation_id",
+  "open_agent.profile_id",
+  "open_agent.session_id",
 ]) {
   if (!runtimeAttributes.some((attribute) => attribute.key === name && anyValue(attribute.value) !== "")) {
     throw new Error(`Agent runtime spans are missing correlation attribute ${name}.`);

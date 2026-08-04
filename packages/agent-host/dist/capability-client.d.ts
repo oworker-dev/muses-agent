@@ -1,6 +1,6 @@
-import type { AgentHostInvocationIdentity } from "@muses/agent-contracts/host";
-import { type AgentHostCapabilityDescriptor, type AgentHostCapabilityInvokeRequest, type AgentHostCapabilityInvokeResponse } from "@muses/agent-contracts/host-capability";
-import type { JsonValue } from "@muses/agent-contracts/agent-run";
+import type { AgentHostInvocationIdentity } from "@oworker/open-agent-contracts/host";
+import { type AgentHostCapabilityDescriptor, type AgentHostCapabilityInvokeRequest, type AgentHostCapabilityInvokeResponse } from "@oworker/open-agent-contracts/host-capability";
+import type { JsonValue } from "@oworker/open-agent-contracts/agent-run";
 export type AgentHostCapabilityClientOptions = {
     readonly baseUrl: string;
     readonly fetch?: typeof globalThis.fetch;

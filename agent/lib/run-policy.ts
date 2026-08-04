@@ -38,7 +38,7 @@ const LIMIT_MAXIMUMS: Readonly<Record<keyof AgentRunLimits, number>> = {
 };
 
 export const runPolicyState = defineState<RunPolicyState>(
-  "muses-agent.run-policy.v1",
+  "open-agent.run-policy.v1",
   () => ({
     inputTokens: 0,
     modelCalls: 0,
@@ -49,8 +49,18 @@ export const runPolicyState = defineState<RunPolicyState>(
   }),
 );
 
-export function readAgentRunPolicy(session: { readonly session: { readonly auth: SessionContext["session"]["auth"] } }): AgentRunPolicy {
-  const value = session.session.auth.current?.attributes.agentRunPolicy;
+type RunPolicyContext = {
+  readonly session: {
+    readonly auth: {
+      readonly current?: { readonly attributes: Readonly<Record<string, unknown>> } | null;
+      readonly initiator?: { readonly attributes: Readonly<Record<string, unknown>> } | null;
+    };
+  };
+};
+
+export function readAgentRunPolicy(session: RunPolicyContext): AgentRunPolicy {
+  const value = session.session.auth.initiator?.attributes.agentRunPolicy ??
+    session.session.auth.current?.attributes.agentRunPolicy;
   if (typeof value !== "string") return {};
   try {
     const parsed: unknown = JSON.parse(value);

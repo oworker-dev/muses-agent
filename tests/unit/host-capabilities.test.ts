@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { SessionContext } from "eve/context";
-import { verifyAgentHostCapabilityRequest } from "@muses/agent-host";
+import { verifyAgentHostCapabilityRequest } from "@oworker/open-agent-host";
 
 import {
   invokeHostCapability,
   listHostCapabilities,
   readHostCapabilityTimeoutMs,
+  shouldExposeHostCapabilities,
 } from "../../agent/lib/host-capabilities.ts";
 
 const SECRET = "01234567890123456789012345678901";
@@ -24,12 +25,40 @@ test("bounds the Host capability timeout and covers synchronous media by default
   );
 });
 
-test("signs Host capability requests with raw host identity and project scope", async () => {
+test("does not expose inherited Host tools without an authenticated explicit grant", () => {
+  const environment = {
+    AGENT_HOST_TOOLS_URL: "https://host.example/agent-tools",
+    AGENT_HOST_TOOLS_SECRET: SECRET,
+  };
+  assert.equal(shouldExposeHostCapabilities({
+    session: { auth: { current: null, initiator: null } },
+  }, environment), false);
+  assert.equal(shouldExposeHostCapabilities({
+    session: {
+      auth: {
+        initiator: { attributes: {} },
+      },
+    },
+  }, environment), false);
+  assert.equal(shouldExposeHostCapabilities({
+    session: {
+      auth: {
+        initiator: {
+          attributes: {
+            agentRunPolicy: JSON.stringify({ hostCapabilities: ["documents.read"] }),
+          },
+        },
+      },
+    },
+  }, environment), true);
+});
+
+test("signs Host capability requests with raw host identity and opaque scope", async () => {
   const previousUrl = process.env.AGENT_HOST_TOOLS_URL;
   const previousSecret = process.env.AGENT_HOST_TOOLS_SECRET;
   const previousFetch = globalThis.fetch;
   process.env.AGENT_HOST_TOOLS_URL =
-    "https://muses.test/api/studio/agent-host-tools";
+    "https://host.test/agent-tools";
   process.env.AGENT_HOST_TOOLS_SECRET = SECRET;
   const requests: Request[] = [];
   globalThis.fetch = async (input, init) => {
@@ -44,11 +73,11 @@ test("signs Host capability requests with raw host identity and project scope", 
     const request = requests[0]!;
     assert.equal(
       request.url,
-      "https://muses.test/api/studio/agent-host-tools/capabilities",
+      "https://host.test/agent-tools/capabilities",
     );
     assert.equal(request.headers.get("x-agent-host-principal"), "user-1");
     assert.equal(request.headers.get("x-agent-host-tenant"), "workspace-1");
-    assert.equal(request.headers.get("x-agent-host-project"), "project-1");
+    assert.ok(request.headers.get("x-agent-host-scope"));
     assertValidSignature(request, "");
   } finally {
     restoreEnvironment(previousUrl, previousSecret, previousFetch);
@@ -127,7 +156,7 @@ function sessionContext(agentRunPolicy?: string): SessionContext {
         current: {
           attributes: {
             actorType: "user",
-            projectId: "project-1",
+            agentHostScope: JSON.stringify({ projectId: "project-1", canvasId: "canvas-1" }),
             tenantId: "workspace-1",
             agentRunId: "arun_external-1",
             ...(agentRunPolicy ? { agentRunPolicy } : {}),
@@ -164,7 +193,7 @@ function assertValidSignature(request: Request, body: string) {
   assert.deepEqual(identity, {
     actorType: "user",
     principalId: "user-1",
-    projectId: "project-1",
+    scope: { canvasId: "canvas-1", projectId: "project-1" },
     tenantId: "workspace-1",
   });
 }

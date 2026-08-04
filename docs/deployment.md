@@ -8,7 +8,7 @@ claim that an unverified deployment is production-ready.
 Run Agent Web and Eve Runtime as separate Node.js 24 processes. Use three
 separate state boundaries:
 
-1. Host product data may contain the `muses_agent` product schema for thread,
+1. Host product data may contain the `open_agent` product schema for thread,
    ownership, AgentRun, extension, and deletion-authorization records.
 2. Eve must use a physically separate PostgreSQL database for its Workflow
    World. A schema or queue prefix is not enough to isolate incompatible
@@ -17,7 +17,7 @@ separate state boundaries:
    Eve database.
 
 Use a unique `WORKFLOW_POSTGRES_JOB_PREFIX` for every World. The supported Eve
-prefix is `muses_agent_`; the Muses host uses `muses_` in its own database.
+prefix is `open_agent_`; the Muses host uses `muses_` in its own database.
 
 ## Preflight
 

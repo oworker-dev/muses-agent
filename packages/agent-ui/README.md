@@ -1,4 +1,4 @@
-# @muses/agent-ui
+# @oworker/open-agent-ui
 
 Reusable React workspace and AI Elements for the independent Muses Agent
 service. The package owns presentation and durable Eve session projection, but
@@ -7,13 +7,13 @@ does not own host identity, model entitlement, billing, or Muses canvas state.
 Import the precompiled stylesheet once in the host application:
 
 ```css
-@import "@muses/agent-ui/styles.css";
+@import "@oworker/open-agent-ui/styles.css";
 ```
 
 Then inject the host-reviewed model catalog and defaults:
 
 ```tsx
-import { AgentWorkspace } from "@muses/agent-ui";
+import { AgentWorkspace } from "@oworker/open-agent-ui";
 
 export function AgentPage() {
   return (
@@ -33,7 +33,7 @@ export function AgentPage() {
 
 The package carries the complete AI Elements and shadcn/ui registries used by
 the product. Import their barrels or stable subpaths such as
-`@muses/agent-ui/ai-elements/context` and `@muses/agent-ui/ui/button`.
+`@oworker/open-agent-ui/ai-elements/context` and `@oworker/open-agent-ui/ui/button`.
 `commands`, `mentions`, and `extensions` are host-injected catalogs; Muses
 canvas concepts never become a dependency of this package. Hosts that own their
-UI can omit this package and use `@muses/agent-client/eve-session` directly.
+UI can omit this package and use `@oworker/open-agent-client/eve-session` directly.

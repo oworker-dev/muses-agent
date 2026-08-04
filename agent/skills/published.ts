@@ -2,6 +2,7 @@ import { defineDynamic, defineSkill, type DynamicResolveContext } from "eve/skil
 import { resolveAgentRunPolicy } from "../../lib/agent-extension-catalog.ts";
 import { readAgentRunPolicy } from "../lib/run-policy.ts";
 import { createPostgresAgentExtensionStoreFromEnvironment } from "../../server/data/agent-extension-store.ts";
+import { readAgentRuntimeConfig } from "../lib/runtime-config.ts";
 
 const SOFTWARE_TASK = {
   id: "software-task",
@@ -11,18 +12,21 @@ const extensionStore = createPostgresAgentExtensionStoreFromEnvironment();
 
 async function resolvePublishedSkills(ctx: DynamicResolveContext) {
   const attributes = ctx.session.auth.current?.attributes;
+  const config = readAgentRuntimeConfig(ctx);
   const policy = resolveAgentRunPolicy(
     {
       profileId:
         typeof attributes?.agentProfileId === "string"
           ? attributes.agentProfileId
-          : "general-purpose",
+          : config.profile.id,
       version:
         typeof attributes?.agentProfileVersion === "string"
           ? attributes.agentProfileVersion
-          : "0.1.0",
+          : config.profile.version,
     },
     readAgentRunPolicy(ctx),
+    undefined,
+    config,
   );
   const tenantId = attributes?.tenantId;
   if (extensionStore && typeof tenantId === "string" && tenantId.trim()) {

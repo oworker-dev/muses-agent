@@ -1,4 +1,4 @@
-import { type AgentEvent, type AgentRunSnapshot, type StartAgentRunRequest } from "@muses/agent-contracts/agent-run";
+import { type AgentEvent, type AgentRunSnapshot, type StartAgentRunRequest } from "@oworker/open-agent-contracts/agent-run";
 export declare const AGENT_CLIENT_VERSION: "0.1.0-alpha.8";
 export declare const AGENT_HOST_SDK_VERSION: "0.1.0-draft";
 export type AgentClientHeaders = Readonly<Record<string, string>> | (() => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>);

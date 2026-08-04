@@ -6,6 +6,7 @@ import {
   parseAgentEmbedEvent,
   parseAgentEmbedHostMessage,
 } from "../../contracts/agent-embed.ts";
+import { DEFAULT_AGENT_RUNTIME_CONFIG } from "../../lib/agent-runtime-config.ts";
 
 test("accepts a valid in-memory embed configuration", () => {
   const parsed = parseAgentEmbedHostMessage({
@@ -16,10 +17,11 @@ test("accepts a valid in-memory embed configuration", () => {
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
     serviceUrl: "https://agent.example",
     storageKey: "tenant:project:threads",
-    profile: { id: "muses-platform", version: "0.1.0" },
+    profile: { id: "general-purpose", version: "0.1.0" },
+    runtimeConfig: DEFAULT_AGENT_RUNTIME_CONFIG,
     theme: "light",
   });
-  assert.equal(parsed?.profile.id, "muses-platform");
+  assert.equal(parsed?.profile.id, "general-purpose");
 });
 
 test("rejects tokens in an invalid or unknown protocol message", () => {

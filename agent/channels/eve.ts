@@ -5,10 +5,12 @@ import {
   vercelOidc,
 } from "eve/channels/auth";
 import {
-  isAgentModelId,
-  isAgentProfileRef,
-  isAgentReasoningLevel,
-} from "../../lib/agent-profile";
+  findAgentRuntimeModel,
+  isAgentProfileForConfig,
+  isAgentReasoningLevelForModel,
+  resolveAgentRuntimeConfig,
+  serializeAgentRuntimeConfig,
+} from "../../lib/agent-runtime-config";
 import { resolveAgentRunPolicy } from "../../lib/agent-extension-catalog";
 import type { AgentRunPolicy } from "../../contracts/agent-run";
 import { createPostgresSessionOwnershipStoreFromEnvironment } from "../../server/data/session-ownership-store";
@@ -41,21 +43,37 @@ function withAgentPreferences(authenticate: AuthFn<Request>): AuthFn<Request> {
     const requestedModel = request.headers.get(MODEL_HEADER) ?? undefined;
     const requestedReasoning = request.headers.get(REASONING_HEADER) ?? undefined;
     const attributes = { ...auth.attributes };
+    const runtimeConfig = resolveAgentRuntimeConfig(attributes);
+    const selectedModel = findAgentRuntimeModel(runtimeConfig, requestedModel) ??
+      findAgentRuntimeModel(runtimeConfig, runtimeConfig.defaultModelId)!;
 
-    if (isAgentModelId(requestedModel)) attributes.agentModelId = requestedModel;
-    if (isAgentReasoningLevel(requestedReasoning)) {
+    if (requestedModel !== undefined && !findAgentRuntimeModel(runtimeConfig, requestedModel)) {
+      throw new Error("The requested Agent model is not published by the active runtime config.");
+    }
+    attributes.agentModelId = selectedModel.id;
+    if (requestedReasoning !== undefined && !isAgentReasoningLevelForModel(selectedModel, requestedReasoning)) {
+      throw new Error("The requested reasoning level is not supported by the selected Agent model.");
+    }
+    if (isAgentReasoningLevelForModel(selectedModel, requestedReasoning)) {
       attributes.agentReasoning = requestedReasoning;
+    } else {
+      attributes.agentReasoning = selectedModel.defaultReasoning;
     }
     const profile = {
-      profileId: request.headers.get(PROFILE_ID_HEADER)?.trim() || "general-purpose",
-      version: request.headers.get(PROFILE_VERSION_HEADER)?.trim() || "0.1.0",
+      profileId: request.headers.get(PROFILE_ID_HEADER)?.trim() || runtimeConfig.profile.id,
+      version: request.headers.get(PROFILE_VERSION_HEADER)?.trim() || runtimeConfig.profile.version,
     };
-    if (!isAgentProfileRef(profile)) throw new Error("The Agent profile is invalid or unpublished.");
+    if (!isAgentProfileForConfig(runtimeConfig, profile)) {
+      throw new Error("The Agent profile is invalid or unpublished by the active runtime config.");
+    }
     attributes.agentProfileId = profile.profileId;
     attributes.agentProfileVersion = profile.version;
+    attributes.agentRuntimeConfig = serializeAgentRuntimeConfig(runtimeConfig);
     const runPolicy = resolveAgentRunPolicy(
       profile,
       parseRunPolicyHeader(request.headers.get(RUN_POLICY_HEADER)),
+      undefined,
+      runtimeConfig,
     );
     const tenantId = attributes.tenantId;
     if (extensionStore && typeof tenantId === "string" && tenantId.trim()) {

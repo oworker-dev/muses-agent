@@ -3,7 +3,7 @@ import {
   type AgentEvent,
   type AgentRunSnapshot,
   type StartAgentRunRequest,
-} from "@muses/agent-contracts/agent-run";
+} from "@oworker/open-agent-contracts/agent-run";
 
 export const AGENT_CLIENT_VERSION = "0.1.0-alpha.8" as const;
 export const AGENT_HOST_SDK_VERSION = "0.1.0-draft" as const;

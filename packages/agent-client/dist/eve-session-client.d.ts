@@ -1,4 +1,4 @@
-import { type AgentSessionCancellation, type AgentSessionCursor, type AgentSessionEvent, type AgentSessionReset, type AgentSessionSendPayload, type AgentSessionTurnResult } from "@muses/agent-contracts/agent-session";
+import { type AgentSessionCancellation, type AgentSessionCursor, type AgentSessionEvent, type AgentSessionReset, type AgentSessionSendPayload, type AgentSessionTurnResult } from "@oworker/open-agent-contracts/agent-session";
 import type { AgentClientHeaders } from "./agent-run-client.js";
 export declare const EVE_AGENT_SESSION_ADAPTER_VERSION: "0.1.0-alpha.8";
 export type AgentSessionClientOptions = {

@@ -14,8 +14,8 @@ import {
   type AgentSessionReset,
   type AgentSessionSendPayload,
   type AgentSessionTurnResult,
-} from "@muses/agent-contracts/agent-session";
-import type { JsonValue } from "@muses/agent-contracts/agent-run";
+} from "@oworker/open-agent-contracts/agent-session";
+import type { JsonValue } from "@oworker/open-agent-contracts/agent-run";
 import type { AgentClientHeaders } from "./agent-run-client.js";
 
 export const EVE_AGENT_SESSION_ADAPTER_VERSION = "0.1.0-alpha.8" as const;

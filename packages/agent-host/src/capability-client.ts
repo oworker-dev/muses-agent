@@ -1,12 +1,12 @@
-import type { AgentHostInvocationIdentity } from "@muses/agent-contracts/host";
+import type { AgentHostInvocationIdentity } from "@oworker/open-agent-contracts/host";
 import {
   AGENT_HOST_CAPABILITY_CONTRACT_VERSION,
   type AgentHostCapabilitiesResponse,
   type AgentHostCapabilityDescriptor,
   type AgentHostCapabilityInvokeRequest,
   type AgentHostCapabilityInvokeResponse,
-} from "@muses/agent-contracts/host-capability";
-import type { JsonValue } from "@muses/agent-contracts/agent-run";
+} from "@oworker/open-agent-contracts/host-capability";
+import type { JsonValue } from "@oworker/open-agent-contracts/agent-run";
 import { signAgentHostCapabilityRequest } from "./capability-signature.js";
 
 export type AgentHostCapabilityClientOptions = {
