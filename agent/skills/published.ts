@@ -1,5 +1,8 @@
 import { defineDynamic, defineSkill, type DynamicResolveContext } from "eve/skills";
-import { resolveAgentRunPolicy } from "../../lib/agent-extension-catalog.ts";
+import {
+  resolveAgentRunPolicy,
+  runtimeExtensionForRef,
+} from "../../lib/agent-extension-catalog.ts";
 import { readAgentRunPolicy } from "../lib/run-policy.ts";
 import { createPostgresAgentExtensionStoreFromEnvironment } from "../../server/data/agent-extension-store.ts";
 import { readAgentRuntimeConfig } from "../lib/runtime-config.ts";
@@ -32,18 +35,28 @@ async function resolvePublishedSkills(ctx: DynamicResolveContext) {
   if (extensionStore && typeof tenantId === "string" && tenantId.trim()) {
     await extensionStore.assertPolicyAllowed(tenantId, policy);
   }
-  if (!policy.skills?.some(
-    (skill) => skill.id === SOFTWARE_TASK.id && skill.version === SOFTWARE_TASK.version,
-  )) return null;
-
-  return {
-    "software-task": defineSkill({
-      description:
-        "Use when implementing, debugging, reviewing, or validating a software change in the workspace.",
-      markdown:
-        "Inspect the repository instructions and current state before editing. Preserve unrelated changes. Prefer existing project patterns and small, coherent edits. For a behavior change, add or update focused tests and run the narrowest useful validation first, then the broader project checks required by the risk. Report what changed, what was verified, and any remaining uncertainty.",
+  const skills = policy.skills ?? [];
+  const resolved = Object.fromEntries(
+    skills.flatMap((skill) => {
+      const runtimeExtension = runtimeExtensionForRef(config, "skill", skill);
+      if (runtimeExtension?.skill) {
+        return [[skill.id, defineSkill({
+          description: runtimeExtension.description,
+          markdown: runtimeExtension.skill.markdown,
+        })]];
+      }
+      if (skill.id === SOFTWARE_TASK.id && skill.version === SOFTWARE_TASK.version) {
+        return [["software-task", defineSkill({
+          description:
+            "Use when implementing, debugging, reviewing, or validating a software change in the workspace.",
+          markdown:
+            "Inspect the repository instructions and current state before editing. Preserve unrelated changes. Prefer existing project patterns and small, coherent tests and run the narrowest useful validation first, then the broader project checks required by the risk. Report what changed, what was verified, and any remaining uncertainty.",
+        })]];
+      }
+      return [];
     }),
-  };
+  );
+  return Object.keys(resolved).length ? resolved : null;
 }
 
 export default defineDynamic({

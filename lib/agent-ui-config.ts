@@ -16,7 +16,19 @@ export function createAgentUiConfig(config: AgentRuntimeConfigSnapshot = DEFAULT
     label,
   }));
   const defaultModel = findAgentRuntimeModel(config, config.defaultModelId) ?? config.models[0]!;
-  const skills = config.profile.allowedSkills.filter((extension) => extension.id === "software-task");
+  const skills = config.profile.allowedSkills.map((extension) => {
+    const published = config.extensions?.find(
+      (candidate) =>
+        candidate.kind === "skill" &&
+        candidate.id === extension.id &&
+        candidate.version === extension.version,
+    );
+    return {
+      ...extension,
+      label: published?.label ?? extension.id,
+      description: published?.description ?? `Published ${extension.id} skill.`,
+    };
+  });
   return {
     models: modelOptions,
     reasoningLevels: defaultModel.reasoningLevels,
@@ -26,18 +38,18 @@ export function createAgentUiConfig(config: AgentRuntimeConfigSnapshot = DEFAULT
     },
     commands: skills.map((skill) => ({
       id: skill.id,
-      label: skill.id,
+      label: skill.label,
       value: `/${skill.id}`,
-      description: `Load the ${skill.id} skill.`,
+      description: skill.description,
       keywords: ["skill"],
     })),
     extensions: skills.map((skill) => ({
       id: skill.id,
       kind: "skill" as const,
-      label: skill.id,
+      label: skill.label,
       status: "available" as const,
       version: skill.version,
-      description: `Published ${skill.id} skill.`,
+      description: skill.description,
     })),
   } as const;
 }

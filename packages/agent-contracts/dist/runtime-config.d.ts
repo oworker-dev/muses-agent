@@ -23,6 +23,22 @@ export type AgentRuntimeProfile = {
     readonly defaultMcpConnections: readonly AgentExtensionRef[];
 };
 /**
+ * Host-published extension metadata. Skill content is procedure text only;
+ * credentials and opaque provider secrets are never valid in this contract.
+ */
+export type AgentRuntimeExtension = AgentExtensionRef & {
+    readonly kind: "mcp" | "skill";
+    readonly label: string;
+    readonly description: string;
+    readonly skill?: {
+        readonly markdown: string;
+    };
+    readonly mcp?: {
+        readonly endpoint: string;
+        readonly authProvider?: string;
+    };
+};
+/**
  * A credential-free, versioned execution snapshot supplied by the standalone
  * deployment or an authenticated integrator. Existing durable sessions pin the
  * exact snapshot; changing a Host default never mutates an active session.
@@ -38,6 +54,7 @@ export type AgentRuntimeConfigSnapshot = {
         readonly thresholdPercent: number;
     };
     readonly limits: AgentRunLimits;
+    readonly extensions?: readonly AgentRuntimeExtension[];
     readonly metadata?: Readonly<Record<string, JsonValue>>;
 };
 export declare function parseAgentRuntimeConfigSnapshot(value: unknown): AgentRuntimeConfigSnapshot;

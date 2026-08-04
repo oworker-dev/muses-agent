@@ -65,3 +65,52 @@ test("loads a deployment snapshot without exposing provider credentials", () => 
   });
   assert.equal(JSON.stringify(config).includes("must-not-appear"), false);
 });
+
+test("accepts host-published Skill content but rejects credentials and insecure MCP endpoints", () => {
+  const skill = { id: "research", version: "1.0.0" };
+  const config = parseAgentRuntimeConfigSnapshot({
+    ...DEFAULT_AGENT_RUNTIME_CONFIG,
+    profile: {
+      ...DEFAULT_AGENT_RUNTIME_CONFIG.profile,
+      allowedSkills: [skill],
+      defaultSkills: [skill],
+    },
+    extensions: [{
+      ...skill,
+      kind: "skill",
+      label: "Research",
+      description: "Research procedure",
+      skill: { markdown: "Use sources before answering." },
+    }],
+  });
+  assert.equal(config.extensions?.[0]?.skill?.markdown, "Use sources before answering.");
+  assert.throws(
+    () => parseAgentRuntimeConfigSnapshot({
+      ...DEFAULT_AGENT_RUNTIME_CONFIG,
+      extensions: [{
+        id: "remote",
+        version: "1.0.0",
+        kind: "mcp",
+        label: "Remote",
+        description: "Remote MCP",
+        mcp: { endpoint: "http://remote.example/mcp" },
+      }],
+    }),
+    /HTTPS/,
+  );
+  assert.throws(
+    () => parseAgentRuntimeConfigSnapshot({
+      ...DEFAULT_AGENT_RUNTIME_CONFIG,
+      extensions: [{
+        id: "leak",
+        version: "1.0.0",
+        kind: "skill",
+        label: "Leak",
+        description: "Contains a secret",
+        skill: { markdown: "token=secret" },
+        apiKey: "secret",
+      }],
+    }),
+    /unknown field apiKey/,
+  );
+});

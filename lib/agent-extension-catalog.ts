@@ -4,7 +4,10 @@ import type {
   AgentRunPolicy,
   AgentProfileRef as ContractAgentProfileRef,
 } from "../contracts/agent-run.ts";
-import type { AgentRuntimeConfigSnapshot } from "@oworker/open-agent-contracts/runtime-config";
+import type {
+  AgentRuntimeConfigSnapshot,
+  AgentRuntimeExtension,
+} from "@oworker/open-agent-contracts/runtime-config";
 import { DEFAULT_AGENT_RUNTIME_CONFIG } from "./agent-runtime-config.ts";
 
 export type AgentExtensionKind = "mcp" | "skill";
@@ -55,12 +58,14 @@ export function resolveAgentRunPolicy(
     requested.skills ?? profile.defaultSkills,
     profile.allowedSkills,
     revokedRefs,
+    config,
   );
   const mcpConnections = resolveExtensionRefs(
     "mcp",
     requested.mcpConnections ?? profile.defaultMcpConnections,
     profile.allowedMcpConnections,
     revokedRefs,
+    config,
   );
   const limits = mergeAgentRunLimits(config.limits, requested.limits);
 
@@ -121,6 +126,7 @@ function resolveExtensionRefs(
   requested: readonly AgentExtensionRef[],
   allowed: readonly AgentExtensionRef[],
   revokedRefs: ReadonlySet<string>,
+  config: AgentRuntimeConfigSnapshot,
 ): readonly AgentExtensionRef[] {
   const allowedKeys = new Set(allowed.map(extensionRefKey));
   const resolved = new Map<string, AgentExtensionRef>();
@@ -129,16 +135,39 @@ function resolveExtensionRefs(
     if (!allowedKeys.has(key)) {
       throw new Error(`Extension ${key} is not allowed by the Agent profile.`);
     }
-    const manifest = AGENT_EXTENSION_CATALOG.find(
+    const runtimeManifest = config.extensions?.find(
+      (candidate) =>
+        candidate.id === ref.id &&
+        candidate.version === ref.version &&
+        candidate.kind === kind,
+    );
+    const staticManifest = AGENT_EXTENSION_CATALOG.find(
       (candidate) => extensionRefKey(candidate) === key && candidate.kind === kind,
     );
+    const manifest = runtimeManifest ?? staticManifest;
     if (!manifest) throw new Error(`Extension ${key} is not installed as ${kind}.`);
-    if (manifest.status !== "published" || revokedRefs.has(key)) {
+    if (
+      revokedRefs.has(key) ||
+      runtimeManifest === undefined && staticManifest?.status !== "published"
+    ) {
       throw new Error(`Extension ${key} is revoked.`);
     }
     resolved.set(key, { id: manifest.id, version: manifest.version });
   }
   return [...resolved.values()].sort((left, right) =>
     extensionRefKey(left).localeCompare(extensionRefKey(right)),
+  );
+}
+
+export function runtimeExtensionForRef(
+  config: AgentRuntimeConfigSnapshot,
+  kind: AgentExtensionKind,
+  ref: AgentExtensionRef,
+): AgentRuntimeExtension | undefined {
+  return config.extensions?.find(
+    (extension) =>
+      extension.kind === kind &&
+      extension.id === ref.id &&
+      extension.version === ref.version,
   );
 }

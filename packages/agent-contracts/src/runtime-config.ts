@@ -29,6 +29,23 @@ export type AgentRuntimeProfile = {
 };
 
 /**
+ * Host-published extension metadata. Skill content is procedure text only;
+ * credentials and opaque provider secrets are never valid in this contract.
+ */
+export type AgentRuntimeExtension = AgentExtensionRef & {
+  readonly kind: "mcp" | "skill";
+  readonly label: string;
+  readonly description: string;
+  readonly skill?: {
+    readonly markdown: string;
+  };
+  readonly mcp?: {
+    readonly endpoint: string;
+    readonly authProvider?: string;
+  };
+};
+
+/**
  * A credential-free, versioned execution snapshot supplied by the standalone
  * deployment or an authenticated integrator. Existing durable sessions pin the
  * exact snapshot; changing a Host default never mutates an active session.
@@ -44,6 +61,7 @@ export type AgentRuntimeConfigSnapshot = {
     readonly thresholdPercent: number;
   };
   readonly limits: AgentRunLimits;
+  readonly extensions?: readonly AgentRuntimeExtension[];
   readonly metadata?: Readonly<Record<string, JsonValue>>;
 };
 
@@ -57,6 +75,7 @@ export function parseAgentRuntimeConfigSnapshot(value: unknown): AgentRuntimeCon
     "limits",
     "metadata",
     "models",
+    "extensions",
     "profile",
     "version",
   ], "config");
@@ -84,6 +103,8 @@ export function parseAgentRuntimeConfigSnapshot(value: unknown): AgentRuntimeCon
     throw invalid("compaction.thresholdPercent must be from 0.5 to 0.95");
   }
   const limits = parseLimits(value.limits);
+  const extensions = parseExtensions(value.extensions);
+  assertProfileExtensions(profile, extensions);
   const metadata = value.metadata === undefined
     ? undefined
     : jsonRecord(value.metadata, "metadata", 64 * 1024);
@@ -96,8 +117,89 @@ export function parseAgentRuntimeConfigSnapshot(value: unknown): AgentRuntimeCon
     profile,
     compaction: { thresholdPercent },
     limits,
+    ...(extensions.length ? { extensions } : {}),
     ...(metadata ? { metadata } : {}),
   };
+}
+
+function parseExtensions(value: unknown): readonly AgentRuntimeExtension[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 128) {
+    throw invalid("extensions must contain at most 128 entries");
+  }
+  const seen = new Set<string>();
+  return value.map((item) => {
+    if (!isRecord(item)) throw invalid("extensions contains an invalid entry");
+    assertOnlyKeys(item, ["description", "id", "kind", "label", "mcp", "skill", "version"], "extension");
+    const id = text(item.id, "extension.id", 120);
+    const version = text(item.version, "extension.version", 80);
+    const kind = item.kind === "skill" || item.kind === "mcp" ? item.kind : invalid("extension.kind is invalid");
+    const key = `${kind}:${id}@${version}`;
+    if (seen.has(key)) throw invalid(`extension ${key} is duplicated`);
+    seen.add(key);
+    const label = text(item.label, "extension.label", 120);
+    const description = text(item.description, "extension.description", 2_000);
+    const skill = item.skill === undefined
+      ? undefined
+      : parseSkill(item.skill);
+    const mcp = item.mcp === undefined
+      ? undefined
+      : parseMcp(item.mcp);
+    if (kind === "skill" && !skill) throw invalid(`skill extension ${key} is missing content`);
+    if (kind === "mcp" && !mcp) throw invalid(`MCP extension ${key} is missing endpoint`);
+    if (kind === "skill" && mcp || kind === "mcp" && skill) {
+      throw invalid(`extension ${key} contains content for the wrong kind`);
+    }
+    return {
+      id,
+      version,
+      kind,
+      label,
+      description,
+      ...(skill ? { skill } : {}),
+      ...(mcp ? { mcp } : {}),
+    };
+  });
+}
+
+function parseSkill(value: unknown): AgentRuntimeExtension["skill"] {
+  if (!isRecord(value)) throw invalid("extension.skill must be an object");
+  assertOnlyKeys(value, ["markdown"], "extension.skill");
+  return { markdown: text(value.markdown, "extension.skill.markdown", 100_000) };
+}
+
+function parseMcp(value: unknown): AgentRuntimeExtension["mcp"] {
+  if (!isRecord(value)) throw invalid("extension.mcp must be an object");
+  assertOnlyKeys(value, ["authProvider", "endpoint"], "extension.mcp");
+  const endpoint = text(value.endpoint, "extension.mcp.endpoint", 2_048);
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw invalid("extension.mcp.endpoint must be an absolute HTTP(S) URL");
+  }
+  if (url.protocol !== "https:") throw invalid("extension.mcp.endpoint must use HTTPS");
+  const authProvider = value.authProvider === undefined
+    ? undefined
+    : text(value.authProvider, "extension.mcp.authProvider", 120);
+  return { endpoint, ...(authProvider ? { authProvider } : {}) };
+}
+
+function assertProfileExtensions(
+  profile: AgentRuntimeProfile,
+  extensions: readonly AgentRuntimeExtension[],
+) {
+  const available = new Set(extensions.map((item) => `${item.kind}:${item.id}@${item.version}`));
+  for (const ref of profile.allowedSkills) {
+    if (!available.has(`skill:${ref.id}@${ref.version}`)) {
+      throw invalid(`profile skill ${ref.id}@${ref.version} has no published extension manifest`);
+    }
+  }
+  for (const ref of profile.allowedMcpConnections) {
+    if (!available.has(`mcp:${ref.id}@${ref.version}`)) {
+      throw invalid(`profile MCP connection ${ref.id}@${ref.version} has no published extension manifest`);
+    }
+  }
 }
 
 function parseModel(value: unknown): AgentRuntimeModel {
