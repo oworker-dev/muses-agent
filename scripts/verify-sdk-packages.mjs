@@ -21,6 +21,7 @@ try {
     "@oworker/open-agent-client",
     "@oworker/open-agent-host",
     "@oworker/open-agent-ui",
+    "@oworker/open-agent-mcp-adapter",
   ]) {
     execFileSync(
       "npm",
@@ -32,13 +33,20 @@ try {
   const archives = (await readdir(packageDirectory))
     .filter((file) => file.endsWith(".tgz"))
     .map((file) => join(packageDirectory, file));
-  assert.equal(archives.length, 4, "Expected one archive for each public SDK package.");
+  assert.equal(archives.length, 5, "Expected one archive for each public SDK package.");
 
   await writeFile(
     join(consumerDirectory, "package.json"),
     JSON.stringify({ name: "agent-sdk-conformance-consumer", private: true, type: "module" }),
   );
-  execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", ...archives], {
+  execFileSync("npm", [
+    "install",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    "eve@0.27.8",
+    ...archives,
+  ], {
     cwd: consumerDirectory,
     stdio: "pipe",
   });
@@ -51,6 +59,7 @@ try {
     import { AGENT_CLIENT_VERSION, createAgentRunClient } from "@oworker/open-agent-client";
     import { AGENT_HOST_SIGNATURE_VERSION, signAgentHostCapabilityRequest } from "@oworker/open-agent-host";
     import { AGENT_UI_VERSION, AgentWorkspace } from "@oworker/open-agent-ui";
+    import { createBrokeredMcpConnection } from "@oworker/open-agent-mcp-adapter";
     import { Conversation } from "@oworker/open-agent-ui/ai-elements/conversation";
     import { Context, ModelSelector } from "@oworker/open-agent-ui/ai-elements";
     import { Button } from "@oworker/open-agent-ui/ui/button";
@@ -63,6 +72,7 @@ try {
     assert.equal(typeof createAgentRunClient, "function");
     assert.equal(typeof signAgentHostCapabilityRequest, "function");
     assert.equal(typeof AgentWorkspace, "function");
+    assert.equal(typeof createBrokeredMcpConnection, "function");
     assert.equal(typeof Conversation, "function");
     assert.equal(typeof Context, "function");
     assert.equal(typeof ModelSelector, "function");
@@ -78,7 +88,7 @@ try {
     join(pnpmConsumerDirectory, "package.json"),
     JSON.stringify({ name: "agent-sdk-pnpm-conformance-consumer", private: true, type: "module" }),
   );
-  execFileSync("pnpm", ["add", "--ignore-scripts", ...archives], {
+  execFileSync("pnpm", ["add", "--ignore-scripts", "eve@0.27.8", ...archives], {
     cwd: pnpmConsumerDirectory,
     stdio: "pipe",
   });

@@ -7,6 +7,7 @@ const distributionPaths = [
   "packages/agent-client/dist",
   "packages/agent-host/dist",
   "packages/agent-ui/dist",
+  "packages/agent-mcp-adapter/dist",
 ];
 const requiredEntrypoints = distributionPaths.map((path) => `${path}/index.js`);
 

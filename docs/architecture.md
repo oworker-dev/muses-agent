@@ -241,9 +241,10 @@ Host-published Skill manifests and procedure markdown may be carried in the
 credential-free `AgentRuntimeConfigSnapshot.extensions` field. The Agent pins
 that snapshot at session start, validates that Profile grants have matching
 manifests, and resolves the Skill dynamically for the session. MCP entries may
-currently be declared as HTTPS endpoint metadata only; the runtime does not
-turn that metadata into a live connection until a host-provided auth and tool
-adapter is installed.
+be declared as HTTPS endpoint metadata only; the runtime never turns that
+metadata into network code. A deployment must explicitly author a compiled
+connection with the reviewed `@oworker/open-agent-mcp-adapter` factory, and its
+exact id/version must also exist in the deployment catalog.
 
 Eve compaction remains deployment-level configuration. The Runtime Config
 contract exposes the selected threshold for UI and audit consistency, but it
@@ -266,12 +267,15 @@ credential references and values are excluded from audit state. A revocation
 takes effect on the next Run or continuation boundary, not retroactively on a
 completed external side effect. Runtime Config Skill text resolves dynamically
 after the same lifecycle check. MCP manifest metadata can enter the lifecycle
-catalog, but Eve connections are still build-time mounted capabilities; a
+catalog, but Eve connections are still build-time authored capabilities; a
 manifest cannot create an unreviewed network adapter, and AgentRun policy
 resolution fails closed when no same-version compiled adapter exists. The
-deployment currently publishes one built-in Skill and intentionally mounts no
-MCP connection until its endpoint, tool allowlist, principal-scoped auth,
-approval policy, and real execution eval exist.
+standalone deployment publishes one built-in Skill and intentionally imports no
+MCP connection. The reusable connection factory and deterministic conformance
+gate now prove a private broker, exact Run grant, tenant continuity, compiled
+allowlist, durable write approval, next-boundary revocation, and secret-free
+events. A consuming deployment still owns the concrete endpoint and catalog,
+and real third-party OAuth remains a separate release gate.
 
 ## Authentication and authorization
 
@@ -307,9 +311,10 @@ The Muses Studio reference integration currently has two separate surfaces:
   `host_capabilities`/`host_invoke` protocol.
 
 The repository now builds `@oworker/open-agent-contracts@0.1.0-alpha.9`,
-`@oworker/open-agent-client@0.1.0-alpha.9`, `@oworker/open-agent-host@0.1.0-alpha.9`, and
-`@oworker/open-agent-ui@0.1.0-alpha.9` as real ESM/declaration packages with stable
-subpath exports. A conformance command packs all four tarballs, installs them
+`@oworker/open-agent-client@0.1.0-alpha.9`, `@oworker/open-agent-host@0.1.0-alpha.9`,
+`@oworker/open-agent-ui@0.1.0-alpha.9`, and
+`@oworker/open-agent-mcp-adapter@0.1.0-alpha.9` as real ESM/declaration packages
+with stable exports. A conformance command packs all five tarballs, installs them
 in an empty consumer, and imports their public entrypoints, an individual AI
 Element, and the stylesheet export. The compiled ESM, declarations, source
 maps, and stylesheet are committed with each release so pnpm consumers can pin
@@ -346,8 +351,11 @@ The release boundary is intentionally split so the Agent remains host-neutral:
 4. `@oworker/open-agent-ui`: host-neutral React workspace exports based on the
    shared AI Elements components. The iframe remains an adapter built on this
    package, not its dependency.
+5. `@oworker/open-agent-mcp-adapter`: host-neutral compiled Eve MCP connection
+   factory with tenant/Run authorization, private broker resolution, allowlists,
+   and per-tool approval.
 
-All four package boundaries and their artifact-installation check are now
+All five package boundaries and their artifact-installation check are now
 implemented. `AgentWorkspace` receives its model catalog, defaults, storage,
 transport, branding, locale behavior, and Host slots through public inputs; it
 does not import the application model profile or Muses state. The standalone
@@ -429,10 +437,11 @@ the signal without settling the provider turn.
 The project must not be called production-complete until all of these are done:
 
 - physical sandbox/network-isolation tests on the selected deployment backend;
-- a real credentialed MCP connection with allowlist, approval, OAuth/revocation,
-  and adversarial execution evidence (the shared lifecycle control plane exists);
+- real third-party MCP OAuth consent, refresh, denial, and revocation against a
+  staged provider, plus deployed adversarial execution evidence (the compiled
+  brokered adapter and shared lifecycle control plane exist);
 - Host SDK and Muses adapter published with a versioned capability conformance suite;
-- public Contracts/Client/Host/UI packages, license, registry release, and release provenance;
+- public Contracts/Client/Host/UI/MCP adapter packages, license, registry release, and release provenance;
 - provider registry, credential routing, quota, billing, and failover;
 - deployed collector dashboards, trace retention, and cost reconciliation;
 - protocol and UI conformance suites across supported hosts;

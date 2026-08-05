@@ -22,7 +22,7 @@ product-owner decisions; do not infer them from this automation.
 3. Commit and push `main`; require the CI workflow to pass.
 4. Create and push an annotated tag matching `v<package.json version>`.
 5. The prerelease workflow rebuilds from the tag, verifies the version, packs
-   all four SDKs, emits `SHA256SUMS`, uploads artifacts, and requests GitHub
+   all five SDKs, emits `SHA256SUMS`, uploads artifacts, and requests GitHub
    build-provenance attestations.
 6. A separate release job builds `sandbox/Dockerfile`, publishes version and
    `v`-prefixed tags to `ghcr.io/<owner>/open-agent-sandbox`, runs the runtime

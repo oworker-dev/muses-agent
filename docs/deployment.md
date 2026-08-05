@@ -103,6 +103,32 @@ step. The default deployment value is 4096. Keep it distinct from cumulative
 session and AgentRun budgets: compatible gateways may reserve or reject quota
 from this per-request value before any output is generated.
 
+## Compiled MCP Connections
+
+Runtime Config and administrator metadata never create outbound MCP code. A
+deployment that enables MCP must add an authored `agent/connections/*.ts` file
+that calls `createBrokeredMcpConnection()` from
+`@oworker/open-agent-mcp-adapter`. Pin the exact adapter id/version, HTTPS
+endpoint, discovery description, tool allowlist, and write-tool approval list
+in that source file. Publish the same id/version in the deployment extension
+catalog and Profile; a tenant installation and AgentRun may only narrow that
+compiled maximum.
+
+The adapter sends a private credential broker only the contract version,
+adapter id/version, Eve session id, and authenticated actor/principal/tenant.
+The broker must verify installation state and resolve its opaque credential
+reference server-side, then return a bounded bearer token with an optional
+expiry. Keep the broker service token in the deployment secret manager. Never
+place it, a credential reference, or a third-party token in Runtime Config,
+AgentRun policy, session attributes, model input, tool input, events, or the
+sandbox.
+
+Run `npm run verify:mcp-conformance` before promotion. It proves a real
+Streamable HTTP connection, compiled allowlist, durable write approval and
+resume, next-boundary revocation, and credential absence from emitted evidence.
+It uses a brokered/out-of-band fixture; production OAuth providers still require
+staged consent, refresh, denial, and revocation tests.
+
 ## Rollout And Rollback
 
 - Deploy an immutable image and record its Git commit, package version, Eve
@@ -153,7 +179,7 @@ the collector; the local mock collector is evidence tooling only.
 7. Record the cause, affected tenants, deletion/notification duties, and a
    regression test before reopening traffic.
 
-The selected production sandbox, MCP OAuth lifecycle, provider billing,
+The selected production sandbox, real third-party MCP OAuth lifecycle, provider billing,
 deployed dashboards, SLO/load evidence, abuse controls, and deletion proof are
 still release gates tracked in the architecture document.
 

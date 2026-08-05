@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "npm run build:sdk && next build && npm run verify:embed-build",
-    "build:sdk": "npm run build --workspace @oworker/open-agent-contracts && npm run build --workspace @oworker/open-agent-client && npm run build --workspace @oworker/open-agent-host && npm run build --workspace @oworker/open-agent-ui",
+    "build:sdk": "npm run build --workspace @oworker/open-agent-contracts && npm run build --workspace @oworker/open-agent-client && npm run build --workspace @oworker/open-agent-host && npm run build --workspace @oworker/open-agent-ui && npm run build --workspace @oworker/open-agent-mcp-adapter",
     "db:migrate": "node scripts/migrate-agent-data.mjs",
     "dev": "npm run build:sdk && next dev",
     "start": "next start",
@@ -26,7 +26,7 @@
     "start:eve": "eve start",
     "test:e2e": "playwright test",
     "test:unit": "npm run build:sdk && node --test tests/unit/*.test.ts",
-    "verify:ci": "npm run typecheck && npm run test:unit && npm run verify:provider-failures && npm run build:eve && npm run build && npm run verify:sdk-source-distribution && npm run verify:sdk-packages && npm run verify:custom-host-example",
+    "verify:ci": "npm run typecheck && npm run test:unit && npm run verify:provider-failures && npm run verify:mcp-conformance && npm run build:eve && npm run build && npm run verify:sdk-source-distribution && npm run verify:sdk-packages && npm run verify:custom-host-example",
     "verify:embed-build": "node scripts/verify-embed-build.mjs",
     "verify:agent-run-api": "node scripts/verify-agent-run-api.mjs",
     "verify:custom-host-example": "npm run build:examples",
@@ -42,6 +42,7 @@
     "verify:extensions": "node scripts/verify-extension-lifecycle.mjs",
     "verify:live-autonomy": "node scripts/verify-live-autonomy.mjs",
     "verify:load": "node scripts/verify-agent-run-load.mjs",
+    "verify:mcp-conformance": "node scripts/verify-mcp-conformance.mjs",
     "verify:provider-failures": "node scripts/verify-provider-failures.mjs",
     "verify:sandbox-reaper": "node scripts/verify-sandbox-reaper.mjs"
   },
@@ -90,6 +91,7 @@
     "@types/pg": "^8.20.0",
     "@types/react": "19.2.15",
     "@types/react-dom": "19.2.3",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "typescript": "6.0.3"
   },
   "overrides": {

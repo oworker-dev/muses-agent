@@ -29,8 +29,8 @@ The project has a working Eve runtime and a reusable AI Elements Web workspace:
 This is an integration preview, not a completed production release. The current
 delivery path publishes immutable static files and bounded artifacts; it does
 not yet proxy long-running development servers or arbitrary sandbox ports.
-MCP execution/lifecycle management, billing reconciliation, deployed telemetry
-and security evidence remain release gates. Host-published Skill manifests and
+Real third-party MCP OAuth, billing reconciliation, deployed telemetry, and
+security evidence remain release gates. Host-published Skill manifests and
 content are now part of the versioned Runtime Config contract. The standalone
 Agent runtime has a repeatable real-Provider autonomy E2E on the local
 PostgreSQL production topology. That evidence does not substitute for a staged
@@ -75,6 +75,7 @@ npm run typecheck
 npm run test:unit
 npm run test:e2e
 npm run verify:provider-failures
+npm run verify:mcp-conformance
 ```
 
 The default browser suite keeps provider-dependent output out of deterministic
@@ -458,14 +459,24 @@ Headless AgentRun starts and again when an Eve session starts or continues.
 It prevents future calls; it cannot roll back a side effect that already
 completed, so write capabilities still require approval and idempotency.
 
-The current compiled catalog contains `software-task@1.0.0`. Runtime Config can
+The current standalone catalog contains `software-task@1.0.0`. Runtime Config can
 publish tenant procedure text as a dynamic Skill without rebuilding the Agent.
 It can also publish MCP lifecycle metadata, but Eve MCP connection adapters are
 build-time capabilities: a manifest alone does not create a network connection.
 AgentRun policy resolution fails closed when MCP metadata has no matching
-compiled adapter. No MCP is advertised by the standalone profile until a
-reviewed adapter, tool allowlist, auth provider, approval policy, and execution
-eval are mounted into the deployment.
+compiled adapter. `@oworker/open-agent-mcp-adapter` now provides the reviewed,
+host-neutral connection factory: a deployment must import it from an authored
+`agent/connections/*.ts` file and pin the endpoint, tool allowlist, approval
+list, broker endpoint, and exact adapter version in source. No MCP is advertised
+by the standalone profile because it imports no connection.
+
+`npm run verify:mcp-conformance` compiles a temporary consuming Agent, starts a
+real Streamable HTTP MCP server and private credential broker, and proves
+authorized discovery/read, allowlist filtering, durable approval/resume for a
+write, revocation at the next boundary, and absence of broker or third-party
+credentials from Agent events. This closes the brokered/out-of-band credential
+adapter contract; it does not replace a real provider OAuth consent, refresh,
+revocation, and denial test.
 
 Headless hosts use the same versioned Run contract through the buildable
 `@oworker/open-agent-contracts` and `@oworker/open-agent-client` workspace packages.

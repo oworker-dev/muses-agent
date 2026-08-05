@@ -45,6 +45,7 @@ jobs:
           npm pack --workspace @oworker/open-agent-client --pack-destination release-artifacts
           npm pack --workspace @oworker/open-agent-host --pack-destination release-artifacts
           npm pack --workspace @oworker/open-agent-ui --pack-destination release-artifacts
+          npm pack --workspace @oworker/open-agent-mcp-adapter --pack-destination release-artifacts
           sha256sum release-artifacts/*.tgz > release-artifacts/SHA256SUMS
       - uses: actions/attest-build-provenance@v2
         with:
