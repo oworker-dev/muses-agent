@@ -19,9 +19,12 @@ const validEnvironment = {
   AGENT_HOST_JWT_ISSUER: "https://muses.example.com",
   AGENT_HOST_JWT_SECRET: "a-production-secret-at-least-32-bytes-long",
   AGENT_MODEL_MAX_OUTPUT_TOKENS: "4096",
+  AGENT_PREVIEW_SIGNING_SECRET: "preview-signing-secret-at-least-32-bytes-long",
+  AGENT_PUBLIC_BASE_URL: "https://agent.example.com",
   AGENT_PROVIDER_HTTP_TIMEOUT_MS: "120000",
   AGENT_RUNTIME_URL: "https://agent-runtime.example.com",
   AGENT_SANDBOX_BACKEND: "microsandbox",
+  AGENT_SANDBOX_IMAGE: "ghcr.io/oworker/open-agent-sandbox@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   AGENT_BASH_APPROVAL_MODE: "risky",
   EVE_NEXT_PRODUCTION_PORT: "4275",
   NODE_ENV: "production",
@@ -91,6 +94,14 @@ test("requires an explicit Docker sandbox retention policy", () => {
   assert.ok(valid.some((item) => item.code === "sandbox-backend-docker"));
 });
 
+test("requires an immutable production sandbox image", () => {
+  const diagnostics = inspectProductionConfiguration({
+    ...validEnvironment,
+    AGENT_SANDBOX_IMAGE: "ghcr.io/oworker/open-agent-sandbox:latest",
+  }, "24.18.1");
+  assert.ok(diagnostics.some((item) => item.code === "sandbox-image" && item.level === "error"));
+});
+
 test("rejects fixture models and disabled Shell approval in production", () => {
   const diagnostics = inspectProductionConfiguration({
     ...validEnvironment,
@@ -150,6 +161,23 @@ test("requires a bounded provider HTTP timeout", () => {
       (diagnostic) => diagnostic.code === "integer-range" && diagnostic.level === "error",
     ),
   );
+});
+
+test("requires a secure preview origin and signing secret", () => {
+  const missing = inspectProductionConfiguration({
+    ...validEnvironment,
+    AGENT_PUBLIC_BASE_URL: "",
+    AGENT_PREVIEW_SIGNING_SECRET: "short",
+  }, "24.18.1");
+  assert.ok(missing.some((item) => item.code === "missing-required" && item.message.includes("AGENT_PUBLIC_BASE_URL")));
+  assert.ok(missing.some((item) => item.code === "preview-signing-secret"));
+
+  const invalid = inspectProductionConfiguration({
+    ...validEnvironment,
+    AGENT_PUBLIC_BASE_URL: "http://agent.example.com/preview",
+  }, "24.18.1");
+  assert.ok(invalid.some((item) => item.code === "insecure-url"));
+  assert.ok(invalid.some((item) => item.code === "preview-public-base-url"));
 });
 
 test("uses and validates a bounded per-request model output limit", () => {

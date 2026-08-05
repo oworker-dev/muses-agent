@@ -47,23 +47,23 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Start deterministic Agent Web
         run: |
-          npm run dev > /tmp/muses-agent-ci.log 2>&1 &
-          echo $! > /tmp/muses-agent-ci.pid
+          npm run dev > /tmp/open-agent-ci.log 2>&1 &
+          echo $! > /tmp/open-agent-ci.pid
           for attempt in $(seq 1 120); do
             if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
               exit 0
             fi
             sleep 1
           done
-          tail -200 /tmp/muses-agent-ci.log
+          tail -200 /tmp/open-agent-ci.log
           exit 1
       - run: npm run test:e2e
       - name: Print server log on failure
         if: failure()
-        run: tail -300 /tmp/muses-agent-ci.log || true
+        run: tail -300 /tmp/open-agent-ci.log || true
       - name: Stop deterministic Agent Web
         if: always()
         run: |
-          if test -f /tmp/muses-agent-ci.pid; then
-            kill "$(cat /tmp/muses-agent-ci.pid)" 2>/dev/null || true
+          if test -f /tmp/open-agent-ci.pid; then
+            kill "$(cat /tmp/open-agent-ci.pid)" 2>/dev/null || true
           fi

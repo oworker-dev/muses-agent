@@ -62,8 +62,9 @@ export function AgentWorkspace({
     () => ({
       modelId: defaultPreferences.modelId,
       reasoning: defaultPreferences.reasoning,
+      executionMode: defaultPreferences.executionMode ?? "standard",
     }),
-    [defaultPreferences.modelId, defaultPreferences.reasoning],
+    [defaultPreferences.executionMode, defaultPreferences.modelId, defaultPreferences.reasoning],
   );
   const [threads, setThreads] = useState<AgentThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string>();
@@ -440,9 +441,10 @@ function normalizeThreadPreferences(
   const reasoning = reasoningLevels.includes(thread.preferences.reasoning)
     ? thread.preferences.reasoning
     : defaults.reasoning;
-  return modelId === thread.preferences.modelId && reasoning === thread.preferences.reasoning
+  const executionMode = thread.preferences.executionMode ?? defaults.executionMode;
+  return modelId === thread.preferences.modelId && reasoning === thread.preferences.reasoning && executionMode === thread.preferences.executionMode
     ? thread
-    : { ...thread, preferences: { modelId, reasoning } };
+    : { ...thread, preferences: { executionMode, modelId, reasoning } };
 }
 
 function withoutSetValue<T>(source: Set<T>, value: T): Set<T> {

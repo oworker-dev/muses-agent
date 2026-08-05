@@ -59,6 +59,56 @@ create table if not exists "__AGENT_SCHEMA__"."agent_thread_collections" (
   constraint agent_thread_collection_object check (jsonb_typeof(collection) = 'object')
 );
 
+create table if not exists "__AGENT_SCHEMA__"."agent_previews" (
+  preview_id text primary key,
+  session_id text not null,
+  tenant_id text not null,
+  principal_id text not null,
+  entrypoint text not null,
+  expires_at timestamptz not null,
+  file_count integer not null,
+  total_bytes bigint not null,
+  created_at timestamptz not null default now(),
+  constraint agent_preview_entrypoint_safe check (
+    entrypoint <> '' and entrypoint not like '/%' and entrypoint not like '%..%'
+  ),
+  constraint agent_preview_size_valid check (file_count > 0 and file_count <= 1000 and total_bytes > 0 and total_bytes <= 26214400)
+);
+
+create index if not exists agent_previews_owner_idx
+  on "__AGENT_SCHEMA__"."agent_previews" (tenant_id, principal_id, created_at desc);
+
+create table if not exists "__AGENT_SCHEMA__"."agent_preview_files" (
+  preview_id text not null references "__AGENT_SCHEMA__"."agent_previews"(preview_id) on delete cascade,
+  path text not null,
+  media_type text not null,
+  content bytea not null,
+  primary key (preview_id, path),
+  constraint agent_preview_file_path_safe check (
+    path <> '' and path not like '/%' and path not like '%..%'
+  )
+);
+
+create table if not exists "__AGENT_SCHEMA__"."agent_artifacts" (
+  artifact_id text primary key,
+  session_id text not null,
+  tenant_id text not null,
+  principal_id text not null,
+  filename text not null,
+  media_type text not null,
+  content bytea not null,
+  expires_at timestamptz not null,
+  total_bytes bigint not null,
+  created_at timestamptz not null default now(),
+  constraint agent_artifact_filename_safe check (
+    filename <> '' and filename not like '%/%' and filename not like '%\\%'
+  ),
+  constraint agent_artifact_size_valid check (total_bytes > 0 and total_bytes <= 26214400)
+);
+
+create index if not exists agent_artifacts_owner_idx
+  on "__AGENT_SCHEMA__"."agent_artifacts" (tenant_id, principal_id, created_at desc);
+
 create table if not exists "__AGENT_SCHEMA__"."agent_runs" (
   run_id text primary key,
   tenant_id text not null,

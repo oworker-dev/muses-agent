@@ -70,6 +70,7 @@ export function resolveAgentRunPolicy(
   const limits = mergeAgentRunLimits(config.limits, requested.limits);
 
   return {
+    ...(requested.executionMode ? { executionMode: requested.executionMode } : {}),
     ...(requested.hostCapabilities ? { hostCapabilities: requested.hostCapabilities } : {}),
     ...(limits ? { limits } : {}),
     mcpConnections,

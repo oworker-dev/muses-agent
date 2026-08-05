@@ -4,6 +4,7 @@ import type { AgentThread, AgentThreadPreferences, AgentThreadStatus } from "./c
 export const AGENT_THREAD_STORAGE_VERSION = 1;
 const EMPTY_SESSION: SessionState = { streamIndex: 0 };
 const FALLBACK_PREFERENCES: AgentThreadPreferences = {
+  executionMode: "standard",
   modelId: "default",
   reasoning: "medium",
 };
@@ -123,6 +124,9 @@ function parseThread(value: unknown): AgentThread | undefined {
       : [],
     id: value.id,
     preferences: {
+      executionMode: isExecutionMode(preferences.executionMode)
+        ? preferences.executionMode
+        : FALLBACK_PREFERENCES.executionMode,
       modelId: nonEmptyString(preferences.modelId) ?? FALLBACK_PREFERENCES.modelId,
       reasoning: nonEmptyString(preferences.reasoning) ?? FALLBACK_PREFERENCES.reasoning,
     },
@@ -139,6 +143,10 @@ function parseThread(value: unknown): AgentThread | undefined {
     title: value.title,
     updatedAt,
   };
+}
+
+function isExecutionMode(value: unknown): value is AgentThreadPreferences["executionMode"] {
+  return value === "automation" || value === "cautious" || value === "standard";
 }
 
 function createId(): string {

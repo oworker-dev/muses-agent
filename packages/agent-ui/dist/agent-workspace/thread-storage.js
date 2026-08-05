@@ -1,6 +1,7 @@
 export const AGENT_THREAD_STORAGE_VERSION = 1;
 const EMPTY_SESSION = { streamIndex: 0 };
 const FALLBACK_PREFERENCES = {
+    executionMode: "standard",
     modelId: "default",
     reasoning: "medium",
 };
@@ -89,6 +90,9 @@ function parseThread(value) {
             : [],
         id: value.id,
         preferences: {
+            executionMode: isExecutionMode(preferences.executionMode)
+                ? preferences.executionMode
+                : FALLBACK_PREFERENCES.executionMode,
             modelId: nonEmptyString(preferences.modelId) ?? FALLBACK_PREFERENCES.modelId,
             reasoning: nonEmptyString(preferences.reasoning) ?? FALLBACK_PREFERENCES.reasoning,
         },
@@ -103,6 +107,9 @@ function parseThread(value) {
         title: value.title,
         updatedAt,
     };
+}
+function isExecutionMode(value) {
+    return value === "automation" || value === "cautious" || value === "standard";
 }
 function createId() {
     return typeof crypto !== "undefined" && "randomUUID" in crypto

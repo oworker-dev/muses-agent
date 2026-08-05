@@ -24,10 +24,13 @@ The project has a working Eve runtime and a reusable AI Elements Web workspace:
 - buildable Contracts, Client, Host, and React UI alpha SDK packages;
 - optional iframe, native `AgentWorkspace`, and custom-host UI integration paths.
 - complete AI Elements and shadcn/ui source registries exported for reusable host composition.
+- authenticated static website previews and generic artifact delivery for Python, image, audio, video, and document outputs.
 
-This is an integration preview, not a completed production release. MCP
-execution/lifecycle management, billing reconciliation, deployed telemetry and
-security evidence remain release gates. Host-published Skill manifests and
+This is an integration preview, not a completed production release. The current
+delivery path publishes immutable static files and bounded artifacts; it does
+not yet proxy long-running development servers or arbitrary sandbox ports.
+MCP execution/lifecycle management, billing reconciliation, deployed telemetry
+and security evidence remain release gates. Host-published Skill manifests and
 content are now part of the versioned Runtime Config contract. The standalone
 Agent runtime and Host Capability bridge are implemented and build-tested; they are not a
 substitute for a real provider-backed production E2E. See
@@ -124,6 +127,9 @@ Build both services with the same Eve port baked into the Next rewrite:
 
 ```bash
 AGENT_SANDBOX_BACKEND=docker \
+AGENT_SANDBOX_IMAGE=ghcr.io/oworker/open-agent-sandbox@sha256:... \
+AGENT_PUBLIC_BASE_URL=https://agent.example.com \
+AGENT_PREVIEW_SIGNING_SECRET='replace-with-32-byte-secret' \
 WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
 WORKFLOW_POSTGRES_URL=postgres://... \
 WORKFLOW_POSTGRES_JOB_PREFIX=open_agent_ \
@@ -145,6 +151,7 @@ For local production verification, start the two official services explicitly:
 
 ```bash
 AGENT_SANDBOX_BACKEND=docker \
+AGENT_SANDBOX_IMAGE=ghcr.io/oworker/open-agent-sandbox@sha256:... \
 WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
 WORKFLOW_POSTGRES_URL=postgres://... \
 WORKFLOW_POSTGRES_JOB_PREFIX=open_agent_ \
@@ -162,6 +169,15 @@ World shares the Agent product database, the queue prefix can collide with
 Muses, build-time CSP/port values are missing, or Host credentials are partial.
 `AGENT_EMBED_ALLOWED_ORIGINS` and `EVE_NEXT_PRODUCTION_PORT` are build inputs;
 setting them only when `next start` runs cannot repair an already built image.
+`AGENT_PUBLIC_BASE_URL` and `AGENT_PREVIEW_SIGNING_SECRET` are also mandatory
+production inputs. They make preview and artifact links absolute, signed, and
+time-limited. Production requires PostgreSQL, so `.eve/previews` and
+`.eve/artifacts` are development fallbacks only.
+Production also requires `AGENT_SANDBOX_IMAGE` pinned by OCI sha256 digest.
+[`sandbox/Dockerfile`](sandbox/Dockerfile) defines the reviewed Node, Python,
+Git, FFmpeg, ImageMagick, and Playwright/Chromium runtime. Build and publish it
+as an immutable image, then run `npm run verify:sandbox-runtime` against the
+published digest before promotion.
 The Agent Web API and Eve runtime both register OpenTelemetry through
 `@vercel/otel`. Configure `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (or the Vercel
 collector) in both processes and use the same collector as Muses. Synchronous
@@ -365,9 +381,12 @@ Run the deterministic Harness suite against a real Docker sandbox:
 npm run eval:fixed
 ```
 
-The suite covers Skill loading, file write/read, Shell execution, checkpoints,
+The suite covers host-neutral file write/read, Shell execution, checkpoints,
 tool failure recovery, durable approval, cancellation, cross-turn sandbox
-continuity, and repeated Eve context compaction. The compaction case preserves
+continuity, repeated Eve context compaction, static website preview delivery,
+Python artifact delivery, and ImageMagick/FFmpeg media rendering. The standalone profile does not force a
+host-specific Skill; Skills are published and granted by the active runtime
+configuration. The compaction case preserves
 exact facts, active todo state, and sandbox contents across two checkpoints,
 and proves that Eve resets read-before-write evidence after summarization so an
 existing file must be read again before it can be changed. It uses

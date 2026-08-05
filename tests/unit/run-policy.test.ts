@@ -20,9 +20,11 @@ test("normalizes and deduplicates host capability policy", () => {
   assert.deepEqual(
     parseAgentRunPolicy({
       hostCapabilities: ["workflow.invoke", "canvas.inspect", "workflow.invoke"],
+      executionMode: "cautious",
       limits: { maxTurns: 4, maxToolCalls: 8 },
     }),
     {
+      executionMode: "cautious",
       hostCapabilities: ["canvas.inspect", "workflow.invoke"],
       limits: { maxToolCalls: 8, maxTurns: 4 },
     },
@@ -31,6 +33,7 @@ test("normalizes and deduplicates host capability policy", () => {
 
 test("rejects unknown fields and invalid direct-channel budgets", () => {
   assert.throws(() => parseAgentRunPolicy({ approvalMode: "always" }), /unknown field/);
+  assert.throws(() => parseAgentRunPolicy({ executionMode: "full-access" }), /executionMode/);
   assert.throws(
     () => parseAgentRunPolicy({ limits: { maxTurns: -1 } }),
     /positive safe integer/,

@@ -26,6 +26,9 @@ the first stable release.
 - Keep credentials in a deployment secret manager and use opaque credential
   references for extensions.
 - Do not put provider credentials inside Agent sandboxes or browser storage.
+- Treat preview and artifact URLs as bearer links. Keep their TTL short for
+  sensitive outputs, never log them, and delete the backing record when a
+  result must be revoked.
 - Keep prompt and output recording disabled in telemetry. Treat exception
   messages from provider SDKs as potentially containing request bodies.
 - Revoke and rotate any exposed credential immediately. Removing it from the
@@ -38,3 +41,9 @@ tool approvals, route authorization, extension scopes, sandbox isolation,
 network egress, retention, telemetry, and abuse controls for their environment.
 The repository production doctor is a preflight check, not a security boundary.
 
+Production result delivery requires PostgreSQL-backed stores and a 32-byte
+`AGENT_PREVIEW_SIGNING_SECRET`. Static previews and artifacts are copied out of
+the session sandbox after validation; sandbox paths and arbitrary listening
+ports are not routed to the public Internet. Dynamic preview proxying is not
+enabled until its separate gateway has passed isolation, authorization, and
+abuse tests.

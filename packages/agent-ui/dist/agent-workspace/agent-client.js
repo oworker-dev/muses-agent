@@ -6,6 +6,7 @@ export function createAgentSession(config, preferences, state) {
             const currentPreferences = typeof preferences === "function" ? preferences() : preferences;
             return {
                 ...(await resolveHeaders(config?.headers)),
+                "x-agent-execution-mode": currentPreferences.executionMode ?? "standard",
                 "x-agent-model": currentPreferences.modelId,
                 "x-agent-reasoning": currentPreferences.reasoning,
             };

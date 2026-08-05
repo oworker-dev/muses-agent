@@ -33,6 +33,7 @@
     "verify:sdk-packages": "npm run build:sdk && node scripts/verify-sdk-packages.mjs",
     "verify:sdk-source-distribution": "node scripts/verify-sdk-source-distribution.mjs",
     "verify:sandbox": "node scripts/verify-sandbox-docker.mjs",
+    "verify:sandbox-runtime": "node scripts/verify-sandbox-runtime.mjs",
     "verify:muses-host-e2e": "node scripts/verify-muses-host-e2e.mjs",
     "mock:openai": "node scripts/mock-openai-responses.mjs",
     "mock:otlp": "node scripts/mock-otlp-json.mjs",

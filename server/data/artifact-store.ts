@@ -1,0 +1,233 @@
+import type { Pool } from "pg";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import {
+  getAgentDatabasePool,
+  quoteIdentifier,
+  readAgentDatabaseConfig,
+  type AgentDatabaseConfig,
+} from "./agent-database.ts";
+
+export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+
+export type ArtifactRecord = {
+  readonly artifactId: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly principalId: string;
+  readonly sessionId: string;
+  readonly tenantId: string;
+  readonly totalBytes: number;
+};
+
+export type ArtifactFile = {
+  readonly content: Uint8Array;
+  readonly filename: string;
+  readonly mediaType: string;
+};
+
+export interface ArtifactStore {
+  create(input: {
+    readonly artifactId?: string;
+    readonly content: Uint8Array;
+    readonly expiresAt: Date;
+    readonly filename: string;
+    readonly mediaType: string;
+    readonly principalId: string;
+    readonly sessionId: string;
+    readonly tenantId: string;
+  }): Promise<ArtifactRecord>;
+  find(artifactId: string): Promise<ArtifactRecord | undefined>;
+  read(artifactId: string): Promise<ArtifactFile | undefined>;
+}
+
+export function createArtifactStoreFromEnvironment(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): ArtifactStore {
+  const config = readAgentDatabaseConfig(environment);
+  if (config) return createPostgresArtifactStore(config);
+  const configuredRoot = environment.AGENT_ARTIFACT_STORAGE_PATH?.trim();
+  return createFilesystemArtifactStore(
+    configuredRoot ? resolve(configuredRoot) : resolve(process.cwd(), ".eve", "artifacts"),
+  );
+}
+
+export function createPostgresArtifactStore(config: AgentDatabaseConfig): ArtifactStore {
+  const pool = getAgentDatabasePool(config);
+  const table = `${quoteIdentifier(config.schema)}."agent_artifacts"`;
+  return postgresArtifactStore(pool, table);
+}
+
+function postgresArtifactStore(pool: Pool, table: string): ArtifactStore {
+  return {
+    async create(input) {
+      assertArtifactInput(input);
+      const artifactId = input.artifactId ?? `art_${randomUUID()}`;
+      const result = await pool.query<ArtifactRow>(
+        `insert into ${table}
+          (artifact_id, session_id, tenant_id, principal_id, filename, media_type, content, expires_at, total_bytes)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         returning artifact_id, session_id, tenant_id, principal_id, filename,
+           media_type, expires_at, created_at, total_bytes`,
+        [
+          artifactId,
+          input.sessionId,
+          input.tenantId,
+          input.principalId,
+          input.filename,
+          input.mediaType,
+          Buffer.from(input.content),
+          input.expiresAt,
+          input.content.byteLength,
+        ],
+      );
+      return toRecord(result.rows[0]);
+    },
+    async find(artifactId) {
+      const result = await pool.query<ArtifactRow>(
+        `select artifact_id, session_id, tenant_id, principal_id, filename,
+           media_type, expires_at, created_at, total_bytes
+         from ${table} where artifact_id = $1`,
+        [artifactId],
+      );
+      return result.rows[0] ? toRecord(result.rows[0]) : undefined;
+    },
+    async read(artifactId) {
+      const result = await pool.query<ArtifactRow & { content: Buffer }>(
+        `select artifact_id, session_id, tenant_id, principal_id, filename,
+           media_type, expires_at, created_at, total_bytes, content
+         from ${table} where artifact_id = $1`,
+        [artifactId],
+      );
+      const row = result.rows[0];
+      return row
+        ? { content: row.content, filename: row.filename, mediaType: row.media_type }
+        : undefined;
+    },
+  };
+}
+
+function createFilesystemArtifactStore(root: string): ArtifactStore {
+  return {
+    async create(input) {
+      assertArtifactInput(input);
+      const artifactId = input.artifactId ?? `art_${randomUUID()}`;
+      const record: ArtifactRecord = {
+        artifactId,
+        createdAt: new Date().toISOString(),
+        expiresAt: input.expiresAt.toISOString(),
+        filename: input.filename,
+        mediaType: input.mediaType,
+        principalId: input.principalId,
+        sessionId: input.sessionId,
+        tenantId: input.tenantId,
+        totalBytes: input.content.byteLength,
+      };
+      const directory = join(root, artifactId);
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, "content"), input.content, { flag: "wx" });
+      await writeFile(join(directory, "meta.json"), JSON.stringify(record), { flag: "wx" });
+      return record;
+    },
+    async find(artifactId) {
+      try {
+        const value = JSON.parse(await readFile(join(root, artifactId, "meta.json"), "utf8")) as unknown;
+        return isArtifactRecord(value) ? value : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async read(artifactId) {
+      const record = await this.find(artifactId);
+      if (!record) return undefined;
+      try {
+        const content = await readFile(join(root, artifactId, "content"));
+        return { content, filename: record.filename, mediaType: record.mediaType };
+      } catch {
+        return undefined;
+      }
+    },
+  };
+}
+
+type ArtifactRow = {
+  artifact_id: string;
+  created_at: Date | string;
+  expires_at: Date | string;
+  filename: string;
+  media_type: string;
+  principal_id: string;
+  session_id: string;
+  tenant_id: string;
+  total_bytes: number;
+  content?: Buffer;
+};
+
+function toRecord(row: ArtifactRow): ArtifactRecord {
+  if (!row) throw new Error("The artifact store returned no created artifact.");
+  return {
+    artifactId: row.artifact_id,
+    createdAt: asIso(row.created_at),
+    expiresAt: asIso(row.expires_at),
+    filename: row.filename,
+    mediaType: row.media_type,
+    principalId: row.principal_id,
+    sessionId: row.session_id,
+    tenantId: row.tenant_id,
+    totalBytes: row.total_bytes,
+  };
+}
+
+function assertArtifactInput(input: {
+  readonly content: Uint8Array;
+  readonly expiresAt: Date;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly principalId: string;
+  readonly sessionId: string;
+  readonly tenantId: string;
+}): void {
+  if (!input.sessionId || !input.tenantId || !input.principalId) {
+    throw new Error("An artifact requires a session and authenticated owner.");
+  }
+  if (!safeFilename(input.filename)) throw new Error("The artifact filename is invalid.");
+  if (!input.mediaType || input.mediaType.length > 200) throw new Error("The artifact media type is invalid.");
+  if (input.content.byteLength === 0 || input.content.byteLength > MAX_ARTIFACT_BYTES) {
+    throw new Error("The artifact must be between 1 byte and 25 MiB.");
+  }
+  if (!Number.isFinite(input.expiresAt.getTime()) || input.expiresAt <= new Date()) {
+    throw new Error("The artifact expiration must be in the future.");
+  }
+}
+
+function safeFilename(value: string): boolean {
+  return value.length > 0
+    && value.length <= 255
+    && value !== "."
+    && value !== ".."
+    && !value.includes("/")
+    && !value.includes("\\")
+    && !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function isArtifactRecord(value: unknown): value is ArtifactRecord {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Partial<ArtifactRecord>;
+  return typeof record.artifactId === "string"
+    && /^art_[a-f0-9-]{36}$/u.test(record.artifactId)
+    && typeof record.createdAt === "string"
+    && typeof record.expiresAt === "string"
+    && typeof record.filename === "string"
+    && typeof record.mediaType === "string"
+    && typeof record.principalId === "string"
+    && typeof record.sessionId === "string"
+    && typeof record.tenantId === "string"
+    && typeof record.totalBytes === "number";
+}
+
+function asIso(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}

@@ -22,6 +22,7 @@ import { parseRemoteTraceParent } from "../lib/observability";
 
 const MODEL_HEADER = "x-agent-model";
 const REASONING_HEADER = "x-agent-reasoning";
+const EXECUTION_MODE_HEADER = "x-agent-execution-mode";
 const PROFILE_ID_HEADER = "x-agent-profile-id";
 const PROFILE_VERSION_HEADER = "x-agent-profile-version";
 const RUN_POLICY_HEADER = "x-agent-run-policy";
@@ -42,6 +43,7 @@ function withAgentPreferences(authenticate: AuthFn<Request>): AuthFn<Request> {
 
     const requestedModel = request.headers.get(MODEL_HEADER) ?? undefined;
     const requestedReasoning = request.headers.get(REASONING_HEADER) ?? undefined;
+    const requestedExecutionMode = request.headers.get(EXECUTION_MODE_HEADER) ?? undefined;
     const attributes = { ...auth.attributes };
     const runtimeConfig = resolveAgentRuntimeConfig(attributes);
     const selectedModel = findAgentRuntimeModel(runtimeConfig, requestedModel) ??
@@ -71,7 +73,10 @@ function withAgentPreferences(authenticate: AuthFn<Request>): AuthFn<Request> {
     attributes.agentRuntimeConfig = serializeAgentRuntimeConfig(runtimeConfig);
     const runPolicy = resolveAgentRunPolicy(
       profile,
-      parseRunPolicyHeader(request.headers.get(RUN_POLICY_HEADER)),
+      {
+        ...parseRunPolicyHeader(request.headers.get(RUN_POLICY_HEADER)),
+        ...(requestedExecutionMode ? { executionMode: parseExecutionModeHeader(requestedExecutionMode) } : {}),
+      },
       undefined,
       runtimeConfig,
     );
@@ -101,6 +106,11 @@ function withAgentPreferences(authenticate: AuthFn<Request>): AuthFn<Request> {
 
     return { ...auth, attributes };
   };
+}
+
+function parseExecutionModeHeader(value: string): AgentRunPolicy["executionMode"] {
+  if (value === "automation" || value === "cautious" || value === "standard") return value;
+  throw new Error("The Agent execution mode is invalid.");
 }
 
 function parseRunPolicyHeader(value: string | null): AgentRunPolicy {

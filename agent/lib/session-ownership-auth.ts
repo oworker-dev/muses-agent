@@ -43,6 +43,21 @@ export function sessionOwnerFromAuth(auth: SessionAuthContext): AgentSessionOwne
   };
 }
 
+export function publicationOwnerFromAuth(
+  auth: SessionAuthContext,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): AgentSessionOwner {
+  if (auth.principalType === "local-dev" && environment.NODE_ENV !== "production") {
+    return {
+      ...(auth.issuer ? { issuer: auth.issuer } : {}),
+      principalId: auth.principalId,
+      principalType: auth.principalType,
+      tenantId: "local-dev",
+    };
+  }
+  return sessionOwnerFromAuth(auth);
+}
+
 function sessionIdFromRequest(request: Request): string | undefined {
   const pathname = new URL(request.url).pathname;
   const match = /^\/eve\/v1\/session\/([^/]+)(?:\/|$)/.exec(pathname);

@@ -31,6 +31,17 @@ export function readAgentSandboxBackend(
   return configured as AgentSandboxBackendName;
 }
 
+export function readAgentSandboxImage(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): string | undefined {
+  const value = environment.AGENT_SANDBOX_IMAGE?.trim();
+  if (!value) return undefined;
+  if (/\s/u.test(value) || value.length > 512) {
+    throw new Error("AGENT_SANDBOX_IMAGE must be one bounded OCI image reference.");
+  }
+  return value;
+}
+
 export function inspectProductionConfiguration(
   environment: Readonly<Record<string, string | undefined>>,
   nodeVersion = process.versions.node,
@@ -85,10 +96,13 @@ export function inspectProductionConfiguration(
   requireValue(environment, "AGENT_PROVIDER_HTTP_TIMEOUT_MS", error);
   requireValue(environment, "AGENT_DATABASE_URL", error);
   requireValue(environment, "AGENT_RUNTIME_URL", error);
+  requireValue(environment, "AGENT_SANDBOX_IMAGE", error);
   requireValue(environment, "AGENT_HOST_JWT_SECRET", error);
   requireValue(environment, "AGENT_HOST_JWT_ISSUER", error);
   requireValue(environment, "AGENT_HOST_JWT_AUDIENCE", error);
   requireValue(environment, "AGENT_EMBED_ALLOWED_ORIGINS", error);
+  requireValue(environment, "AGENT_PUBLIC_BASE_URL", error);
+  requireValue(environment, "AGENT_PREVIEW_SIGNING_SECRET", error);
   requireValue(environment, "WORKFLOW_POSTGRES_URL", error);
   requireValue(environment, "WORKFLOW_POSTGRES_JOB_PREFIX", error);
 
@@ -163,12 +177,19 @@ export function inspectProductionConfiguration(
   } else if (jobPrefix && jobPrefix !== "open_agent_") {
     warning(
       "workflow-job-prefix-convention",
-      "The verified Muses Agent queue prefix is open_agent_; keep custom prefixes unique per Workflow World.",
+      "The verified Open Agent queue prefix is open_agent_; keep custom prefixes unique per Workflow World.",
     );
   }
 
   try {
     const backend = readAgentSandboxBackend({ ...environment, NODE_ENV: "production" });
+    const image = readAgentSandboxImage(environment);
+    if (image && !/@sha256:[a-f0-9]{64}$/u.test(image)) {
+      error(
+        "sandbox-image",
+        "AGENT_SANDBOX_IMAGE must use an immutable OCI sha256 digest in production.",
+      );
+    }
     if (backend === "docker") {
       inspectInteger(
         environment.EVE_SANDBOX_RETENTION_HOURS,
@@ -194,6 +215,28 @@ export function inspectProductionConfiguration(
   }
 
   inspectHttpUrl(environment.AGENT_RUNTIME_URL, "AGENT_RUNTIME_URL", { allowLoopbackHttp: true }, error);
+  inspectHttpUrl(environment.AGENT_PUBLIC_BASE_URL, "AGENT_PUBLIC_BASE_URL", { allowLoopbackHttp: false }, error);
+  const publicBaseUrl = environment.AGENT_PUBLIC_BASE_URL?.trim();
+  if (publicBaseUrl) {
+    try {
+      const parsed = new URL(publicBaseUrl);
+      if (parsed.protocol !== "https:" || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+        error(
+          "preview-public-base-url",
+          "AGENT_PUBLIC_BASE_URL must be an HTTPS origin without a path, query, or fragment.",
+        );
+      }
+    } catch {
+      // inspectHttpUrl emits the canonical URL diagnostic.
+    }
+  }
+  const previewSigningSecret = environment.AGENT_PREVIEW_SIGNING_SECRET?.trim();
+  if (previewSigningSecret && Buffer.byteLength(previewSigningSecret) < 32) {
+    error(
+      "preview-signing-secret",
+      "AGENT_PREVIEW_SIGNING_SECRET must contain at least 32 bytes.",
+    );
+  }
   inspectHttpUrl(environment.OPENAI_BASE_URL, "OPENAI_BASE_URL", { allowLoopbackHttp: true }, error);
   inspectInteger(
     environment.AGENT_MODEL_MAX_OUTPUT_TOKENS,

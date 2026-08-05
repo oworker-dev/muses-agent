@@ -11,7 +11,10 @@ import type { AgentThreadStorage } from "./thread-storage.js";
 
 export type AgentThreadStatus = "error" | "ready" | "streaming" | "submitted";
 
+export type AgentExecutionMode = "automation" | "cautious" | "standard";
+
 export type AgentThreadPreferences = {
+  readonly executionMode?: AgentExecutionMode;
   readonly modelId: string;
   readonly reasoning: string;
 };

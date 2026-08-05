@@ -35,6 +35,16 @@ The doctor must pass in the same environment used for the build. In particular,
 The standard build checks the generated route manifest and fails unless
 `/embed` contains those exact frame ancestors. Keep this artifact check in the
 release pipeline; a healthy standalone page does not prove Host embedding works.
+`AGENT_PUBLIC_BASE_URL` and `AGENT_PREVIEW_SIGNING_SECRET` are mandatory in
+production. The former must be a public HTTPS origin without a path; the latter
+must be at least 32 bytes. They sign expiring website-preview and artifact links.
+The filesystem preview/artifact stores are local-development fallbacks and must
+not be used by a production deployment; `AGENT_DATABASE_URL` is required.
+`AGENT_SANDBOX_IMAGE` must also be an immutable OCI digest. Build the repository
+`sandbox/Dockerfile`, publish it to the deployment registry, and run
+`npm run verify:sandbox-runtime` against that exact digest. The gate verifies
+Node/npm, Python, Git, FFmpeg, ImageMagick, and Playwright/Chromium without
+network access.
 Do not continue when the doctor reports a shared Workflow database, implicit
 sandbox backend, missing telemetry, test fixture model, or disabled Shell
 approval.
@@ -50,6 +60,22 @@ AGENT_DATABASE_URL=postgres://... npm run db:migrate
 Build and start Eve before Agent Web. The complete environment example and
 commands are in the root README. Health checks must verify the Eve health route,
 the Agent Web route, PostgreSQL connectivity, and telemetry export.
+
+## User-visible delivery
+
+The supported first release delivers two bounded result types:
+
+- `publish_preview` copies a completed static website from `/workspace` into
+  PostgreSQL and returns a signed URL to its entrypoint and static assets.
+- `publish_artifact` copies one completed file (up to 25 MiB) and returns a
+  signed URL suitable for a Python result, image, audio/video render, PDF,
+  archive, or other generated output.
+
+Both records are scoped to the authenticated tenant, principal, and Eve
+session. URLs are bearer links and expire according to
+`AGENT_PREVIEW_TTL_SECONDS`; the raw sandbox filesystem and arbitrary ports are
+never exposed. Long-running dev servers and WebSocket previews require the
+future Preview Gateway release gate described in the architecture document.
 
 For a Muses-hosted deployment, configure the Agent's OpenAI-compatible client
 against the private Host broker:

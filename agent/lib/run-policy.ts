@@ -2,6 +2,7 @@ import { defineState, type SessionContext } from "eve/context";
 
 import type {
   AgentExtensionRef,
+  AgentExecutionMode,
   AgentRunLimits,
   AgentRunPolicy,
 } from "../../contracts/agent-run";
@@ -26,6 +27,7 @@ const LIMIT_NAMES = [
 const CAPABILITY_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/;
 const MAX_CAPABILITIES = 128;
 const MAX_EXTENSIONS = 64;
+const EXECUTION_MODES = ["automation", "cautious", "standard"] as const satisfies readonly AgentExecutionMode[];
 const EXTENSION_ID = /^[a-z0-9][a-z0-9._-]*$/;
 const EXTENSION_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$/;
 const LIMIT_MAXIMUMS: Readonly<Record<keyof AgentRunLimits, number>> = {
@@ -73,7 +75,9 @@ export function readAgentRunPolicy(session: RunPolicyContext): AgentRunPolicy {
 /** Strict parser shared by the public AgentRun API and the direct Eve channel. */
 export function parseAgentRunPolicy(value: unknown): AgentRunPolicy {
   if (!isRecord(value)) throw new Error("The AgentRun policy must be a JSON object.");
-  assertOnlyKeys(value, ["hostCapabilities", "limits", "mcpConnections", "skills"], "AgentRun policy");
+  assertOnlyKeys(value, ["executionMode", "hostCapabilities", "limits", "mcpConnections", "skills"], "AgentRun policy");
+
+  const executionMode = value.executionMode === undefined ? undefined : parseExecutionMode(value.executionMode);
 
   let hostCapabilities: readonly string[] | undefined;
   if (value.hostCapabilities !== undefined) {
@@ -121,11 +125,23 @@ export function parseAgentRunPolicy(value: unknown): AgentRunPolicy {
   const skills = parseExtensionRefs(value.skills, "skills");
 
   return {
+    ...(executionMode ? { executionMode } : {}),
     ...(hostCapabilities ? { hostCapabilities } : {}),
     ...(limits ? { limits } : {}),
     ...(mcpConnections ? { mcpConnections } : {}),
     ...(skills ? { skills } : {}),
   };
+}
+
+export function readAgentExecutionMode(session: RunPolicyContext): AgentExecutionMode {
+  return readAgentRunPolicy(session).executionMode ?? "standard";
+}
+
+function parseExecutionMode(value: unknown): AgentExecutionMode {
+  if (typeof value !== "string" || !(EXECUTION_MODES as readonly string[]).includes(value)) {
+    throw new Error("AgentRun executionMode must be automation, cautious, or standard.");
+  }
+  return value as AgentExecutionMode;
 }
 
 function parseExtensionRefs(value: unknown, field: string): readonly AgentExtensionRef[] | undefined {

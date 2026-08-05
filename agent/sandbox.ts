@@ -5,7 +5,10 @@ import {
 import { docker } from "eve/sandbox/docker";
 import { microsandbox } from "eve/sandbox/microsandbox";
 import { vercel } from "eve/sandbox/vercel";
-import { readAgentSandboxBackend } from "../lib/production-config.ts";
+import {
+  readAgentSandboxBackend,
+  readAgentSandboxImage,
+} from "../lib/production-config.ts";
 
 /**
  * The sandbox is an Agent capability boundary, not a convenience default.
@@ -28,14 +31,17 @@ export default defineSandbox({
 
 function selectBackend() {
   const selected = readAgentSandboxBackend();
+  const image = readAgentSandboxImage();
   if (selected === "docker") {
     return docker({
+      ...(image ? { image } : {}),
       networkPolicy: "deny-all",
       pullPolicy: "if-not-present",
     });
   }
   if (selected === "microsandbox") {
     return microsandbox({
+      ...(image ? { image } : {}),
       cpus: 2,
       memoryMiB: 2048,
       networkPolicy: "deny-all",
@@ -44,18 +50,20 @@ function selectBackend() {
   }
   if (selected === "vercel") {
     return vercel({
+      ...(image ? { image } : {}),
       networkPolicy: "deny-all",
       resources: { vcpus: 2 },
     });
   }
   return defaultBackend({
-    docker: { networkPolicy: "deny-all", pullPolicy: "if-not-present" },
+    docker: { ...(image ? { image } : {}), networkPolicy: "deny-all", pullPolicy: "if-not-present" },
     microsandbox: {
+      ...(image ? { image } : {}),
       cpus: 2,
       memoryMiB: 2048,
       networkPolicy: "deny-all",
       pullPolicy: "if-missing",
     },
-    vercel: { resources: { vcpus: 2 } },
+    vercel: { ...(image ? { image } : {}), resources: { vcpus: 2 } },
   });
 }

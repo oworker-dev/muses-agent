@@ -24,11 +24,14 @@ product-owner decisions; do not infer them from this automation.
 5. The prerelease workflow rebuilds from the tag, verifies the version, packs
    all four SDKs, emits `SHA256SUMS`, uploads artifacts, and requests GitHub
    build-provenance attestations.
-6. Verify the release assets and attestation, then update host dependencies in a
-   separate reviewed commit. Do not point a host at an artifact before the
-   release exists.
+6. A separate release job builds `sandbox/Dockerfile`, publishes version and
+   `v`-prefixed tags to `ghcr.io/<owner>/open-agent-sandbox`, runs the runtime
+   probe against the returned immutable digest, emits an SBOM, and requests a
+   registry provenance attestation.
+7. Verify the release assets, image digest, SBOM, and attestations, then update
+   deployment and host references in a separate reviewed commit. Do not point a
+   host at an artifact or mutable image tag before the release exists.
 
 The workflow does not publish to npm. Removing `private: true`, selecting a
 license, setting npm provenance, and defining stable support/migration policy
 require an explicit release decision.
-

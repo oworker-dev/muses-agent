@@ -39,8 +39,11 @@ export type AgentRunLimits = {
   readonly maxTurns?: number;
 };
 
+export type AgentExecutionMode = "automation" | "cautious" | "standard";
+
 /** Host-neutral execution policy discovered from the active host. */
 export type AgentRunPolicy = {
+  readonly executionMode?: AgentExecutionMode;
   readonly hostCapabilities?: readonly string[];
   readonly limits?: AgentRunLimits;
   readonly mcpConnections?: readonly AgentExtensionRef[];

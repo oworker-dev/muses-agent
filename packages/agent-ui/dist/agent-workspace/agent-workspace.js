@@ -19,7 +19,8 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
     const stableDefaults = useMemo(() => ({
         modelId: defaultPreferences.modelId,
         reasoning: defaultPreferences.reasoning,
-    }), [defaultPreferences.modelId, defaultPreferences.reasoning]);
+        executionMode: defaultPreferences.executionMode ?? "standard",
+    }), [defaultPreferences.executionMode, defaultPreferences.modelId, defaultPreferences.reasoning]);
     const [threads, setThreads] = useState([]);
     const [activeThreadId, setActiveThreadId] = useState();
     const [isHydrated, setIsHydrated] = useState(false);
@@ -297,9 +298,10 @@ function normalizeThreadPreferences(thread, models, reasoningLevels, defaults) {
     const reasoning = reasoningLevels.includes(thread.preferences.reasoning)
         ? thread.preferences.reasoning
         : defaults.reasoning;
-    return modelId === thread.preferences.modelId && reasoning === thread.preferences.reasoning
+    const executionMode = thread.preferences.executionMode ?? defaults.executionMode;
+    return modelId === thread.preferences.modelId && reasoning === thread.preferences.reasoning && executionMode === thread.preferences.executionMode
         ? thread
-        : { ...thread, preferences: { modelId, reasoning } };
+        : { ...thread, preferences: { executionMode, modelId, reasoning } };
 }
 function withoutSetValue(source, value) {
     if (!source.has(value))

@@ -35,6 +35,7 @@ const startSchema = z.object({
     source: z.enum(["agent", "workflow"]),
   }).strict().optional(),
   policy: z.object({
+    executionMode: z.enum(["automation", "cautious", "standard"]).optional(),
     hostCapabilities: z.array(capabilityNameSchema).max(128).optional(),
     limits: z.object({
       maxDurationMs: positiveLimit.max(24 * 60 * 60 * 1_000).optional(),

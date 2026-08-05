@@ -66,6 +66,7 @@ declare const translations: {
         readonly unconfigured: "Not configured";
         readonly noMcpConnections: "No MCP connections are configured.";
         readonly estimatedCost: "Estimated cost";
+        readonly executionMode: "Execution mode";
         readonly usage: "Usage";
     };
     readonly "zh-CN": {
@@ -134,6 +135,7 @@ declare const translations: {
         readonly unconfigured: "未配置";
         readonly noMcpConnections: "尚未配置 MCP 连接。";
         readonly estimatedCost: "预估费用";
+        readonly executionMode: "执行模式";
         readonly usage: "用量";
     };
 };

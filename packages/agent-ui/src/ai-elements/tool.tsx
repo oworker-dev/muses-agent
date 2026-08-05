@@ -9,6 +9,7 @@ import {
   ChevronDownIcon,
   CircleIcon,
   ClockIcon,
+  ExternalLinkIcon,
   WrenchIcon,
   XCircleIcon,
 } from "lucide-react";
@@ -136,7 +137,43 @@ export const ToolOutput = ({ className, output, errorLabel = "Error", errorText,
 
   let Output = <div>{output as ReactNode}</div>;
 
-  if (typeof output === "object" && !isValidElement(output)) {
+  const preview = previewOutput(output);
+  const artifact = artifactOutput(output);
+  if (preview) {
+    Output = (
+      <div className="flex flex-wrap items-center gap-3 p-3">
+        <a
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm hover:bg-primary/90"
+          href={preview.url}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <ExternalLinkIcon className="size-4" />
+          Open preview
+        </a>
+        <span className="text-muted-foreground text-xs">
+          {preview.fileCount} files - {formatBytes(preview.bytes)}
+        </span>
+      </div>
+    );
+  } else if (artifact) {
+    Output = (
+      <div className="flex flex-wrap items-center gap-3 p-3">
+        <a
+          className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm hover:bg-primary/90"
+          href={artifact.url}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <ExternalLinkIcon className="size-4" />
+          Open artifact
+        </a>
+        <span className="text-muted-foreground text-xs">
+          {artifact.filename} - {formatBytes(artifact.bytes)}
+        </span>
+      </div>
+    );
+  } else if (typeof output === "object" && !isValidElement(output)) {
     Output = <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />;
   } else if (typeof output === "string") {
     Output = <CodeBlock code={output} language="json" />;
@@ -159,3 +196,43 @@ export const ToolOutput = ({ className, output, errorLabel = "Error", errorText,
     </div>
   );
 };
+
+function previewOutput(value: unknown): { readonly bytes: number; readonly fileCount: number; readonly url: string } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.kind !== "website-preview" || typeof record.url !== "string") return undefined;
+  try {
+    const url = new URL(record.url, window.location.href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return {
+      bytes: typeof record.bytes === "number" ? record.bytes : 0,
+      fileCount: typeof record.fileCount === "number" ? record.fileCount : 0,
+      url: url.toString(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function artifactOutput(value: unknown): { readonly bytes: number; readonly filename: string; readonly url: string } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.kind !== "artifact" || typeof record.url !== "string" || typeof record.filename !== "string") return undefined;
+  try {
+    const url = new URL(record.url, window.location.href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return {
+      bytes: typeof record.bytes === "number" ? record.bytes : 0,
+      filename: record.filename,
+      url: url.toString(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function formatBytes(value: number): string {
+  if (value < 1_024) return `${value} B`;
+  if (value < 1_024 * 1_024) return `${Math.round(value / 1_024)} KB`;
+  return `${(value / (1_024 * 1_024)).toFixed(1)} MB`;
+}

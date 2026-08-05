@@ -20,6 +20,26 @@ Canvas control belongs to layer 3. Muses can expose canvas query, patch, run, an
 approval tools to the Agent. The Agent core must remain useful when those tools
 do not exist.
 
+## Result delivery boundary
+
+User-visible results leave a session only through an authenticated publication
+tool. `publish_preview` is for a completed static website: it enumerates a
+bounded `/workspace` tree, requires an entrypoint, and stores immutable files.
+`publish_artifact` is for one bounded output file such as a Python report,
+image, audio/video render, PDF, archive, or build log. Both use PostgreSQL in
+production, retain tenant/principal/session ownership, and return HMAC-signed
+links with a finite TTL. A bearer link is not an authorization substitute for
+the Agent APIs; it can be revoked by expiry or database deletion and never
+reveals the underlying sandbox path.
+
+This release intentionally supports static result delivery only. It does not
+claim that `npm run dev`, a Python HTTP server, a WebSocket process, or any
+arbitrary sandbox port is publicly reachable. A Preview Gateway remains a
+separate release gate: it must own process registration, health checks, port
+mapping, idle shutdown, WebSocket/HTTP proxying, sandbox restart behavior,
+tenant/session authorization, and abuse limits before dynamic previews are
+enabled.
+
 ## Durable session contract
 
 One Web thread maps to one Eve durable session. The session is the isolation and
@@ -170,7 +190,10 @@ independent sandboxes.
 
 Local development may use Eve's availability-aware backend selection. Production
 must set `AGENT_SANDBOX_BACKEND` to `docker`, `microsandbox`, or `vercel`; the
-production doctor rejects implicit selection. The authored policy applies
+production doctor rejects implicit selection and requires
+`AGENT_SANDBOX_IMAGE` pinned by OCI sha256 digest. The reviewed
+`sandbox/Dockerfile` pins Eve's base image and adds Node/npm, Python, Git,
+FFmpeg, ImageMagick, ripgrep, and Playwright/Chromium. The authored policy applies
 2 vCPU/2048 MiB limits where supported, writes a session marker into the
 session-owned `/workspace`, and applies `deny-all` egress at backend creation
 and session start. Docker and microsandbox enforce the coarse policy; Vercel
@@ -199,6 +222,10 @@ Production still requires evidence on the selected deployment backend. Remaining
 - credential brokering instead of secrets inside the sandbox;
 - deployed reaper scheduling, product-authorized deletion, timeout, and durable audit policies;
 - adversarial isolation tests across users and sessions.
+- website/Python/media task evals that build or process a real fixture and
+  verify the returned preview or artifact URL, file bytes, and ownership;
+- a dynamic Preview Gateway with bounded process/port lifecycle before
+  promising long-running server previews.
 
 Skills add instructions; they do not add authority. MCP connections and tools
 must be scoped by the current principal, session, and approval policy.
@@ -266,9 +293,9 @@ The Muses Studio reference integration currently has two separate surfaces:
   API (`/api/agent/runs`). The Agent-to-host canvas bridge uses the signed
   `host_capabilities`/`host_invoke` protocol.
 
-The repository now builds `@oworker/open-agent-contracts@0.1.0-alpha.8`,
-`@oworker/open-agent-client@0.1.0-alpha.8`, `@oworker/open-agent-host@0.1.0-alpha.8`, and
-`@oworker/open-agent-ui@0.1.0-alpha.8` as real ESM/declaration packages with stable
+The repository now builds `@oworker/open-agent-contracts@0.1.0-alpha.9`,
+`@oworker/open-agent-client@0.1.0-alpha.9`, `@oworker/open-agent-host@0.1.0-alpha.9`, and
+`@oworker/open-agent-ui@0.1.0-alpha.9` as real ESM/declaration packages with stable
 subpath exports. A conformance command packs all four tarballs, installs them
 in an empty consumer, and imports their public entrypoints, an individual AI
 Element, and the stylesheet export. The compiled ESM, declarations, source
@@ -370,9 +397,10 @@ The current implementation has passed type checking, deterministic browser
 tests, Eve production build under Node 24, Next production build, HMAC Host
 bridge tests, and a two-process local production smoke test. The Headless
 AgentRun protocol has also passed a local Eve/PostgreSQL conformance run.
-The Eve-native fixed suite additionally passes 43/43 gates against real Docker
-sandboxes for Skill/file/Shell/checkpoint autonomy, tool failure recovery,
-durable approval, cancellation, and cross-turn continuity. PostgreSQL extension
+The Eve-native fixed suite additionally passes 58/58 gates against real Docker
+sandboxes for file/Shell/checkpoint autonomy, tool failure recovery, durable
+approval, cancellation, cross-turn continuity, static website preview delivery,
+Python artifact delivery, and ImageMagick/FFmpeg media rendering. PostgreSQL extension
 lifecycle conformance proves default enablement, tenant revocation, re-enable,
 and credential-minimized append-only audit records.
 Cancellation prefers Eve's cooperative boundary

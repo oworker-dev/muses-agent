@@ -1,3 +1,5 @@
+import type { AgentExecutionMode } from "@oworker/open-agent-contracts/agent-run";
+
 export type BashApprovalMode = "always" | "never" | "risky";
 
 const HIGH_RISK_COMMANDS = [
@@ -33,11 +35,13 @@ export function bashCommandNeedsApproval(command: string): boolean {
 export function bashApprovalDecision(input: {
   readonly actorType?: unknown;
   readonly command?: unknown;
+  readonly executionMode?: AgentExecutionMode;
   readonly mode: BashApprovalMode;
   readonly principalType?: unknown;
 }): "not-applicable" | "user-approval" | { readonly type: "denied"; readonly reason: string } {
   const requiresApproval =
-    input.mode === "always"
+    input.executionMode === "cautious"
+    || input.mode === "always"
     || (input.mode === "risky"
       && typeof input.command === "string"
       && bashCommandNeedsApproval(input.command));

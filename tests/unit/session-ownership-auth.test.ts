@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { AuthFn } from "eve/channels/auth";
 
-import { withSessionOwnership } from "../../agent/lib/session-ownership-auth.ts";
+import {
+  publicationOwnerFromAuth,
+  withSessionOwnership,
+} from "../../agent/lib/session-ownership-auth.ts";
 import type {
   AgentSessionOwner,
   AgentSessionOwnershipResult,
@@ -68,6 +71,24 @@ test("fails closed when a session owner cannot be resolved after the claim windo
       error instanceof Error &&
       "response" in error &&
       (error.response as Response).status === 403,
+  );
+});
+
+test("allows a synthetic publication owner only for local development", () => {
+  const localAuth = {
+    attributes: {},
+    authenticator: "local-dev",
+    principalId: "local-dev",
+    principalType: "local-dev",
+  } as const;
+  assert.deepEqual(publicationOwnerFromAuth(localAuth, { NODE_ENV: "development" }), {
+    principalId: "local-dev",
+    principalType: "local-dev",
+    tenantId: "local-dev",
+  });
+  assert.throws(
+    () => publicationOwnerFromAuth(localAuth, { NODE_ENV: "production" }),
+    /tenant-scoped/,
   );
 });
 

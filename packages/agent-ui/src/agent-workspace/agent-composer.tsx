@@ -59,6 +59,7 @@ import { Button } from "../ui/button.js";
 import type { AgentMessages } from "./i18n.js";
 import type {
   AgentModelOption,
+  AgentExecutionMode,
   AgentPromptMenuItem,
   AgentThreadPreferences,
 } from "./contracts.js";
@@ -98,6 +99,7 @@ export function AgentComposer({
   readonly usage: AgentUsageSummary;
 }) {
   const attachments = usePromptInputAttachments();
+  const executionMode = preferences.executionMode ?? "standard";
 
   return (
     <PromptInput
@@ -139,6 +141,11 @@ export function AgentComposer({
             onChange={(reasoning) => onPreferencesChange({ ...preferences, reasoning })}
             reasoningLevels={reasoningLevels}
             value={preferences.reasoning}
+          />
+          <ExecutionModeSelect
+            label={messages.executionMode}
+            onChange={(nextMode) => onPreferencesChange({ ...preferences, executionMode: nextMode })}
+            value={executionMode}
           />
         </PromptInputTools>
         <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -368,6 +375,28 @@ function ReasoningSelect({ label, onChange, reasoningLevels, value }: { readonly
         {reasoningLevels.map((level) => (
           <PromptInputSelectItem key={level} value={level}>{level}</PromptInputSelectItem>
         ))}
+      </PromptInputSelectContent>
+    </PromptInputSelect>
+  );
+}
+
+function ExecutionModeSelect({ label, onChange, value }: { readonly label: string; readonly onChange: (mode: AgentExecutionMode) => void; readonly value: AgentExecutionMode }) {
+  const labels: Record<AgentExecutionMode, string> = {
+    automation: "Auto",
+    cautious: "Review",
+    standard: "Standard",
+  };
+  return (
+    <PromptInputSelect onValueChange={(next) => {
+      if (next === "automation" || next === "cautious" || next === "standard") onChange(next);
+    }} value={value}>
+      <PromptInputSelectTrigger aria-label={label} className="h-8 max-w-24 px-2 text-xs">
+        <PromptInputSelectValue>{labels[value]}</PromptInputSelectValue>
+      </PromptInputSelectTrigger>
+      <PromptInputSelectContent align="start" position="popper" side="top">
+        <PromptInputSelectItem value="standard">Standard</PromptInputSelectItem>
+        <PromptInputSelectItem value="cautious">Review</PromptInputSelectItem>
+        <PromptInputSelectItem value="automation">Auto</PromptInputSelectItem>
       </PromptInputSelectContent>
     </PromptInputSelect>
   );

@@ -3,7 +3,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { Badge } from "../ui/badge.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 import { cn } from "../utils.js";
-import { CheckCircleIcon, ChevronDownIcon, CircleIcon, ClockIcon, WrenchIcon, XCircleIcon, } from "lucide-react";
+import { CheckCircleIcon, ChevronDownIcon, CircleIcon, ClockIcon, ExternalLinkIcon, WrenchIcon, XCircleIcon, } from "lucide-react";
 import { isValidElement } from "react";
 import { CodeBlock } from "./code-block.js";
 export const Tool = ({ className, ...props }) => (_jsx(Collapsible, { className: cn("group not-prose mb-4 w-full rounded-md border", className), ...props }));
@@ -37,7 +37,15 @@ export const ToolOutput = ({ className, output, errorLabel = "Error", errorText,
         return null;
     }
     let Output = _jsx("div", { children: output });
-    if (typeof output === "object" && !isValidElement(output)) {
+    const preview = previewOutput(output);
+    const artifact = artifactOutput(output);
+    if (preview) {
+        Output = (_jsxs("div", { className: "flex flex-wrap items-center gap-3 p-3", children: [_jsxs("a", { className: "inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm hover:bg-primary/90", href: preview.url, rel: "noreferrer", target: "_blank", children: [_jsx(ExternalLinkIcon, { className: "size-4" }), "Open preview"] }), _jsxs("span", { className: "text-muted-foreground text-xs", children: [preview.fileCount, " files - ", formatBytes(preview.bytes)] })] }));
+    }
+    else if (artifact) {
+        Output = (_jsxs("div", { className: "flex flex-wrap items-center gap-3 p-3", children: [_jsxs("a", { className: "inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm hover:bg-primary/90", href: artifact.url, rel: "noreferrer", target: "_blank", children: [_jsx(ExternalLinkIcon, { className: "size-4" }), "Open artifact"] }), _jsxs("span", { className: "text-muted-foreground text-xs", children: [artifact.filename, " - ", formatBytes(artifact.bytes)] })] }));
+    }
+    else if (typeof output === "object" && !isValidElement(output)) {
         Output = _jsx(CodeBlock, { code: JSON.stringify(output, null, 2), language: "json" });
     }
     else if (typeof output === "string") {
@@ -45,4 +53,51 @@ export const ToolOutput = ({ className, output, errorLabel = "Error", errorText,
     }
     return (_jsxs("div", { className: cn("space-y-2", className), ...props, children: [_jsx("h4", { className: "font-medium text-muted-foreground text-xs uppercase tracking-wide", children: errorText ? errorLabel : resultLabel }), _jsxs("div", { className: cn("overflow-x-auto rounded-md text-xs [&_table]:w-full", errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground"), children: [errorText && _jsx("div", { children: errorText }), Output] })] }));
 };
+function previewOutput(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return undefined;
+    const record = value;
+    if (record.kind !== "website-preview" || typeof record.url !== "string")
+        return undefined;
+    try {
+        const url = new URL(record.url, window.location.href);
+        if (url.protocol !== "http:" && url.protocol !== "https:")
+            return undefined;
+        return {
+            bytes: typeof record.bytes === "number" ? record.bytes : 0,
+            fileCount: typeof record.fileCount === "number" ? record.fileCount : 0,
+            url: url.toString(),
+        };
+    }
+    catch {
+        return undefined;
+    }
+}
+function artifactOutput(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return undefined;
+    const record = value;
+    if (record.kind !== "artifact" || typeof record.url !== "string" || typeof record.filename !== "string")
+        return undefined;
+    try {
+        const url = new URL(record.url, window.location.href);
+        if (url.protocol !== "http:" && url.protocol !== "https:")
+            return undefined;
+        return {
+            bytes: typeof record.bytes === "number" ? record.bytes : 0,
+            filename: record.filename,
+            url: url.toString(),
+        };
+    }
+    catch {
+        return undefined;
+    }
+}
+function formatBytes(value) {
+    if (value < 1_024)
+        return `${value} B`;
+    if (value < 1_024 * 1_024)
+        return `${Math.round(value / 1_024)} KB`;
+    return `${(value / (1_024 * 1_024)).toFixed(1)} MB`;
+}
 //# sourceMappingURL=tool.js.map

@@ -50,6 +50,13 @@ test("requires a person for risky commands and denies unattended approval", () =
   );
 });
 
+test("cautious execution mode gates otherwise safe shell commands", () => {
+  assert.equal(
+    bashApprovalDecision({ command: "npm test", executionMode: "cautious", mode: "risky" }),
+    "user-approval",
+  );
+});
+
 test("parses only supported shell approval modes", () => {
   assert.equal(readBashApprovalMode({}), "risky");
   assert.equal(readBashApprovalMode({ AGENT_BASH_APPROVAL_MODE: "always" }), "always");

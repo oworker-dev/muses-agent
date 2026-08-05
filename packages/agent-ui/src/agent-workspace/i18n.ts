@@ -67,6 +67,7 @@ const translations = {
     unconfigured: "Not configured",
     noMcpConnections: "No MCP connections are configured.",
     estimatedCost: "Estimated cost",
+    executionMode: "Execution mode",
     usage: "Usage",
   },
   "zh-CN": {
@@ -135,6 +136,7 @@ const translations = {
     unconfigured: "未配置",
     noMcpConnections: "尚未配置 MCP 连接。",
     estimatedCost: "预估费用",
+    executionMode: "执行模式",
     usage: "用量",
   },
 } as const;

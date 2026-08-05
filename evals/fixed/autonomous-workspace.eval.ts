@@ -1,13 +1,13 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
-  description: "Loads a Skill and completes a file, Shell, read, and checkpoint loop.",
+  description: "Completes a file, Shell, read, and checkpoint loop without a host-specific default Skill.",
   tags: ["fixed", "sandbox"],
   async test(t) {
     await t.send("EVAL_AUTONOMY_FILE complete the autonomous workspace task.");
     t.succeeded();
-    t.loadedSkill("software-task", { count: 1 });
-    t.toolOrder(["load_skill", "write_file", "bash", "read_file", "record_checkpoint"]);
+    t.notCalledTool("load_skill");
+    t.toolOrder(["write_file", "bash", "read_file", "record_checkpoint"]);
     t.calledTool("write_file", {
       input: { filePath: "/workspace/autonomy.txt" },
       count: 1,
