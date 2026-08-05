@@ -68,6 +68,11 @@ npm run dev
 The Next.js app and Eve development runtime are mounted on one origin by
 `withEve()`. The default Web URL is `http://127.0.0.1:3000`.
 
+For a remote development preview, bind Next to all interfaces and pass the
+current hostname or IP through `AGENT_DEV_ALLOWED_ORIGINS`. Keep that value in
+the process environment rather than source control so dynamic addresses do not
+become deployment configuration.
+
 ## Verification
 
 ```bash

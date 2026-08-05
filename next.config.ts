@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import { withEve } from "eve/next";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  allowedDevOrigins: allowedDevelopmentOrigins(),
   async headers() {
     return [{
       source: "/embed",
@@ -13,6 +13,23 @@ const nextConfig: NextConfig = {
     }];
   },
 };
+
+function allowedDevelopmentOrigins(): string[] {
+  const configured = process.env.AGENT_DEV_ALLOWED_ORIGINS?.trim();
+  const origins = configured
+    ? configured.split(",").map((value) => normalizeDevelopmentOrigin(value.trim()))
+    : [];
+  return [...new Set(["127.0.0.1", "localhost", ...origins])];
+}
+
+function normalizeDevelopmentOrigin(value: string): string {
+  const hostname = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/iu;
+  const ipv6 = /^\[[0-9a-f:]+\]$/iu;
+  if (!value || value.length > 253 || !hostname.test(value) && !ipv6.test(value)) {
+    throw new Error("AGENT_DEV_ALLOWED_ORIGINS must contain comma-separated hostnames or IP addresses.");
+  }
+  return value.toLowerCase();
+}
 
 function frameAncestorPolicy(): string {
   const configured = process.env.AGENT_EMBED_ALLOWED_ORIGINS?.trim();
