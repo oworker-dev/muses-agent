@@ -155,3 +155,32 @@ test("derives tenant lifecycle manifests from a Host runtime config", () => {
     version: "1.0.0",
   });
 });
+
+test("does not treat MCP metadata as an executable connection adapter", () => {
+  const runtimeMcp = { id: "tenant-mcp", version: "1.0.0" } as const;
+  const config = {
+    ...DEFAULT_AGENT_RUNTIME_CONFIG,
+    profile: {
+      ...DEFAULT_AGENT_RUNTIME_CONFIG.profile,
+      allowedMcpConnections: [runtimeMcp],
+      defaultMcpConnections: [],
+    },
+    extensions: [{
+      ...runtimeMcp,
+      kind: "mcp" as const,
+      label: "Tenant MCP",
+      description: "Tenant tools",
+      mcp: { endpoint: "https://mcp.example.com", authProvider: "tenant-vault" },
+    }],
+  };
+
+  assert.throws(
+    () => resolveAgentRunPolicy(
+      profile,
+      { mcpConnections: [runtimeMcp] },
+      undefined,
+      config,
+    ),
+    /no compiled MCP connection adapter/,
+  );
+});

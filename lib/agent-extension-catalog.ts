@@ -183,7 +183,10 @@ function resolveExtensionRefs(
     const staticManifest = AGENT_EXTENSION_CATALOG.find(
       (candidate) => extensionRefKey(candidate) === key && candidate.kind === kind,
     );
-    const manifest = runtimeManifest ?? staticManifest;
+    if (kind === "mcp" && staticManifest === undefined) {
+      throw new Error(`Extension ${key} has no compiled MCP connection adapter.`);
+    }
+    const manifest = kind === "mcp" ? staticManifest : runtimeManifest ?? staticManifest;
     if (!manifest) throw new Error(`Extension ${key} is not installed as ${kind}.`);
     if (
       revokedRefs.has(key) ||

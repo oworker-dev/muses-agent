@@ -267,10 +267,11 @@ takes effect on the next Run or continuation boundary, not retroactively on a
 completed external side effect. Runtime Config Skill text resolves dynamically
 after the same lifecycle check. MCP manifest metadata can enter the lifecycle
 catalog, but Eve connections are still build-time mounted capabilities; a
-manifest cannot create an unreviewed network adapter. The deployment currently
-publishes one built-in Skill and intentionally mounts no MCP connection until
-its endpoint, tool allowlist, principal-scoped auth, approval policy, and real
-execution eval exist.
+manifest cannot create an unreviewed network adapter, and AgentRun policy
+resolution fails closed when no same-version compiled adapter exists. The
+deployment currently publishes one built-in Skill and intentionally mounts no
+MCP connection until its endpoint, tool allowlist, principal-scoped auth,
+approval policy, and real execution eval exist.
 
 ## Authentication and authorization
 

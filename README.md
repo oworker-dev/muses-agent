@@ -462,9 +462,10 @@ The current compiled catalog contains `software-task@1.0.0`. Runtime Config can
 publish tenant procedure text as a dynamic Skill without rebuilding the Agent.
 It can also publish MCP lifecycle metadata, but Eve MCP connection adapters are
 build-time capabilities: a manifest alone does not create a network connection.
-No MCP is advertised by the standalone profile until a reviewed adapter, tool
-allowlist, auth provider, approval policy, and execution eval are mounted into
-the deployment.
+AgentRun policy resolution fails closed when MCP metadata has no matching
+compiled adapter. No MCP is advertised by the standalone profile until a
+reviewed adapter, tool allowlist, auth provider, approval policy, and execution
+eval are mounted into the deployment.
 
 Headless hosts use the same versioned Run contract through the buildable
 `@oworker/open-agent-contracts` and `@oworker/open-agent-client` workspace packages.
