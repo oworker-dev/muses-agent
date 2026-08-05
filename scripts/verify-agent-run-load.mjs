@@ -1,21 +1,36 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+
+import { evaluateLoadSlo, summarizeLatencies } from "../lib/load-slo.ts";
 
 const baseUrl = (
   process.env.AGENT_LOAD_BASE_URL?.trim() || "http://127.0.0.1:3100"
 ).replace(/\/$/, "");
-const concurrency = boundedInteger("AGENT_LOAD_CONCURRENCY", 8, 1, 50);
-const completionBudgetMs = boundedInteger(
-  "AGENT_LOAD_P95_COMPLETION_MS",
-  20_000,
-  100,
-  300_000,
-);
+const concurrency = boundedInteger("AGENT_LOAD_CONCURRENCY", 8, 1, 100);
+const totalRuns = boundedInteger("AGENT_LOAD_TOTAL_RUNS", concurrency, 1, 10_000);
+const warmupRuns = boundedInteger("AGENT_LOAD_WARMUP_RUNS", 0, 0, 1_000);
+const budgets = {
+  maxErrorRate: boundedNumber("AGENT_LOAD_MAX_ERROR_RATE", 0, 0, 1),
+  minThroughputPerSecond: optionalBoundedNumber(
+    "AGENT_LOAD_MIN_THROUGHPUT_PER_SECOND",
+    0.01,
+    10_000,
+  ),
+  p95AdmissionMs: boundedInteger("AGENT_LOAD_P95_ADMISSION_MS", 2_000, 10, 300_000),
+  p95CompletionMs: boundedInteger("AGENT_LOAD_P95_COMPLETION_MS", 20_000, 100, 900_000),
+  p99CompletionMs: optionalBoundedInteger(
+    "AGENT_LOAD_P99_COMPLETION_MS",
+    100,
+    900_000,
+  ),
+};
 const deadlineMs = boundedInteger(
   "AGENT_LOAD_DEADLINE_MS",
   60_000,
   1_000,
-  600_000,
+  900_000,
 );
 const batchId = `load-${Date.now()}-${randomUUID()}`;
 const accessToken = signToken({
@@ -27,15 +42,168 @@ const providerDebugUrl = process.env.AGENT_LOAD_PROVIDER_DEBUG_URL?.trim();
 const providerBefore = providerDebugUrl
   ? await providerRequestCount(providerDebugUrl)
   : undefined;
+const generatedAt = new Date().toISOString();
 
-const cases = Array.from({ length: concurrency }, (_, index) => {
-  const expected = `LOAD_READY_${batchId}_${index}`;
+const warmup = await runPhase("warmup", warmupRuns);
+const measuredStartedAt = performance.now();
+const measured = await runPhase("measured", totalRuns);
+const measuredDurationMs = performance.now() - measuredStartedAt;
+const succeeded = measured.filter((entry) => entry.ok);
+const failed = measured.filter((entry) => !entry.ok);
+
+const replayFailures = [];
+await mapWithConcurrency(succeeded, concurrency, async (entry) => {
+  try {
+    const payload = await api("POST", "/api/agent/runs", entry.request, 200);
+    assert(payload.disposition === "replayed", `AgentRun ${entry.runId} was not replayed.`);
+    assert(payload.run?.runId === entry.runId, `AgentRun ${entry.runId} replay changed identity.`);
+  } catch (cause) {
+    replayFailures.push({ runId: entry.runId, error: safeError(cause) });
+  }
+});
+
+const providerAfter = providerDebugUrl
+  ? await providerRequestCount(providerDebugUrl)
+  : undefined;
+const providerRequests =
+  providerAfter !== undefined && providerBefore !== undefined
+    ? providerAfter - providerBefore
+    : undefined;
+const expectedProviderRequests = warmupRuns + totalRuns;
+const metrics = {
+  admission: summarizeLatencies(succeeded.map((entry) => entry.admissionMs)),
+  completion: summarizeLatencies(succeeded.map((entry) => entry.completionMs)),
+  errorRate: failed.length / totalRuns,
+  throughputPerSecond: round(succeeded.length / Math.max(measuredDurationMs / 1_000, 0.001), 2),
+};
+const violations = [...evaluateLoadSlo(metrics, budgets)];
+const warmupFailures = warmup.filter((entry) => !entry.ok);
+if (warmupFailures.length > 0) {
+  violations.push(`${warmupFailures.length} of ${warmupRuns} warmup runs failed.`);
+}
+if (replayFailures.length > 0) {
+  violations.push(`${replayFailures.length} idempotent replays failed.`);
+}
+if (
+  providerRequests !== undefined &&
+  warmupFailures.length === 0 &&
+  failed.length === 0 &&
+  providerRequests !== expectedProviderRequests
+) {
+  violations.push(
+    `Expected ${expectedProviderRequests} Provider requests, received ${providerRequests}.`,
+  );
+}
+
+const evidence = {
+  schemaVersion: "open-agent.load-evidence.v1",
+  batchId,
+  generatedAt,
+  completedAt: new Date().toISOString(),
+  targetOrigin: new URL(baseUrl).origin,
+  configuration: {
+    concurrency,
+    deadlineMs,
+    totalRuns,
+    warmupRuns,
+  },
+  budgets,
+  metrics: {
+    ...metrics,
+    measuredDurationMs: Math.round(measuredDurationMs),
+    successes: succeeded.length,
+    failures: failed.length,
+    eventCount: succeeded.reduce((total, entry) => total + entry.eventCount, 0),
+    idempotencyReplays: succeeded.length - replayFailures.length,
+    providerRequests,
+  },
+  failures: failed.map(({ index, stage, error }) => ({ index, stage, error })),
+  warmupFailures: warmupFailures.map(({ index, stage, error }) => ({ index, stage, error })),
+  replayFailures,
+  violations,
+  ok: violations.length === 0,
+};
+
+await writeEvidence(evidence);
+console.log(JSON.stringify(evidence));
+assert(evidence.ok, `Load SLO gate failed: ${violations.join(" ")}`);
+
+async function runPhase(phase, count) {
+  const cases = Array.from({ length: count }, (_, index) => createCase(phase, index));
+  return await mapWithConcurrency(cases, concurrency, async (loadCase) => {
+    let stage = "admission";
+    try {
+      const startedAt = performance.now();
+      const payload = await api("POST", "/api/agent/runs", loadCase.request, 202);
+      assert(payload.disposition === "started", "A load run was not newly started.");
+      assert(typeof payload.run?.runId === "string", "A load run did not return a runId.");
+      const admissionMs = performance.now() - startedAt;
+      const runId = payload.run.runId;
+
+      stage = "completion";
+      const run = await poll(runId, startedAt + deadlineMs);
+      const completionMs = performance.now() - startedAt;
+      assert(run.status === "completed", `AgentRun ${runId} ended as ${run.status}.`);
+      assert(
+        run.result?.kind === "text" && run.result.value === loadCase.expected,
+        `AgentRun ${runId} received another run's result.`,
+      );
+      assert(run.usage?.steps > 0, `AgentRun ${runId} did not project step usage.`);
+      assert(run.usage?.inputTokens > 0, `AgentRun ${runId} did not project input usage.`);
+      assert(run.usage?.outputTokens > 0, `AgentRun ${runId} did not project output usage.`);
+
+      stage = "events";
+      const eventPage = await api(
+        "GET",
+        `/api/agent/runs/${encodeURIComponent(runId)}/events?after=0`,
+        undefined,
+        200,
+      );
+      assert(Array.isArray(eventPage.events), `AgentRun ${runId} returned invalid events.`);
+      assert(eventPage.events.length > 0, `AgentRun ${runId} returned no events.`);
+      assert(
+        eventPage.nextCursor === eventPage.events.length,
+        `AgentRun ${runId} returned an invalid event cursor.`,
+      );
+      eventPage.events.forEach((event, index) => {
+        assert(event.runId === runId, `AgentRun ${runId} received a foreign event.`);
+        assert(event.sequence === index + 1, `AgentRun ${runId} has a broken event sequence.`);
+      });
+      const exhausted = await api(
+        "GET",
+        `/api/agent/runs/${encodeURIComponent(runId)}/events?after=${eventPage.nextCursor}`,
+        undefined,
+        200,
+      );
+      assert(exhausted.events.length === 0, `AgentRun ${runId} replayed exhausted events.`);
+      return {
+        ...loadCase,
+        admissionMs,
+        completionMs,
+        eventCount: eventPage.nextCursor,
+        ok: true,
+        runId,
+      };
+    } catch (cause) {
+      return {
+        ...loadCase,
+        error: safeError(cause),
+        ok: false,
+        stage,
+      };
+    }
+  });
+}
+
+function createCase(phase, index) {
+  const expected = `LOAD_READY_${batchId}_${phase}_${index}`;
   return {
     expected,
+    index,
     request: {
-      idempotencyKey: `${batchId}:${index}`,
+      idempotencyKey: `${batchId}:${phase}:${index}`,
       message: `Do not use tools. Reply exactly: ${expected}`,
-      metadata: { loadBatch: batchId, loadIndex: index },
+      metadata: { loadBatch: batchId, loadIndex: index, loadPhase: phase },
       policy: {
         limits: {
           maxDurationMs: deadlineMs,
@@ -49,108 +217,22 @@ const cases = Array.from({ length: concurrency }, (_, index) => {
       profile: { profileId: "general-purpose", version: "0.1.0" },
     },
   };
-});
-
-const started = await Promise.all(
-  cases.map(async (loadCase) => {
-    const startedAt = performance.now();
-    const payload = await api("POST", "/api/agent/runs", loadCase.request, 202);
-    assert(payload.disposition === "started", "A load run was not newly started.");
-    assert(typeof payload.run?.runId === "string", "A load run did not return a runId.");
-    return {
-      ...loadCase,
-      admissionMs: performance.now() - startedAt,
-      runId: payload.run.runId,
-      startedAt,
-    };
-  }),
-);
-
-assert(
-  new Set(started.map((entry) => entry.runId)).size === concurrency,
-  "Concurrent submissions reused an AgentRun id.",
-);
-
-const completed = await Promise.all(
-  started.map(async (entry) => {
-    const run = await poll(entry.runId, entry.startedAt + deadlineMs);
-    const completionMs = performance.now() - entry.startedAt;
-    assert(run.status === "completed", `AgentRun ${entry.runId} ended as ${run.status}.`);
-    assert(
-      run.result?.kind === "text" && run.result.value === entry.expected,
-      `AgentRun ${entry.runId} received another run's result.`,
-    );
-    assert(run.usage?.steps > 0, `AgentRun ${entry.runId} did not project step usage.`);
-    assert(run.usage?.inputTokens > 0, `AgentRun ${entry.runId} did not project input usage.`);
-    assert(run.usage?.outputTokens > 0, `AgentRun ${entry.runId} did not project output usage.`);
-
-    const eventPage = await api(
-      "GET",
-      `/api/agent/runs/${encodeURIComponent(entry.runId)}/events?after=0`,
-      undefined,
-      200,
-    );
-    assert(Array.isArray(eventPage.events), `AgentRun ${entry.runId} returned invalid events.`);
-    assert(eventPage.events.length > 0, `AgentRun ${entry.runId} returned no events.`);
-    assert(
-      eventPage.nextCursor === eventPage.events.length,
-      `AgentRun ${entry.runId} returned an invalid event cursor.`,
-    );
-    eventPage.events.forEach((event, index) => {
-      assert(event.runId === entry.runId, `AgentRun ${entry.runId} received a foreign event.`);
-      assert(event.sequence === index + 1, `AgentRun ${entry.runId} has a broken event sequence.`);
-    });
-    const exhausted = await api(
-      "GET",
-      `/api/agent/runs/${encodeURIComponent(entry.runId)}/events?after=${eventPage.nextCursor}`,
-      undefined,
-      200,
-    );
-    assert(exhausted.events.length === 0, `AgentRun ${entry.runId} replayed exhausted events.`);
-    return { ...entry, completionMs, eventCount: eventPage.nextCursor };
-  }),
-);
-
-const replayed = await Promise.all(
-  completed.map(async (entry) => {
-    const payload = await api("POST", "/api/agent/runs", entry.request, 200);
-    assert(payload.disposition === "replayed", `AgentRun ${entry.runId} was not replayed.`);
-    assert(payload.run?.runId === entry.runId, `AgentRun ${entry.runId} replay changed identity.`);
-    return payload.run.runId;
-  }),
-);
-assert(new Set(replayed).size === concurrency, "Idempotent replay collapsed distinct load runs.");
-
-if (providerDebugUrl && providerBefore !== undefined) {
-  const providerAfter = await providerRequestCount(providerDebugUrl);
-  assert(
-    providerAfter - providerBefore === concurrency,
-    `Expected ${concurrency} Provider requests, received ${providerAfter - providerBefore}.`,
-  );
 }
 
-const admission = distribution(completed.map((entry) => entry.admissionMs));
-const completion = distribution(completed.map((entry) => entry.completionMs));
-const withinCompletionBudget = completion.p95Ms <= completionBudgetMs;
-
-console.log(
-  JSON.stringify({
-    admission,
-    batchId,
-    completion,
-    completionBudgetMs,
-    concurrency,
-    eventCount: completed.reduce((total, entry) => total + entry.eventCount, 0),
-    idempotencyReplays: replayed.length,
-    ok: withinCompletionBudget,
-    providerRequests: providerDebugUrl ? concurrency : undefined,
-  }),
-);
-
-assert(
-  withinCompletionBudget,
-  `AgentRun p95 completion ${completion.p95Ms}ms exceeded ${completionBudgetMs}ms.`,
-);
+async function mapWithConcurrency(items, limit, worker) {
+  if (items.length === 0) return [];
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 async function poll(runId, deadline) {
   while (performance.now() < deadline) {
@@ -197,6 +279,14 @@ async function providerRequestCount(url) {
   return payload.requestCount;
 }
 
+async function writeEvidence(value) {
+  const configured = process.env.AGENT_LOAD_EVIDENCE_PATH?.trim();
+  if (!configured) return;
+  const path = resolve(configured);
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
 function signToken(claims) {
   const secret = required("AGENT_HOST_JWT_SECRET");
   const issuer = required("AGENT_HOST_JWT_ISSUER");
@@ -215,19 +305,6 @@ function signToken(claims) {
   return `${input}.${createHmac("sha256", secret).update(input).digest("base64url")}`;
 }
 
-function distribution(values) {
-  const sorted = values.map((value) => Math.round(value)).sort((left, right) => left - right);
-  return {
-    maxMs: sorted.at(-1),
-    p50Ms: percentile(sorted, 0.5),
-    p95Ms: percentile(sorted, 0.95),
-  };
-}
-
-function percentile(sorted, percentileValue) {
-  return sorted[Math.max(0, Math.ceil(sorted.length * percentileValue) - 1)];
-}
-
 function boundedInteger(name, fallback, minimum, maximum) {
   const raw = process.env[name]?.trim();
   if (!raw) return fallback;
@@ -238,8 +315,40 @@ function boundedInteger(name, fallback, minimum, maximum) {
   return value;
 }
 
+function optionalBoundedInteger(name, minimum, maximum) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  return boundedInteger(name, minimum, minimum, maximum);
+}
+
+function boundedNumber(name, fallback, minimum, maximum) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be a number from ${minimum} to ${maximum}.`);
+  }
+  return value;
+}
+
+function optionalBoundedNumber(name, minimum, maximum) {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  return boundedNumber(name, minimum, minimum, maximum);
+}
+
 function encode(value) {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function safeError(cause) {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return message.replaceAll(/[\r\n\t]+/gu, " ").slice(0, 500);
+}
+
+function round(value, digits) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
 }
 
 function required(name) {

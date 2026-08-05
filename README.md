@@ -291,12 +291,22 @@ Headless runs with:
 ```bash
 AGENT_LOAD_BASE_URL=http://127.0.0.1:3111 \
 AGENT_LOAD_PROVIDER_DEBUG_URL=http://127.0.0.1:4291/debug/state \
-AGENT_LOAD_CONCURRENCY=8 npm run verify:load
+AGENT_LOAD_CONCURRENCY=8 \
+AGENT_LOAD_TOTAL_RUNS=32 \
+AGENT_LOAD_WARMUP_RUNS=4 \
+AGENT_LOAD_P95_ADMISSION_MS=2000 \
+AGENT_LOAD_P95_COMPLETION_MS=20000 \
+AGENT_LOAD_MAX_ERROR_RATE=0 \
+AGENT_LOAD_EVIDENCE_PATH=.tmp/load-evidence.json \
+  npm run verify:load
 ```
 
-The gate checks completion latency, per-run result and event isolation, Usage,
-cursor exhaustion, and idempotent replay without additional Provider calls.
-This is a repeatable single-host baseline, not target-deployment capacity proof.
+The gate uses a bounded worker pool and checks admission and completion latency,
+error rate, optional throughput and p99 budgets, per-run result and event
+isolation, Usage, cursor exhaustion, and idempotent replay without additional
+Provider calls. The optional evidence path receives a versioned, secret-free
+JSON report even when a budget fails. This is a repeatable single-host baseline,
+not target-deployment capacity proof.
 
 ## Docker sandbox retention
 

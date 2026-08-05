@@ -11,5 +11,6 @@ dist
 !packages/*/dist/**
 playwright-report
 test-results
+.tmp/
 .DS_Store
 *.tsbuildinfo

@@ -160,10 +160,15 @@ input/output/cache tokens, tool count, preview id, and correlated trace id. A
 functional pass with excessive latency or spend is not an SLO pass.
 
 Use `npm run verify:load` against the staged Agent Web and Eve deployment before
-traffic promotion. Record its concurrency and p50/p95/max completion latency.
-The deterministic local run is a regression baseline; production capacity still
-requires the target Provider, database, queue, sandbox backend, autoscaling, and
-collector configuration.
+traffic promotion. Set total runs above concurrency, include a warmup phase, and
+configure explicit admission p95, completion p95/p99, maximum error-rate, and
+minimum throughput budgets for the intended traffic class. Set
+`AGENT_LOAD_EVIDENCE_PATH` and retain the versioned JSON report with the release;
+it includes the applied budgets, p50/p95/p99/max latency, throughput, failures,
+event count, and idempotency results without credentials or prompts. A local
+deterministic pass is only a regression baseline. Production capacity evidence
+must use the target Provider, database, queue, sandbox backend, autoscaling, and
+collector configuration, and must be repeated after material topology changes.
 
 Keep Eve pinned to an exact version. Before any cross-minor upgrade, replay
 representative persistent sessions against an isolated copy of the Workflow
