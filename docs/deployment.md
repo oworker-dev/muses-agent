@@ -152,6 +152,13 @@ The selected production sandbox, MCP OAuth lifecycle, provider billing,
 deployed dashboards, SLO/load evidence, abuse controls, and deletion proof are
 still release gates tracked in the architecture document.
 
+Run `npm run verify:live-autonomy` first against the staged Agent Web and Eve
+deployment. It must complete a real Provider-backed website task, execute
+sandbox tools, call `publish_preview`, and read the signed HTML through the
+deployment route. Record the run id, duration, Provider model/config revision,
+input/output/cache tokens, tool count, preview id, and correlated trace id. A
+functional pass with excessive latency or spend is not an SLO pass.
+
 Use `npm run verify:load` against the staged Agent Web and Eve deployment before
 traffic promotion. Record its concurrency and p50/p95/max completion latency.
 The deterministic local run is a regression baseline; production capacity still

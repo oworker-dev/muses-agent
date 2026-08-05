@@ -32,8 +32,9 @@ not yet proxy long-running development servers or arbitrary sandbox ports.
 MCP execution/lifecycle management, billing reconciliation, deployed telemetry
 and security evidence remain release gates. Host-published Skill manifests and
 content are now part of the versioned Runtime Config contract. The standalone
-Agent runtime and Host Capability bridge are implemented and build-tested; they are not a
-substitute for a real provider-backed production E2E. See
+Agent runtime has a repeatable real-Provider autonomy E2E on the local
+PostgreSQL production topology. That evidence does not substitute for a staged
+or deployed Provider, database, collector, load, and failure conformance run. See
 [Architecture](docs/architecture.md), the
 [deployment runbook](docs/deployment.md), and the
 [release runbook](docs/releasing.md).
@@ -90,6 +91,26 @@ the AI SDK does not multiply those attempts with its own retry loop. It also
 proves that a hung request and a stream interrupted after Provider output emit
 `step.failed` and `turn.failed`, park at `session.waiting`, and accept a
 successful follow-up in the same durable session without `session.failed`.
+
+Against an already running production topology, verify a real autonomous
+sandbox-to-preview task with:
+
+```bash
+AGENT_LIVE_E2E_BASE_URL=http://127.0.0.1:3100 \
+AGENT_LIVE_E2E_PREVIEW_ORIGIN=http://127.0.0.1:3100 \
+AGENT_HOST_JWT_SECRET=... \
+AGENT_HOST_JWT_ISSUER=... \
+AGENT_HOST_JWT_AUDIENCE=... \
+npm run verify:live-autonomy
+```
+
+The gate submits a real Provider-backed Headless AgentRun, proves idempotent
+admission, requires sandbox file or Shell execution, requires
+`publish_preview`, and reads the signed HTML back through the public preview
+route. `AGENT_LIVE_E2E_PREVIEW_ORIGIN` may point at a loopback deployment while
+`AGENT_PUBLIC_BASE_URL` remains the production HTTPS origin. The default task
+allows five minutes of Agent execution plus one minute for observation; record
+completion latency and token/cache usage from its JSON result.
 
 The Muses bridge verification is an explicit live-provider check, not a
 deterministic unit test:

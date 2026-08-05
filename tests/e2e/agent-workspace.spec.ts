@@ -21,7 +21,7 @@ test("wide workspace supports navigation, search, settings, and multiple threads
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByText("Software task", { exact: true })).toBeVisible();
+  await expect(page.getByText("Software task", { exact: true })).toHaveCount(0);
   await expect(page.getByText("No MCP connections are configured.")).toBeVisible();
   await page.getByRole("button", { name: "简体中文" }).click();
   await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
@@ -30,10 +30,8 @@ test("wide workspace supports navigation, search, settings, and multiple threads
 
   const composer = page.getByRole("textbox", { name: "描述一个任务" });
   await composer.fill("/");
-  await expect(page.getByText("技能与命令")).toBeVisible();
-  await expect(page.getByText("/software-task", { exact: true })).toBeVisible();
-  await composer.press("Enter");
-  await expect(composer).toHaveValue("/software-task ");
+  await expect(page.getByText("技能与命令")).toHaveCount(0);
+  await expect(composer).toHaveValue("/");
   await composer.fill("@");
   await expect(page.getByText("工作区上下文")).toBeVisible();
   await composer.press("Tab");
@@ -97,8 +95,8 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
   await page.keyboard.press("Escape");
 
   const composer = page.getByRole("textbox", { name: "Describe a task" });
-  await composer.fill("/");
-  await expect(page.getByText("Skills and commands")).toBeVisible();
+  await composer.fill("@");
+  await expect(page.getByText("Workspace context")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ fullPage: true, path: "/tmp/open-agent-mobile.png" });
 });

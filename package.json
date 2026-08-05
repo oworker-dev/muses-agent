@@ -40,6 +40,7 @@
     "reap:sandboxes": "node scripts/reap-docker-sandboxes.mjs",
     "verify:otel": "node scripts/verify-otel-export.mjs",
     "verify:extensions": "node scripts/verify-extension-lifecycle.mjs",
+    "verify:live-autonomy": "node scripts/verify-live-autonomy.mjs",
     "verify:load": "node scripts/verify-agent-run-load.mjs",
     "verify:provider-failures": "node scripts/verify-provider-failures.mjs",
     "verify:sandbox-reaper": "node scripts/verify-sandbox-reaper.mjs"

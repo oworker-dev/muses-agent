@@ -396,7 +396,13 @@ projections are not an audit log.
 The current implementation has passed type checking, deterministic browser
 tests, Eve production build under Node 24, Next production build, HMAC Host
 bridge tests, and a two-process local production smoke test. The Headless
-AgentRun protocol has also passed a local Eve/PostgreSQL conformance run.
+AgentRun protocol has also passed a local Eve/PostgreSQL conformance run. A
+real-Provider autonomy gate has completed a sandbox website task, published a
+signed preview, read the requested marker back from the delivered HTML, and
+verified idempotent admission plus token/cache projection. The same run's local
+OTLP evidence joined Agent Web to the durable Eve turn without exporting the
+prompt probe. This is local production-topology evidence, not deployed SLO or
+capacity evidence.
 The Eve-native fixed suite additionally passes 58/58 gates against real Docker
 sandboxes for file/Shell/checkpoint autonomy, tool failure recovery, durable
 approval, cancellation, cross-turn continuity, static website preview delivery,
@@ -423,5 +429,5 @@ The project must not be called production-complete until all of these are done:
 The headless AgentRun API itself has passed deterministic unit tests and a local
 production conformance run against Eve 0.27.8, PostgreSQL World, Host JWT
 authentication, structured output, event cursors, idempotency, isolation, and
-bounded cancellation reconciliation. That evidence does not waive the remaining
-release gates above.
+bounded cancellation reconciliation, plus a real-Provider sandbox and signed
+preview task. That evidence does not waive the remaining release gates above.

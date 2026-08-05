@@ -5,8 +5,13 @@ import type { AgentRuntimeStatus } from "@oworker/open-agent-ui";
 export function readAgentRuntimeStatus(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): AgentRuntimeStatus {
+  if (
+    environment.AGENT_PROVIDER_MODE?.trim() === "mock" ||
+    environment.AGENT_EVAL_FIXTURE_MODEL?.trim()
+  ) {
+    return { provider: "mock" };
+  }
   if (!environment.OPENAI_API_KEY?.trim()) return { provider: "unconfigured" };
-  if (environment.AGENT_PROVIDER_MODE?.trim() === "mock") return { provider: "mock" };
   const baseUrl = environment.OPENAI_BASE_URL?.trim();
   if (!baseUrl) return { provider: "ready" };
   try {

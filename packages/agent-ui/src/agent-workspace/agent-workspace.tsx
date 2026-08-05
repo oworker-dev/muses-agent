@@ -335,7 +335,7 @@ export function AgentWorkspace({
             locale={locale}
             onRetry={() => setRecoveringIds((current) => new Set(current).add(activeThread.id))}
           />
-        ) : <AgentThreadView client={client} commands={commands} key={activeThread.id} locale={locale} mentions={mentions} models={models} onChange={changeActiveThread} onEvent={onEvent} providerReady={runtimeStatus.provider === "ready"} reasoningLevels={reasoningLevels} thread={activeThread} />}
+        ) : <AgentThreadView client={client} commands={commands} key={activeThread.id} locale={locale} mentions={mentions} models={models} onChange={changeActiveThread} onEvent={onEvent} providerReady={runtimeStatus.provider !== "unconfigured"} reasoningLevels={reasoningLevels} thread={activeThread} />}
       </section>
       <AgentSettingsDialog extensions={extensions} locale={locale} messages={messages} onLocaleChange={setLocale} onOpenChange={setSettingsOpen} open={settingsOpen} />
     </div>
