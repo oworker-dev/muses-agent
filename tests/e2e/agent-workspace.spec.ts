@@ -153,6 +153,68 @@ test("a transport failure exposes same-thread recovery", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 90_000 });
 });
 
+test("an original page catches up when its live stream misses a durable turn failure", async ({ page }) => {
+  const sessionId = "mock-interrupted-provider-session";
+  const at = new Date().toISOString();
+  const turnId = "turn_0";
+  const acceptedEvents = [
+    { data: { runtime: { agentId: "open-agent", agentName: "open-agent", eveVersion: "test", modelId: "mock/model" } }, meta: { at }, type: "session.started" },
+    { data: { sequence: 0, turnId }, meta: { at }, type: "turn.started" },
+    { data: { message: "Run an interrupted task", parts: [{ text: "Run an interrupted task", type: "text" }], sequence: 0, turnId }, meta: { at }, type: "message.received" },
+    { data: { sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "step.started" },
+  ];
+  const durableFailureEvents = [
+    { data: { code: "PROVIDER_STREAM_INTERRUPTED", message: "The model Provider stream ended before completion.", sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "step.failed" },
+    { data: { code: "PROVIDER_STREAM_INTERRUPTED", message: "The model Provider stream ended before completion.", sequence: 0, turnId }, meta: { at }, type: "turn.failed" },
+    { data: { continuationToken: "mock-interrupted-token", wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+  ];
+  let liveRequests = 0;
+  let boundedRequests = 0;
+
+  await page.route("**/eve/v1/session", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-interrupted-token", sessionId }),
+      contentType: "application/json",
+      headers: { "x-eve-session-id": sessionId },
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    const url = new URL(route.request().url());
+    const startIndex = Number(url.searchParams.get("startIndex") ?? "0");
+    if (url.searchParams.get("includeTailIndex") === "1") {
+      boundedRequests += 1;
+      const allEvents = [...acceptedEvents, ...durableFailureEvents];
+      await route.fulfill({
+        body: `${allEvents.slice(startIndex).map((event) => JSON.stringify(event)).join("\n")}\n`,
+        contentType: "application/x-ndjson",
+        headers: { "x-eve-stream-tail-index": String(allEvents.length - 1) },
+        status: 200,
+      });
+      return;
+    }
+
+    liveRequests += 1;
+    await route.fulfill({
+      body: liveRequests === 1
+        ? `${acceptedEvents.map((event) => JSON.stringify(event)).join("\n")}\n`
+        : "",
+      contentType: "application/x-ndjson",
+      status: 200,
+    });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("Run an interrupted task");
+  await composer.press("Enter");
+
+  await expect(page.getByText("The model Provider stream ended before completion.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
+  await expect.poll(() => boundedRequests).toBeGreaterThanOrEqual(2);
+  expect(liveRequests).toBeGreaterThanOrEqual(1);
+});
+
 test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
   const session = new Client({
     headers: { "x-agent-model": "gpt-5.6-sol", "x-agent-reasoning": "low" },

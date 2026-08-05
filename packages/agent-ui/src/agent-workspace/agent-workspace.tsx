@@ -211,6 +211,11 @@ export function AgentWorkspace({
     updateThread(threadId, { title: normalized });
   }, [updateThread]);
 
+  const requestThreadRecovery = useCallback((threadId: string) => {
+    setRecoveryErrors((current) => withoutMapKey(current, threadId));
+    setRecoveringIds((current) => new Set(current).add(threadId));
+  }, []);
+
   const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? threads[0];
   const changeActiveThread = useCallback(
     (patch: AgentThreadPatch) => {
@@ -218,6 +223,9 @@ export function AgentWorkspace({
     },
     [activeThreadId, updateThread],
   );
+  const recoverActiveThread = useCallback(() => {
+    if (activeThreadId) requestThreadRecovery(activeThreadId);
+  }, [activeThreadId, requestThreadRecovery]);
 
   const recoverThread = useCallback(async (thread: AgentThread) => {
     if (!thread.session.sessionId || recoveryStarted.current.has(thread.id)) return;
@@ -236,7 +244,7 @@ export function AgentWorkspace({
 
     try {
       while (!settled) {
-        for await (const event of session.stream({ signal: controller.signal, startIndex: cursor })) {
+        for await (const event of session.stream({ follow: false, signal: controller.signal, startIndex: cursor })) {
           events.push(event);
           cursor += 1;
           updateThread(thread.id, { events: [...events], session: { ...session.state, streamIndex: cursor }, status: statusFromEvents(events) });
@@ -335,7 +343,7 @@ export function AgentWorkspace({
             locale={locale}
             onRetry={() => setRecoveringIds((current) => new Set(current).add(activeThread.id))}
           />
-        ) : <AgentThreadView client={client} commands={commands} key={activeThread.id} locale={locale} mentions={mentions} models={models} onChange={changeActiveThread} onEvent={onEvent} providerReady={runtimeStatus.provider !== "unconfigured"} reasoningLevels={reasoningLevels} thread={activeThread} />}
+        ) : <AgentThreadView client={client} commands={commands} key={activeThread.id} locale={locale} mentions={mentions} models={models} onChange={changeActiveThread} onEvent={onEvent} onRecoveryNeeded={recoverActiveThread} providerReady={runtimeStatus.provider !== "unconfigured"} reasoningLevels={reasoningLevels} thread={activeThread} />}
       </section>
       <AgentSettingsDialog extensions={extensions} locale={locale} messages={messages} onLocaleChange={setLocale} onOpenChange={setSettingsOpen} open={settingsOpen} />
     </div>

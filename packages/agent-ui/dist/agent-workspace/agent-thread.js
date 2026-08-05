@@ -13,9 +13,10 @@ import { AgentMessage } from "./agent-message.js";
 import { messagesFor } from "./i18n.js";
 import { titleFromPrompt } from "./thread-storage.js";
 import { summarizeUsage } from "./usage.js";
-export function AgentThreadView({ client, commands, locale, mentions, models, onChange, onEvent, providerReady, reasoningLevels, thread, }) {
+export function AgentThreadView({ client, commands, locale, mentions, models, onChange, onEvent, onRecoveryNeeded, providerReady, reasoningLevels, thread, }) {
     const preferencesRef = useRef(thread.preferences);
     const cancellationRef = useRef({ requested: false });
+    const recoveryRequestedRef = useRef(false);
     const [cancellationState, setCancellationState] = useState("idle");
     const [cancellationError, setCancellationError] = useState();
     const [turnError, setTurnError] = useState(() => latestTurnFailure(thread.events));
@@ -58,6 +59,81 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
         prepareSend: client?.prepareSend,
         session,
     });
+    const stopAgent = agent.stop;
+    const isBusy = agent.status === "submitted" || agent.status === "streaming";
+    const liveStateRef = useRef({
+        busy: isBusy,
+        events: agent.events,
+        session: agent.session,
+    });
+    liveStateRef.current = {
+        busy: isBusy,
+        events: agent.events,
+        session: agent.session,
+    };
+    const requestRecovery = useCallback(() => {
+        if (recoveryRequestedRef.current)
+            return;
+        recoveryRequestedRef.current = true;
+        stopAgent();
+        onRecoveryNeeded();
+    }, [onRecoveryNeeded, stopAgent]);
+    useEffect(() => {
+        if (!isBusy || !agent.session.sessionId)
+            return;
+        const controller = new AbortController();
+        void (async () => {
+            await waitForReconciliation(RECONCILIATION_INTERVAL_MS, controller.signal);
+            while (!controller.signal.aborted) {
+                const current = liveStateRef.current;
+                if (!current.busy || !current.session.sessionId)
+                    return;
+                const probeController = new AbortController();
+                const abortProbe = () => probeController.abort();
+                controller.signal.addEventListener("abort", abortProbe, { once: true });
+                const timeout = window.setTimeout(abortProbe, RECONCILIATION_TIMEOUT_MS);
+                const probe = createAgentSession(client, () => preferencesRef.current, {
+                    ...current.session,
+                    streamIndex: current.events.length,
+                });
+                let foundBoundary = false;
+                try {
+                    for await (const event of probe.stream({
+                        follow: false,
+                        signal: probeController.signal,
+                        startIndex: current.events.length,
+                    })) {
+                        if (isSessionBoundary(event))
+                            foundBoundary = true;
+                    }
+                }
+                catch (error) {
+                    if (!probeController.signal.aborted && !isAbortError(error)) {
+                        console.warn("Agent session reconciliation failed", error);
+                    }
+                }
+                finally {
+                    window.clearTimeout(timeout);
+                    controller.signal.removeEventListener("abort", abortProbe);
+                }
+                if (foundBoundary) {
+                    requestRecovery();
+                    return;
+                }
+                await waitForReconciliation(RECONCILIATION_INTERVAL_MS, controller.signal);
+            }
+        })();
+        return () => controller.abort();
+    }, [agent.session.sessionId, client, isBusy, requestRecovery]);
+    useEffect(() => {
+        const lastEvent = agent.events.at(-1);
+        if (agent.session.sessionId &&
+            !isBusy &&
+            lastEvent &&
+            !isSessionBoundary(lastEvent)) {
+            requestRecovery();
+        }
+    }, [agent.events, agent.session.sessionId, isBusy, requestRecovery]);
     useEffect(() => {
         onChange({
             events: agent.events,
@@ -66,10 +142,10 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
             updatedAt: Date.now(),
         });
     }, [agent.events, agent.session, agent.status, onChange, turnError]);
-    const isBusy = agent.status === "submitted" || agent.status === "streaming";
     const errorMessage = cancellationError ?? turnError ?? agent.error?.message;
     const usage = summarizeUsage(agent.events);
     const prepareTurn = () => {
+        recoveryRequestedRef.current = false;
         cancellationRef.current = { requested: false };
         setCancellationError(undefined);
         setCancellationState("idle");
@@ -109,6 +185,29 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
     };
     const isEmpty = agent.data.messages.length === 0;
     return (_jsx(PromptInputProvider, { children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [errorMessage ? (_jsx("div", { className: "mx-auto w-full max-w-4xl shrink-0 px-4 pt-3 sm:px-8", children: _jsxs("div", { className: "flex flex-col items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm sm:flex-row", children: [_jsx(AlertCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "font-medium", children: messages.requestFailed }), _jsx("p", { className: "mt-0.5 break-words text-muted-foreground", children: errorMessage })] }), _jsxs(Button, { className: "shrink-0", onClick: () => void submit({ files: [], text: messages.retryPrompt }), size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.retry] })] }) })) : null, isEmpty ? (_jsx(EmptyThread, { disabled: !providerReady, messages: messages, onPrompt: (prompt) => void submit({ files: [], text: prompt }) })) : (_jsxs(Conversation, { className: "min-h-0 flex-1", children: [_jsx(ConversationContent, { className: "mx-auto w-full max-w-4xl gap-8 px-4 py-8 sm:px-8", children: agent.data.messages.map((message, index) => (_jsx(AgentMessage, { canRespond: !isBusy, isStreaming: agent.status === "streaming" && index === agent.data.messages.length - 1, locale: locale, message: message, onInputResponses: respond }, message.id))) }), _jsx(ConversationScrollButton, { children: _jsx(ArrowDownIcon, { className: "size-4" }) })] })), _jsx("div", { className: cn("mx-auto w-full shrink-0 px-4 pb-4 sm:px-8", isEmpty ? "max-w-2xl pb-[10vh]" : "max-w-4xl"), children: _jsx(AgentComposer, { commands: commands, disabled: !providerReady, mentions: mentions, messages: messages, models: models, onPreferencesChange: (preferences) => onChange({ preferences }), onStop: requestCancellation, onSubmit: submit, preferences: thread.preferences, reasoningLevels: reasoningLevels, status: isBusy && cancellationState !== "idle" ? "submitted" : errorMessage ? "error" : agent.status, usage: usage }) })] }) }));
+}
+const RECONCILIATION_INTERVAL_MS = 2_000;
+const RECONCILIATION_TIMEOUT_MS = 10_000;
+function isSessionBoundary(event) {
+    return event.type === "session.waiting" || event.type === "session.completed" || event.type === "session.failed";
+}
+function waitForReconciliation(ms, signal) {
+    if (signal.aborted)
+        return Promise.resolve();
+    return new Promise((resolve) => {
+        const onAbort = () => {
+            window.clearTimeout(timeout);
+            resolve();
+        };
+        const timeout = window.setTimeout(() => {
+            signal.removeEventListener("abort", onAbort);
+            resolve();
+        }, ms);
+        signal.addEventListener("abort", onAbort, { once: true });
+    });
+}
+function isAbortError(error) {
+    return error instanceof Error && error.name === "AbortError";
 }
 function EmptyThread({ disabled, messages, onPrompt }) {
     const suggestions = [

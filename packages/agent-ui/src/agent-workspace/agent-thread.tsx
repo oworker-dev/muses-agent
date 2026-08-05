@@ -35,6 +35,7 @@ export function AgentThreadView({
   models,
   onChange,
   onEvent,
+  onRecoveryNeeded,
   providerReady,
   reasoningLevels,
   thread,
@@ -46,12 +47,14 @@ export function AgentThreadView({
   readonly models: readonly AgentModelOption[];
   readonly onChange: (patch: AgentThreadPatch) => void;
   readonly onEvent?: (event: HandleMessageStreamEvent) => void;
+  readonly onRecoveryNeeded: () => void;
   readonly providerReady: boolean;
   readonly reasoningLevels: readonly string[];
   readonly thread: AgentThread;
 }) {
   const preferencesRef = useRef(thread.preferences);
   const cancellationRef = useRef<Cancellation>({ requested: false });
+  const recoveryRequestedRef = useRef(false);
   const [cancellationState, setCancellationState] = useState<"idle" | "requested" | "cancelling">("idle");
   const [cancellationError, setCancellationError] = useState<string>();
   const [turnError, setTurnError] = useState<string | undefined>(() => latestTurnFailure(thread.events));
@@ -106,6 +109,86 @@ export function AgentThreadView({
     prepareSend: client?.prepareSend,
     session,
   });
+  const stopAgent = agent.stop;
+
+  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const liveStateRef = useRef({
+    busy: isBusy,
+    events: agent.events,
+    session: agent.session,
+  });
+  liveStateRef.current = {
+    busy: isBusy,
+    events: agent.events,
+    session: agent.session,
+  };
+
+  const requestRecovery = useCallback(() => {
+    if (recoveryRequestedRef.current) return;
+    recoveryRequestedRef.current = true;
+    stopAgent();
+    onRecoveryNeeded();
+  }, [onRecoveryNeeded, stopAgent]);
+
+  useEffect(() => {
+    if (!isBusy || !agent.session.sessionId) return;
+    const controller = new AbortController();
+
+    void (async () => {
+      await waitForReconciliation(RECONCILIATION_INTERVAL_MS, controller.signal);
+      while (!controller.signal.aborted) {
+        const current = liveStateRef.current;
+        if (!current.busy || !current.session.sessionId) return;
+
+        const probeController = new AbortController();
+        const abortProbe = () => probeController.abort();
+        controller.signal.addEventListener("abort", abortProbe, { once: true });
+        const timeout = window.setTimeout(abortProbe, RECONCILIATION_TIMEOUT_MS);
+        const probe = createAgentSession(client, () => preferencesRef.current, {
+          ...current.session,
+          streamIndex: current.events.length,
+        });
+        let foundBoundary = false;
+
+        try {
+          for await (const event of probe.stream({
+            follow: false,
+            signal: probeController.signal,
+            startIndex: current.events.length,
+          })) {
+            if (isSessionBoundary(event)) foundBoundary = true;
+          }
+        } catch (error) {
+          if (!probeController.signal.aborted && !isAbortError(error)) {
+            console.warn("Agent session reconciliation failed", error);
+          }
+        } finally {
+          window.clearTimeout(timeout);
+          controller.signal.removeEventListener("abort", abortProbe);
+        }
+
+        if (foundBoundary) {
+          requestRecovery();
+          return;
+        }
+        await waitForReconciliation(RECONCILIATION_INTERVAL_MS, controller.signal);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [agent.session.sessionId, client, isBusy, requestRecovery]);
+
+  useEffect(() => {
+    const lastEvent = agent.events.at(-1);
+    if (
+      agent.session.sessionId &&
+      !isBusy &&
+      lastEvent &&
+      !isSessionBoundary(lastEvent)
+    ) {
+      requestRecovery();
+    }
+  }, [agent.events, agent.session.sessionId, isBusy, requestRecovery]);
 
   useEffect(() => {
     onChange({
@@ -116,11 +199,11 @@ export function AgentThreadView({
     });
   }, [agent.events, agent.session, agent.status, onChange, turnError]);
 
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const errorMessage = cancellationError ?? turnError ?? agent.error?.message;
   const usage = summarizeUsage(agent.events);
 
   const prepareTurn = () => {
+    recoveryRequestedRef.current = false;
     cancellationRef.current = { requested: false };
     setCancellationError(undefined);
     setCancellationState("idle");
@@ -221,6 +304,32 @@ export function AgentThreadView({
       </main>
     </PromptInputProvider>
   );
+}
+
+const RECONCILIATION_INTERVAL_MS = 2_000;
+const RECONCILIATION_TIMEOUT_MS = 10_000;
+
+function isSessionBoundary(event: HandleMessageStreamEvent): boolean {
+  return event.type === "session.waiting" || event.type === "session.completed" || event.type === "session.failed";
+}
+
+function waitForReconciliation(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function EmptyThread({ disabled, messages, onPrompt }: { readonly disabled: boolean; readonly messages: AgentMessages; readonly onPrompt: (prompt: string) => void }) {
