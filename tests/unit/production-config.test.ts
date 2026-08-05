@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   inspectProductionConfiguration,
+  readAgentDeploymentTenancy,
   readAgentSandboxBackend,
 } from "../../lib/production-config.ts";
 import {
@@ -13,6 +14,7 @@ import {
 const validEnvironment = {
   AGENT_DATABASE_SCHEMA: "open_agent",
   AGENT_DATABASE_URL: "postgresql://agent:secret@db.internal:5432/muses_product",
+  AGENT_DEPLOYMENT_TENANCY: "multi-tenant",
   AGENT_EMBED_ALLOWED_ORIGINS: "https://muses.example.com",
   AGENT_HOST_JWT_ALGORITHM: "HS256",
   AGENT_HOST_JWT_AUDIENCE: "open-agent",
@@ -74,9 +76,23 @@ test("allows automatic sandbox discovery only outside production", () => {
   );
 });
 
+test("requires an explicit deployment tenancy", () => {
+  assert.equal(readAgentDeploymentTenancy(validEnvironment), "multi-tenant");
+  assert.throws(
+    () => readAgentDeploymentTenancy({}),
+    /must explicitly be single-tenant or multi-tenant/,
+  );
+  const diagnostics = inspectProductionConfiguration({
+    ...validEnvironment,
+    AGENT_DEPLOYMENT_TENANCY: "shared",
+  }, "24.18.1");
+  assert.ok(diagnostics.some((item) => item.code === "deployment-tenancy"));
+});
+
 test("requires an explicit Docker sandbox retention policy", () => {
   const missing = inspectProductionConfiguration({
     ...validEnvironment,
+    AGENT_DEPLOYMENT_TENANCY: "single-tenant",
     AGENT_SANDBOX_BACKEND: "docker",
   }, "24.18.1");
   assert.equal(
@@ -86,12 +102,27 @@ test("requires an explicit Docker sandbox retention policy", () => {
 
   const valid = inspectProductionConfiguration({
     ...validEnvironment,
+    AGENT_DEPLOYMENT_TENANCY: "single-tenant",
     AGENT_SANDBOX_BACKEND: "docker",
     EVE_SANDBOX_REAPER_MAX_REMOVALS: "50",
     EVE_SANDBOX_RETENTION_HOURS: "168",
   }, "24.18.1");
   assert.equal(valid.some((item) => item.level === "error"), false);
   assert.ok(valid.some((item) => item.code === "sandbox-backend-docker"));
+});
+
+test("rejects Docker for untrusted multi-tenant production", () => {
+  const diagnostics = inspectProductionConfiguration({
+    ...validEnvironment,
+    AGENT_SANDBOX_BACKEND: "docker",
+    EVE_SANDBOX_REAPER_MAX_REMOVALS: "50",
+    EVE_SANDBOX_RETENTION_HOURS: "168",
+  }, "24.18.1");
+  assert.ok(
+    diagnostics.some(
+      (item) => item.code === "sandbox-backend-docker-multi-tenant" && item.level === "error",
+    ),
+  );
 });
 
 test("requires an immutable production sandbox image", () => {

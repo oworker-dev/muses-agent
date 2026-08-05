@@ -19,6 +19,11 @@ separate state boundaries:
 Use a unique `WORKFLOW_POSTGRES_JOB_PREFIX` for every World. The supported Eve
 prefix is `open_agent_`; the Muses host uses `muses_` in its own database.
 
+Set `AGENT_DEPLOYMENT_TENANCY` explicitly. The documented Docker topology is a
+single-tenant alpha/staging baseline. A deployment serving mutually untrusted
+tenants must use a reviewed microVM backend such as microsandbox or Vercel
+Sandbox; the production doctor rejects multi-tenant Docker.
+
 ## Preflight
 
 Pin the exact source revision and container digest. Load secrets from the target
@@ -46,8 +51,8 @@ not be used by a production deployment; `AGENT_DATABASE_URL` is required.
 Node/npm, Python, Git, FFmpeg, ImageMagick, and Playwright/Chromium without
 network access.
 Do not continue when the doctor reports a shared Workflow database, implicit
-sandbox backend, missing telemetry, test fixture model, or disabled Shell
-approval.
+sandbox backend, missing deployment tenancy, multi-tenant Docker, missing
+telemetry, test fixture model, or disabled Shell approval.
 
 Bootstrap each database once and run product migrations before accepting
 traffic:

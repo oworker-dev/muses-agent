@@ -134,10 +134,11 @@ idempotent replay, and asserts the semantic Host event chain and Workflow
 output. A live Provider may still reject or time out a model request; use
 `scripts/mock-openai-responses.mjs` for a deterministic protocol check.
 
-## Production build
+## Self-hosted alpha build
 
-For a self-hosted production build, use the PostgreSQL Workflow World during
-both build and runtime. Bootstrap its schema once against the target database:
+For a single-tenant self-hosted alpha build, use the PostgreSQL Workflow World
+during both build and runtime. Bootstrap its schema once against the target
+database:
 
 ```bash
 WORKFLOW_POSTGRES_URL=postgres://... npx --package=@workflow/world-postgres bootstrap
@@ -147,6 +148,7 @@ AGENT_DATABASE_URL=postgres://... npm run db:migrate
 Build both services with the same Eve port baked into the Next rewrite:
 
 ```bash
+AGENT_DEPLOYMENT_TENANCY=single-tenant \
 AGENT_SANDBOX_BACKEND=docker \
 AGENT_SANDBOX_IMAGE=ghcr.io/oworker/open-agent-sandbox@sha256:... \
 AGENT_PUBLIC_BASE_URL=https://agent.example.com \
@@ -155,10 +157,18 @@ WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
 WORKFLOW_POSTGRES_URL=postgres://... \
 WORKFLOW_POSTGRES_JOB_PREFIX=open_agent_ \
   npm run build:eve
+AGENT_DEPLOYMENT_TENANCY=single-tenant \
 AGENT_SANDBOX_BACKEND=docker \
 AGENT_EMBED_ALLOWED_ORIGINS=https://muses.example.com \
 EVE_NEXT_PRODUCTION_PORT=4275 npm run build
 ```
+
+This Docker topology is for a trusted single-tenant operator or staging
+baseline. Eve 0.27.8 does not expose Docker CPU, memory, PID, Linux capability,
+or non-root controls through its backend. `doctor:production` therefore rejects
+Docker when `AGENT_DEPLOYMENT_TENANCY=multi-tenant`; use a reviewed microVM
+backend such as microsandbox or Vercel Sandbox before admitting mutually
+untrusted tenants.
 
 `npm run build` verifies the generated Next.js route manifest after compilation.
 It fails if `/embed` does not contain the exact origins from
@@ -171,6 +181,7 @@ installed Next.js 16.3 preview does not currently invoke that resolver reliably.
 For local production verification, start the two official services explicitly:
 
 ```bash
+AGENT_DEPLOYMENT_TENANCY=single-tenant \
 AGENT_SANDBOX_BACKEND=docker \
 AGENT_SANDBOX_IMAGE=ghcr.io/oworker/open-agent-sandbox@sha256:... \
 WORKFLOW_TARGET_WORLD=@workflow/world-postgres \
@@ -187,7 +198,8 @@ generated service routes and does not use this two-process local fallback.
 Run `npm run doctor:production` with the deployment environment before building.
 It fails when Node is not 24, a production sandbox backend is implicit, the Eve
 World shares the Agent product database, the queue prefix can collide with
-Muses, build-time CSP/port values are missing, or Host credentials are partial.
+Muses, deployment tenancy is missing, a multi-tenant deployment selects Docker,
+build-time CSP/port values are missing, or Host credentials are partial.
 `AGENT_EMBED_ALLOWED_ORIGINS` and `EVE_NEXT_PRODUCTION_PORT` are build inputs;
 setting them only when `next start` runs cannot repair an already built image.
 `AGENT_PUBLIC_BASE_URL` and `AGENT_PREVIEW_SIGNING_SECRET` are also mandatory

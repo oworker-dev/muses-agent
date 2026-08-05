@@ -197,8 +197,15 @@ FFmpeg, ImageMagick, ripgrep, and Playwright/Chromium. The authored policy appli
 2 vCPU/2048 MiB limits where supported, writes a session marker into the
 session-owned `/workspace`, and applies `deny-all` egress at backend creation
 and session start. Docker and microsandbox enforce the coarse policy; Vercel
-Sandbox receives the live policy through Eve's network-policy API. Production
-Docker deployments also require `EVE_SANDBOX_RETENTION_HOURS` and
+Sandbox receives the live policy through Eve's network-policy API.
+
+`AGENT_DEPLOYMENT_TENANCY` makes the trust model explicit. Eve 0.27.8's Docker
+backend does not expose CPU, memory, PID, Linux capability, or non-root controls
+and is accepted only for a trusted single-tenant alpha/staging deployment. The
+production doctor rejects Docker for mutually untrusted multi-tenant traffic;
+that topology must select a reviewed microVM backend and pass physical
+isolation tests there. Single-tenant Docker deployments also require
+`EVE_SANDBOX_RETENTION_HOURS` and
 `EVE_SANDBOX_REAPER_MAX_REMOVALS`. The operator reaper is dry-run by default,
 owns only stopped containers carrying Eve's exact session labels and naming
 convention, honors a protected-session list, revalidates a candidate before

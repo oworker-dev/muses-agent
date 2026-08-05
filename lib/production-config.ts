@@ -5,12 +5,17 @@ export type ProductionDiagnostic = {
 };
 
 export type AgentSandboxBackendName = "auto" | "docker" | "microsandbox" | "vercel";
+export type AgentDeploymentTenancy = "single-tenant" | "multi-tenant";
 
 const SANDBOX_BACKENDS = new Set<AgentSandboxBackendName>([
   "auto",
   "docker",
   "microsandbox",
   "vercel",
+]);
+const DEPLOYMENT_TENANCIES = new Set<AgentDeploymentTenancy>([
+  "single-tenant",
+  "multi-tenant",
 ]);
 const EXTENSION_REF = /^[a-z0-9][a-z0-9._-]*@[0-9]+\.[0-9]+\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$/;
 
@@ -40,6 +45,18 @@ export function readAgentSandboxImage(
     throw new Error("AGENT_SANDBOX_IMAGE must be one bounded OCI image reference.");
   }
   return value;
+}
+
+export function readAgentDeploymentTenancy(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): AgentDeploymentTenancy {
+  const configured = environment.AGENT_DEPLOYMENT_TENANCY?.trim();
+  if (!configured || !DEPLOYMENT_TENANCIES.has(configured as AgentDeploymentTenancy)) {
+    throw new Error(
+      "AGENT_DEPLOYMENT_TENANCY must explicitly be single-tenant or multi-tenant.",
+    );
+  }
+  return configured as AgentDeploymentTenancy;
 }
 
 export function inspectProductionConfiguration(
@@ -95,6 +112,7 @@ export function inspectProductionConfiguration(
   requireValue(environment, "AGENT_MODEL_MAX_OUTPUT_TOKENS", error);
   requireValue(environment, "AGENT_PROVIDER_HTTP_TIMEOUT_MS", error);
   requireValue(environment, "AGENT_DATABASE_URL", error);
+  requireValue(environment, "AGENT_DEPLOYMENT_TENANCY", error);
   requireValue(environment, "AGENT_RUNTIME_URL", error);
   requireValue(environment, "AGENT_SANDBOX_IMAGE", error);
   requireValue(environment, "AGENT_HOST_JWT_SECRET", error);
@@ -105,6 +123,16 @@ export function inspectProductionConfiguration(
   requireValue(environment, "AGENT_PREVIEW_SIGNING_SECRET", error);
   requireValue(environment, "WORKFLOW_POSTGRES_URL", error);
   requireValue(environment, "WORKFLOW_POSTGRES_JOB_PREFIX", error);
+
+  let deploymentTenancy: AgentDeploymentTenancy | undefined;
+  try {
+    deploymentTenancy = readAgentDeploymentTenancy(environment);
+  } catch (cause) {
+    error(
+      "deployment-tenancy",
+      cause instanceof Error ? cause.message : "Invalid deployment tenancy.",
+    );
+  }
 
   const telemetryConfigured = Boolean(
     environment.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT?.trim() ||
@@ -205,10 +233,17 @@ export function inspectProductionConfiguration(
         10_000,
         error,
       );
-      warning(
-        "sandbox-backend-docker",
-        "Docker is selected; production must schedule the sandbox reaper and prove daemon hardening, quotas, and cross-session isolation on the deployed host.",
-      );
+      if (deploymentTenancy === "multi-tenant") {
+        error(
+          "sandbox-backend-docker-multi-tenant",
+          "Eve's Docker backend does not expose the resource, capability, or VM isolation controls required for untrusted multi-tenant production. Select microsandbox, Vercel Sandbox, or another reviewed microVM backend.",
+        );
+      } else if (deploymentTenancy === "single-tenant") {
+        warning(
+          "sandbox-backend-docker",
+          "Docker is selected for a single-tenant deployment; schedule the sandbox reaper and prove daemon hardening, quotas, and cross-session isolation on the deployed host.",
+        );
+      }
     }
   } catch (cause) {
     error("sandbox-backend", cause instanceof Error ? cause.message : "Invalid sandbox backend.");
