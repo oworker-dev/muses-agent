@@ -37,6 +37,44 @@ export const AGENT_EXTENSION_CATALOG: readonly AgentExtensionManifest[] = [
   },
 ];
 
+export function agentExtensionCatalogForConfig(
+  config: AgentRuntimeConfigSnapshot,
+): readonly AgentExtensionManifest[] {
+  const catalog = new Map(
+    AGENT_EXTENSION_CATALOG.map((manifest) => [extensionRefKey(manifest), manifest]),
+  );
+  const defaultSkills = new Set(config.profile.defaultSkills.map(extensionRefKey));
+  const defaultMcpConnections = new Set(
+    config.profile.defaultMcpConnections.map(extensionRefKey),
+  );
+  for (const extension of config.extensions ?? []) {
+    const key = extensionRefKey(extension);
+    const existing = catalog.get(key);
+    if (existing && existing.kind !== extension.kind) {
+      throw new Error(`Extension ${key} is published as both ${existing.kind} and ${extension.kind}.`);
+    }
+    const isDefault = extension.kind === "skill"
+      ? defaultSkills.has(key)
+      : defaultMcpConnections.has(key);
+    catalog.set(key, {
+      credentialMode:
+        extension.kind === "mcp" && extension.mcp?.authProvider
+          ? "reference-required"
+          : "none",
+      defaultTenantStatus: isDefault ? "enabled" : "disabled",
+      description: extension.description,
+      id: extension.id,
+      kind: extension.kind,
+      requiredPermissions: [],
+      status: "published",
+      version: extension.version,
+    });
+  }
+  return [...catalog.values()].sort((left, right) =>
+    extensionRefKey(left).localeCompare(extensionRefKey(right)),
+  );
+}
+
 /**
  * Resolves the exact extension grant recorded on an AgentRun. A request can
  * narrow a profile, but never add an extension that the published profile did

@@ -16,6 +16,7 @@ import {
 import { authenticateHostRequest } from "@/server/http/host-request-auth";
 import { createPostgresAgentExtensionStoreFromEnvironment } from "@/server/data/agent-extension-store";
 import { AgentExtensionAccessError } from "@/lib/agent-extension-lifecycle";
+import { agentExtensionCatalogForConfig } from "@/lib/agent-extension-catalog";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,7 @@ export async function POST(request: Request): Promise<Response> {
     await extensionStore.assertPolicyAllowed(
       authenticated.identity.tenantId,
       parsed.value.policy ?? {},
+      agentExtensionCatalogForConfig(authenticated.runtimeConfig),
     );
   } catch (error) {
     if (error instanceof AgentExtensionAccessError) {

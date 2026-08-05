@@ -439,9 +439,10 @@ existing file must be read again before it can be changed. It uses
 
 ## Skill and MCP control plane
 
-The deployment catalog is code-reviewed and version-pinned. Tenant operators
-with the Host JWT scope `agent.extensions.manage` can inspect, enable, or revoke
-catalog entries through:
+The effective deployment catalog merges code-reviewed built-in adapters with
+the version-pinned extension manifests in the authenticated Runtime Config.
+Tenant operators with the Host JWT scope `agent.extensions.manage` can inspect,
+enable, or revoke that effective catalog through:
 
 ```text
 GET    /api/agent/extensions
@@ -457,10 +458,13 @@ Headless AgentRun starts and again when an Eve session starts or continues.
 It prevents future calls; it cannot roll back a side effect that already
 completed, so write capabilities still require approval and idempotency.
 
-The current compiled catalog contains `software-task@1.0.0`. The lifecycle
-contract supports MCP entries, but none are advertised until a real MCP
-connection, allowlist, auth provider, approval policy, and eval are compiled
-into the deployment.
+The current compiled catalog contains `software-task@1.0.0`. Runtime Config can
+publish tenant procedure text as a dynamic Skill without rebuilding the Agent.
+It can also publish MCP lifecycle metadata, but Eve MCP connection adapters are
+build-time capabilities: a manifest alone does not create a network connection.
+No MCP is advertised by the standalone profile until a reviewed adapter, tool
+allowlist, auth provider, approval policy, and execution eval are mounted into
+the deployment.
 
 Headless hosts use the same versioned Run contract through the buildable
 `@oworker/open-agent-contracts` and `@oworker/open-agent-client` workspace packages.

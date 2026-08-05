@@ -28,21 +28,28 @@ export type AgentExtensionView = AgentExtensionManifest & {
 };
 
 export interface AgentExtensionStore {
-  assertPolicyAllowed(tenantId: string, policy: AgentRunPolicy): Promise<void>;
+  assertPolicyAllowed(
+    tenantId: string,
+    policy: AgentRunPolicy,
+    catalog?: readonly AgentExtensionManifest[],
+  ): Promise<void>;
   enable(input: {
     readonly actorId: string;
     readonly credentialRef?: string;
     readonly id: string;
     readonly tenantId: string;
     readonly version: string;
-  }): Promise<AgentExtensionView>;
-  list(tenantId: string): Promise<readonly AgentExtensionView[]>;
+  }, catalog?: readonly AgentExtensionManifest[]): Promise<AgentExtensionView>;
+  list(
+    tenantId: string,
+    catalog?: readonly AgentExtensionManifest[],
+  ): Promise<readonly AgentExtensionView[]>;
   revoke(input: {
     readonly actorId: string;
     readonly id: string;
     readonly tenantId: string;
     readonly version: string;
-  }): Promise<AgentExtensionView>;
+  }, catalog?: readonly AgentExtensionManifest[]): Promise<AgentExtensionView>;
 }
 
 export function createPostgresAgentExtensionStore(
@@ -86,10 +93,10 @@ function postgresAgentExtensionStore(
     readonly status: "enabled" | "revoked";
     readonly tenantId: string;
     readonly version: string;
-  }): Promise<AgentExtensionView> => {
+  }, catalog: readonly AgentExtensionManifest[]): Promise<AgentExtensionView> => {
     assertText(input.actorId, "actorId", 512);
     assertText(input.tenantId, "tenantId", 512);
-    const manifest = requireManifest(input.id, input.version);
+    const manifest = requireManifest(input.id, input.version, catalog);
     if (input.credentialRef) assertCredentialReference(input.credentialRef);
     if (manifest.credentialMode === "none" && input.credentialRef) {
       throw new Error(`Extension ${extensionRefKey(manifest)} does not accept a credential reference.`);
@@ -163,20 +170,20 @@ function postgresAgentExtensionStore(
   };
 
   return {
-    async assertPolicyAllowed(tenantId, policy) {
-      assertAgentRunExtensionsEnabled(policy, await readInstallations(tenantId));
+    async assertPolicyAllowed(tenantId, policy, catalog = AGENT_EXTENSION_CATALOG) {
+      assertAgentRunExtensionsEnabled(policy, await readInstallations(tenantId), catalog);
     },
-    async enable(input) {
-      return mutate({ ...input, status: "enabled" });
+    async enable(input, catalog = AGENT_EXTENSION_CATALOG) {
+      return mutate({ ...input, status: "enabled" }, catalog);
     },
-    async list(tenantId) {
+    async list(tenantId, catalog = AGENT_EXTENSION_CATALOG) {
       const byKey = new Map(
         (await readInstallations(tenantId)).map((item) => [extensionRefKey(item), item]),
       );
-      return AGENT_EXTENSION_CATALOG.map((manifest) => toView(manifest, byKey.get(extensionRefKey(manifest))));
+      return catalog.map((manifest) => toView(manifest, byKey.get(extensionRefKey(manifest))));
     },
-    async revoke(input) {
-      return mutate({ ...input, status: "revoked" });
+    async revoke(input, catalog = AGENT_EXTENSION_CATALOG) {
+      return mutate({ ...input, status: "revoked" }, catalog);
     },
   };
 }
@@ -222,8 +229,12 @@ function auditState(stored: StoredInstallation) {
   };
 }
 
-function requireManifest(id: string, version: string): AgentExtensionManifest {
-  const manifest = AGENT_EXTENSION_CATALOG.find(
+function requireManifest(
+  id: string,
+  version: string,
+  catalog: readonly AgentExtensionManifest[],
+): AgentExtensionManifest {
+  const manifest = catalog.find(
     (candidate) => candidate.id === id && candidate.version === version,
   );
   if (!manifest) throw new Error(`Extension ${id}@${version} is not installed in this deployment.`);

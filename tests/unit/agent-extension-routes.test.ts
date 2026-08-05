@@ -7,12 +7,12 @@ import type {
   AgentExtensionStore,
   AgentExtensionView,
 } from "../../server/data/agent-extension-store.ts";
+import { DEFAULT_AGENT_RUNTIME_CONFIG } from "../../lib/agent-runtime-config.ts";
 import {
   enableAgentExtension,
   listAgentExtensions,
   revokeAgentExtension,
 } from "../../server/http/agent-extension-routes.ts";
-import { authenticateHostRequest } from "../../server/http/host-request-auth.ts";
 
 const SECRET = "01234567890123456789012345678901";
 const ISSUER = "https://muses.extension-routes.test";
@@ -131,6 +131,59 @@ test("does not expose unexpected store errors", async () => {
     assert.equal(response.status, 400);
     assert.doesNotMatch(text, /vault:\/\/|database/u);
   });
+});
+
+test("uses the authenticated Host runtime catalog for extension administration", async () => {
+  const store = memoryStore();
+  const runtimeSkill = { id: "tenant-playbook", version: "1.0.0" } as const;
+  const runtimeConfig = {
+    ...DEFAULT_AGENT_RUNTIME_CONFIG,
+    profile: {
+      ...DEFAULT_AGENT_RUNTIME_CONFIG.profile,
+      allowedSkills: [runtimeSkill],
+      defaultSkills: [],
+    },
+    extensions: [{
+      ...runtimeSkill,
+      kind: "skill" as const,
+      label: "Tenant playbook",
+      description: "Tenant procedure",
+      skill: { markdown: "Follow the tenant procedure." },
+    }],
+  };
+  let receivedCatalog: readonly AgentExtensionView[] = [];
+  store.list = async (_tenantId, catalog = []) => {
+    receivedCatalog = catalog.map((manifest) => ({
+      ...manifest,
+      credentialConfigured: false,
+      effectiveStatus: manifest.defaultTenantStatus,
+      explicitlyConfigured: false,
+    }));
+    return receivedCatalog;
+  };
+
+  const response = await listAgentExtensions(
+    new Request("https://agent.test/api/agent/extensions"),
+    {
+      authenticate: async () => ({
+        accessToken: "test-host-token",
+        identity: {
+          issuer: ISSUER,
+          principalId: "admin-a",
+          principalType: "user",
+          tenantId: "tenant-a",
+        },
+        ok: true,
+        runtimeConfig,
+        scopes: new Set([MANAGE_SCOPE]),
+      }),
+      store,
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.ok(receivedCatalog.some((item) => item.id === runtimeSkill.id));
+  assert.match(await response.text(), /tenant-playbook/u);
 });
 
 function memoryStore(): AgentExtensionStore & { calls: string[] } {

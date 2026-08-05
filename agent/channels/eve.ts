@@ -11,7 +11,10 @@ import {
   resolveAgentRuntimeConfig,
   serializeAgentRuntimeConfig,
 } from "../../lib/agent-runtime-config";
-import { resolveAgentRunPolicy } from "../../lib/agent-extension-catalog";
+import {
+  agentExtensionCatalogForConfig,
+  resolveAgentRunPolicy,
+} from "../../lib/agent-extension-catalog";
 import type { AgentRunPolicy } from "../../contracts/agent-run";
 import { createPostgresSessionOwnershipStoreFromEnvironment } from "../../server/data/session-ownership-store";
 import { createPostgresAgentExtensionStoreFromEnvironment } from "../../server/data/agent-extension-store";
@@ -82,7 +85,11 @@ function withAgentPreferences(authenticate: AuthFn<Request>): AuthFn<Request> {
     );
     const tenantId = attributes.tenantId;
     if (extensionStore && typeof tenantId === "string" && tenantId.trim()) {
-      await extensionStore.assertPolicyAllowed(tenantId, runPolicy);
+      await extensionStore.assertPolicyAllowed(
+        tenantId,
+        runPolicy,
+        agentExtensionCatalogForConfig(runtimeConfig),
+      );
     }
     attributes.agentRunPolicy = JSON.stringify(runPolicy);
     const agentRunId = request.headers.get(RUN_ID_HEADER)?.trim();

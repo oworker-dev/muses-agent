@@ -252,7 +252,8 @@ for an already compiled deployment.
 
 The extension control plane separates four facts that must not be conflated:
 
-1. the deployment catalog declares reviewed, immutable code and versions;
+1. the effective deployment catalog merges reviewed, immutable built-in
+   adapters with versioned manifests from the authenticated Runtime Config;
 2. a Profile declares the maximum extensions one Run may request;
 3. a tenant installation enables or revokes a catalog version and stores only
    an opaque credential reference where one is required;
@@ -263,9 +264,13 @@ Only JWT principals with `agent.extensions.manage` may change installations.
 Every enable/revoke mutation is appended to `agent_extension_audit_events`;
 credential references and values are excluded from audit state. A revocation
 takes effect on the next Run or continuation boundary, not retroactively on a
-completed external side effect. The deployment currently publishes one Skill
-and intentionally publishes no MCP connection until its endpoint, tool
-allowlist, principal-scoped auth, approval policy, and real execution eval exist.
+completed external side effect. Runtime Config Skill text resolves dynamically
+after the same lifecycle check. MCP manifest metadata can enter the lifecycle
+catalog, but Eve connections are still build-time mounted capabilities; a
+manifest cannot create an unreviewed network adapter. The deployment currently
+publishes one built-in Skill and intentionally mounts no MCP connection until
+its endpoint, tool allowlist, principal-scoped auth, approval policy, and real
+execution eval exist.
 
 ## Authentication and authorization
 

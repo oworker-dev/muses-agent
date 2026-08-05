@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseAgentRunPolicy } from "../../agent/lib/run-policy.ts";
-import { resolveAgentRunPolicy } from "../../lib/agent-extension-catalog.ts";
+import {
+  agentExtensionCatalogForConfig,
+  resolveAgentRunPolicy,
+} from "../../lib/agent-extension-catalog.ts";
 import { DEFAULT_AGENT_RUNTIME_CONFIG } from "../../lib/agent-runtime-config.ts";
 import { parseStartAgentRun } from "../../server/agent-runs/input.ts";
 
@@ -99,4 +102,56 @@ test("runtime limits cannot be expanded by an AgentRun request", () => {
     }).limits,
     { maxInputTokens: 2_000_000, maxOutputTokens: 200_000, maxToolCalls: 12 },
   );
+});
+
+test("derives tenant lifecycle manifests from a Host runtime config", () => {
+  const runtimeSkill = { id: "tenant-playbook", version: "1.0.0" } as const;
+  const runtimeMcp = { id: "tenant-mcp", version: "1.0.0" } as const;
+  const catalog = agentExtensionCatalogForConfig({
+    ...DEFAULT_AGENT_RUNTIME_CONFIG,
+    profile: {
+      ...DEFAULT_AGENT_RUNTIME_CONFIG.profile,
+      allowedSkills: [runtimeSkill],
+      defaultSkills: [runtimeSkill],
+      allowedMcpConnections: [runtimeMcp],
+      defaultMcpConnections: [],
+    },
+    extensions: [
+      {
+        ...runtimeSkill,
+        kind: "skill",
+        label: "Tenant playbook",
+        description: "Tenant procedure",
+        skill: { markdown: "Follow the tenant procedure." },
+      },
+      {
+        ...runtimeMcp,
+        kind: "mcp",
+        label: "Tenant MCP",
+        description: "Tenant tools",
+        mcp: { endpoint: "https://mcp.example.com", authProvider: "tenant-vault" },
+      },
+    ],
+  });
+
+  assert.deepEqual(catalog.find((item) => item.id === runtimeSkill.id), {
+    credentialMode: "none",
+    defaultTenantStatus: "enabled",
+    description: "Tenant procedure",
+    id: "tenant-playbook",
+    kind: "skill",
+    requiredPermissions: [],
+    status: "published",
+    version: "1.0.0",
+  });
+  assert.deepEqual(catalog.find((item) => item.id === runtimeMcp.id), {
+    credentialMode: "reference-required",
+    defaultTenantStatus: "disabled",
+    description: "Tenant tools",
+    id: "tenant-mcp",
+    kind: "mcp",
+    requiredPermissions: [],
+    status: "published",
+    version: "1.0.0",
+  });
 });

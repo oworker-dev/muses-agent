@@ -1,4 +1,5 @@
 import { assertCredentialReference } from "../../lib/agent-extension-lifecycle.ts";
+import { agentExtensionCatalogForConfig } from "../../lib/agent-extension-catalog.ts";
 import type {
   AgentExtensionStore,
   AgentExtensionView,
@@ -30,7 +31,10 @@ export async function listAgentExtensions(
   if (!dependencies.store) return databaseUnavailable();
 
   try {
-    const extensions = await dependencies.store.list(authenticated.identity.tenantId);
+    const extensions = await dependencies.store.list(
+      authenticated.identity.tenantId,
+      agentExtensionCatalogForConfig(authenticated.runtimeConfig),
+    );
     return Response.json(
       { extensions: extensions.map(toPublicExtensionView), ok: true },
       { headers: noStoreHeaders() },
@@ -57,13 +61,16 @@ export async function enableAgentExtension(
   if (!parsed.ok) return parsed.response;
 
   try {
-    const extension = await dependencies.store.enable({
-      actorId: authenticated.identity.principalId,
-      ...(parsed.credentialRef ? { credentialRef: parsed.credentialRef } : {}),
-      id: params.extensionId,
-      tenantId: authenticated.identity.tenantId,
-      version: params.version,
-    });
+    const extension = await dependencies.store.enable(
+      {
+        actorId: authenticated.identity.principalId,
+        ...(parsed.credentialRef ? { credentialRef: parsed.credentialRef } : {}),
+        id: params.extensionId,
+        tenantId: authenticated.identity.tenantId,
+        version: params.version,
+      },
+      agentExtensionCatalogForConfig(authenticated.runtimeConfig),
+    );
     return Response.json(
       { extension: toPublicExtensionView(extension), ok: true },
       { headers: noStoreHeaders() },
@@ -87,12 +94,15 @@ export async function revokeAgentExtension(
   if (!dependencies.store) return databaseUnavailable();
 
   try {
-    const extension = await dependencies.store.revoke({
-      actorId: authenticated.identity.principalId,
-      id: params.extensionId,
-      tenantId: authenticated.identity.tenantId,
-      version: params.version,
-    });
+    const extension = await dependencies.store.revoke(
+      {
+        actorId: authenticated.identity.principalId,
+        id: params.extensionId,
+        tenantId: authenticated.identity.tenantId,
+        version: params.version,
+      },
+      agentExtensionCatalogForConfig(authenticated.runtimeConfig),
+    );
     return Response.json(
       { extension: toPublicExtensionView(extension), ok: true },
       { headers: noStoreHeaders() },

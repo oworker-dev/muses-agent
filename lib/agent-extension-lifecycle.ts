@@ -34,43 +34,50 @@ export class AgentExtensionAccessError extends Error {
 export function assertAgentRunExtensionsEnabled(
   policy: AgentRunPolicy,
   installations: readonly AgentExtensionInstallation[],
+  catalog: readonly AgentExtensionManifest[] = AGENT_EXTENSION_CATALOG,
 ): void {
-  const byKey = new Map(installations.map((item) => [extensionRefKey(item), item]));
-  for (const ref of [
-    ...(policy.skills ?? []),
-    ...(policy.mcpConnections ?? []),
-  ]) {
-    const key = extensionRefKey(ref);
-    const manifest = AGENT_EXTENSION_CATALOG.find((candidate) => extensionRefKey(candidate) === key);
-    if (!manifest) {
-      throw new AgentExtensionAccessError(
-        "extension_not_enabled",
-        key,
-        `Extension ${key} is not installed in this Agent deployment.`,
+  const byKey = new Map(
+    installations.map((item) => [`${item.kind}:${extensionRefKey(item)}`, item]),
+  );
+  for (const [kind, refs] of [
+    ["skill", policy.skills ?? []],
+    ["mcp", policy.mcpConnections ?? []],
+  ] as const) {
+    for (const ref of refs) {
+      const key = extensionRefKey(ref);
+      const manifest = catalog.find(
+        (candidate) => candidate.kind === kind && extensionRefKey(candidate) === key,
       );
-    }
-    const installation = byKey.get(key);
-    const status = installation?.status ?? manifest.defaultTenantStatus;
-    if (status === "revoked") {
-      throw new AgentExtensionAccessError(
-        "extension_revoked",
-        key,
-        `Extension ${key} is revoked for this tenant.`,
-      );
-    }
-    if (status !== "enabled") {
-      throw new AgentExtensionAccessError(
-        "extension_not_enabled",
-        key,
-        `Extension ${key} is not enabled for this tenant.`,
-      );
-    }
-    if (manifest.credentialMode === "reference-required" && !installation?.credentialConfigured) {
-      throw new AgentExtensionAccessError(
-        "extension_credentials_required",
-        key,
-        `Extension ${key} requires a server-side credential reference.`,
-      );
+      if (!manifest) {
+        throw new AgentExtensionAccessError(
+          "extension_not_enabled",
+          key,
+          `Extension ${key} is not installed in this Agent deployment.`,
+        );
+      }
+      const installation = byKey.get(`${kind}:${key}`);
+      const status = installation?.status ?? manifest.defaultTenantStatus;
+      if (status === "revoked") {
+        throw new AgentExtensionAccessError(
+          "extension_revoked",
+          key,
+          `Extension ${key} is revoked for this tenant.`,
+        );
+      }
+      if (status !== "enabled") {
+        throw new AgentExtensionAccessError(
+          "extension_not_enabled",
+          key,
+          `Extension ${key} is not enabled for this tenant.`,
+        );
+      }
+      if (manifest.credentialMode === "reference-required" && !installation?.credentialConfigured) {
+        throw new AgentExtensionAccessError(
+          "extension_credentials_required",
+          key,
+          `Extension ${key} requires a server-side credential reference.`,
+        );
+      }
     }
   }
 }

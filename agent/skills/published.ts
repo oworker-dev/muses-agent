@@ -1,5 +1,6 @@
 import { defineDynamic, defineSkill, type DynamicResolveContext } from "eve/skills";
 import {
+  agentExtensionCatalogForConfig,
   resolveAgentRunPolicy,
   runtimeExtensionForRef,
 } from "../../lib/agent-extension-catalog.ts";
@@ -33,7 +34,11 @@ async function resolvePublishedSkills(ctx: DynamicResolveContext) {
   );
   const tenantId = attributes?.tenantId;
   if (extensionStore && typeof tenantId === "string" && tenantId.trim()) {
-    await extensionStore.assertPolicyAllowed(tenantId, policy);
+    await extensionStore.assertPolicyAllowed(
+      tenantId,
+      policy,
+      agentExtensionCatalogForConfig(config),
+    );
   }
   const skills = policy.skills ?? [];
   const resolved = Object.fromEntries(
