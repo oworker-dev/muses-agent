@@ -390,7 +390,7 @@ The release boundary is intentionally split so the Agent remains host-neutral:
 3. `@oworker/open-agent-host`: server-side capability registration/signing and host
    adapter primitives; Muses provides the first implementation.
 4. `@oworker/open-agent-ui`: host-neutral React workspace exports based on the
-   shared AI Elements components. The iframe remains an adapter built on this
+   shared assistant-ui components. The iframe remains an adapter built on this
    package, not its dependency.
 5. `@oworker/open-agent-mcp-adapter`: host-neutral compiled Eve MCP connection
    factory with tenant/Run authorization, private broker resolution, allowlists,
@@ -419,7 +419,7 @@ surface now exposes:
 
 - `AgentClient`: typed session creation, continuation, cancellation, and event
   persistence interfaces;
-- `AgentWorkspace`: AI Elements UI with injectable storage, transport, locale,
+- `AgentWorkspace`: assistant-ui based UI with injectable storage, transport, locale,
   branding, and host slots;
 - Host Capability signing, verification, client, and registry primitives;
 - versioned headless events from which hosts can build their own presentation
@@ -428,7 +428,7 @@ surface now exposes:
 The reference workspace now accepts Eve host, auth, rotating headers, redirect
 policy, and `prepareSend` injection through `AgentWorkspaceClientConfig`. This is
 the first Host SDK boundary: Muses can attach authenticated transport and
-ephemeral canvas context while reusing the same session and AI Elements UI.
+ephemeral canvas context while reusing the same session and assistant-ui UI.
 
 No package may import Muses canvas state directly. Muses integration should be a
 separate adapter package and a set of permissioned canvas tools.

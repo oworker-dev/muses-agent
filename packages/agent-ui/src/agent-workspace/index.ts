@@ -12,6 +12,7 @@ export {
 } from "./http-thread-storage.js";
 export { AgentMessage } from "./agent-message.js";
 export type { AgentInputResponse } from "./agent-message.js";
+export type { PromptInputMessage } from "./agent-composer.js";
 export type {
   AgentExtensionInfo,
   AgentThread,

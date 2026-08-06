@@ -60,8 +60,6 @@ try {
     import { AGENT_HOST_SIGNATURE_VERSION, signAgentHostCapabilityRequest } from "@oworker/open-agent-host";
     import { AGENT_UI_VERSION, AgentWorkspace } from "@oworker/open-agent-ui";
     import { createBrokeredMcpConnection } from "@oworker/open-agent-mcp-adapter";
-    import { Conversation } from "@oworker/open-agent-ui/ai-elements/conversation";
-    import { Context, ModelSelector } from "@oworker/open-agent-ui/ai-elements";
     import { Button } from "@oworker/open-agent-ui/ui/button";
     assert.equal(AGENT_RUN_CONTRACT_VERSION, "0.1.0-draft");
     assert.equal(AGENT_SESSION_CONTRACT_VERSION, "0.1.0-draft");
@@ -73,9 +71,6 @@ try {
     assert.equal(typeof signAgentHostCapabilityRequest, "function");
     assert.equal(typeof AgentWorkspace, "function");
     assert.equal(typeof createBrokeredMcpConnection, "function");
-    assert.equal(typeof Conversation, "function");
-    assert.equal(typeof Context, "function");
-    assert.equal(typeof ModelSelector, "function");
     assert.equal(typeof Button, "function");
     assert.match(import.meta.resolve("@oworker/open-agent-ui/styles.css"), /styles\.css$/);
   `;

@@ -60,7 +60,7 @@ test("wide workspace supports navigation, search, settings, and multiple threads
 
   const composer = page.getByRole("textbox", { name: "描述一个任务" });
   await composer.fill("/");
-  await expect(page.getByText("技能与命令")).toHaveCount(0);
+  await expect(page.getByText("技能与命令", { exact: true })).toHaveCount(0);
   await expect(composer).toHaveValue("/");
   await composer.fill("@");
   await expect(page.getByText("工作区上下文")).toBeVisible();
@@ -125,6 +125,14 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
   await page.keyboard.press("Escape");
 
   const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composerFrame = page.locator("form").filter({ has: composer });
+  const composerBox = await composerFrame.boundingBox();
+  expect(composerBox).not.toBeNull();
+  expect((composerBox?.x ?? 0) + (composerBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  const sendButton = page.getByRole("button", { name: "Send" });
+  const sendBox = await sendButton.boundingBox();
+  expect(sendBox).not.toBeNull();
+  expect((sendBox?.x ?? 0) + (sendBox?.width ?? 0)).toBeLessThanOrEqual(390);
   await composer.fill("@");
   await expect(page.getByText("Workspace context")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -181,6 +189,48 @@ test("tool work collapses into one timed execution cycle and keeps the final del
   await execution.click();
   await expect(page.getByText("Inspecting the workspace.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Terminal command/u })).toBeVisible();
+});
+
+test("file patch tools render with the assistant-ui diff viewer", async ({ page }) => {
+  const sessionId = "mock-patch-viewer-session";
+  const patch = [
+    "diff --git a/src/app.ts b/src/app.ts",
+    "--- a/src/app.ts",
+    "+++ b/src/app.ts",
+    "@@ -1 +1 @@",
+    "-export const ready = false;",
+    "+export const ready = true;",
+  ].join("\n");
+  await page.route("**/eve/v1/session", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-patch-token", sessionId }),
+      contentType: "application/json",
+      headers: { "x-eve-session-id": sessionId },
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    await route.fulfill({
+      body: mockToolTurn("Update the application", "The patch is applied.", {
+        input: { patch },
+        output: "Done",
+        toolName: "apply_patch",
+      }),
+      contentType: "application/x-ndjson",
+      status: 200,
+    });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("Update the application");
+  await composer.press("Enter");
+  await page.getByRole("button", { name: /Worked for/u }).click();
+  await page.getByRole("button", { name: "Edited files" }).click();
+
+  const diffViewer = page.locator('[data-tool-view="diff"] [data-slot="diff-viewer"]');
+  await expect(diffViewer).toBeVisible();
+  await expect(diffViewer).toContainText("export const ready = true;");
 });
 
 test("a live autonomous website task survives refresh and publishes a usable preview", async ({ page }) => {
@@ -457,6 +507,7 @@ test("cancelling a queued follow-up prevents browser delivery before admission",
   await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
   await composer.fill("Do not deliver this follow-up");
   await composer.press("Enter");
+  await expect(composer).toHaveValue("");
   await expect(page.getByText("Do not deliver this follow-up", { exact: true })).toBeVisible();
   await expect.poll(() => mailboxEnqueues).toBe(1);
   await expect.poll(() => mailboxInspections).toBeGreaterThan(0);
@@ -997,6 +1048,10 @@ test("a persisted cursor past a missing UI boundary repairs from the durable tai
 
 test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
   const sessionId = "mock-refresh-session";
+  let releaseRecovery: (() => void) | undefined;
+  const recoveryReleased = new Promise<void>((resolve) => {
+    releaseRecovery = resolve;
+  });
   const at = new Date().toISOString();
   const turnId = "turn_0";
   const acceptedEvents = [
@@ -1025,7 +1080,7 @@ test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
     const url = new URL(route.request().url());
     const startIndex = Number(url.searchParams.get("startIndex") ?? "0");
     if (url.searchParams.get("includeTailIndex") === "1") {
-      await new Promise((resolve) => setTimeout(resolve, 750));
+      await recoveryReleased;
       await route.fulfill({
         body: `${completedEvents.slice(startIndex).map((event) => JSON.stringify(event)).join("\n")}\n`,
         contentType: "application/x-ndjson",
@@ -1051,6 +1106,7 @@ test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
+  releaseRecovery?.();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText("Reconnecting to the active run...")).toBeHidden();
   await expect(page.getByText("Refresh recovery ready.", { exact: true })).toBeVisible();
@@ -1143,7 +1199,15 @@ function mockCompletedChildTurn(message: string, reply: string): string {
   ].map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
 
-function mockToolTurn(message: string, reply: string): string {
+function mockToolTurn(
+  message: string,
+  reply: string,
+  tool: { readonly input: unknown; readonly output: unknown; readonly toolName: string } = {
+    input: { command: "find . -maxdepth 2 -type f" },
+    output: "./index.html",
+    toolName: "bash",
+  },
+): string {
   const base = Date.now();
   const at = (offset: number) => new Date(base + offset).toISOString();
   const turnId = "turn_tool";
@@ -1153,8 +1217,8 @@ function mockToolTurn(message: string, reply: string): string {
     { data: { message, parts: [{ text: message, type: "text" }], sequence: 0, turnId }, meta: { at: at(200) }, type: "message.received" },
     { data: { sequence: 0, stepIndex: 0, turnId }, meta: { at: at(300) }, type: "step.started" },
     { data: { finishReason: "tool-calls", message: "Inspecting the workspace.", sequence: 0, stepIndex: 0, turnId }, meta: { at: at(500) }, type: "message.completed" },
-    { data: { actions: [{ callId: "call-1", input: { command: "find . -maxdepth 2 -type f" }, kind: "tool-call", toolName: "bash" }], sequence: 0, stepIndex: 0, turnId }, meta: { at: at(600) }, type: "actions.requested" },
-    { data: { result: { callId: "call-1", kind: "tool-result", output: "./index.html", toolName: "bash" }, sequence: 0, status: "completed", stepIndex: 0, turnId }, meta: { at: at(1_200) }, type: "action.result" },
+    { data: { actions: [{ callId: "call-1", input: tool.input, kind: "tool-call", toolName: tool.toolName }], sequence: 0, stepIndex: 0, turnId }, meta: { at: at(600) }, type: "actions.requested" },
+    { data: { result: { callId: "call-1", kind: "tool-result", output: tool.output, toolName: tool.toolName }, sequence: 0, status: "completed", stepIndex: 0, turnId }, meta: { at: at(1_200) }, type: "action.result" },
     { data: { finishReason: "tool-calls", sequence: 0, stepIndex: 0, turnId, usage: { inputTokens: 10_000, outputTokens: 300 } }, meta: { at: at(1_300) }, type: "step.completed" },
     { data: { sequence: 0, stepIndex: 1, turnId }, meta: { at: at(1_400) }, type: "step.started" },
     { data: { finishReason: "stop", message: reply, sequence: 0, stepIndex: 1, turnId }, meta: { at: at(2_000) }, type: "message.completed" },

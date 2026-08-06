@@ -23,18 +23,9 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { HandleMessageStreamEvent } from "eve/client";
-import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from "../ai-elements/message.js";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "../ai-elements/reasoning.js";
-import { Shimmer } from "../ai-elements/shimmer.js";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "../ai-elements/tool.js";
 import { Button } from "../ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
+import { DiffViewer } from "../ui/diff-viewer.js";
 import { cn } from "../utils.js";
 import type { AgentLocale } from "./i18n.js";
 import {
@@ -43,6 +34,66 @@ import {
   type AgentTurnPresentation,
   type AgentTurnStatus,
 } from "./turn-presentation.js";
+
+function Message({ children, from, ...props }: { readonly children: React.ReactNode; readonly from: string; readonly [key: string]: unknown }) {
+  return <article className={cn("group flex w-full flex-col", from === "user" ? "items-end" : "items-start")} {...props}>{children}</article>;
+}
+
+function MessageContent({ children }: { readonly children: React.ReactNode }) {
+  return <div className="min-w-0 max-w-full">{children}</div>;
+}
+
+function MessageResponse({ children, isAnimating }: { readonly children: React.ReactNode; readonly isAnimating?: boolean; readonly caret?: string }) {
+  return <p className="whitespace-pre-wrap break-words">{children}{isAnimating ? <span className="ml-1 inline-block animate-pulse text-muted-foreground">▍</span> : null}</p>;
+}
+
+function MessageActions({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) {
+  return <div className={cn("mt-1 flex gap-1", className)}>{children}</div>;
+}
+
+function MessageAction({ children, label, onClick, tooltip }: { readonly children: React.ReactNode; readonly label: string; readonly onClick: () => void; readonly tooltip?: string }) {
+  return <Button aria-label={label} className="size-7" onClick={onClick} size="icon-sm" title={tooltip} variant="ghost">{children}</Button>;
+}
+
+function Reasoning({ children, defaultOpen, isStreaming }: { readonly children: React.ReactNode; readonly defaultOpen?: boolean; readonly isStreaming?: boolean }) {
+  return <details className="my-2 rounded-lg bg-muted/40 px-3 py-2 text-sm text-muted-foreground" open={defaultOpen || isStreaming}><summary className="cursor-pointer select-none font-medium">{isStreaming ? "Thinking…" : "Reasoning"}</summary>{children}</details>;
+}
+
+function ReasoningTrigger({ getThinkingMessage }: { readonly getThinkingMessage: (streaming: boolean, duration?: number) => React.ReactNode }) {
+  return <span className="sr-only">{getThinkingMessage(false)}</span>;
+}
+
+function ReasoningContent({ children }: { readonly children: React.ReactNode }) {
+  return <div className="mt-2 whitespace-pre-wrap break-words">{children}</div>;
+}
+
+function Shimmer({ children }: { readonly children: React.ReactNode; readonly duration?: number }) {
+  return <span className="animate-pulse">{children}</span>;
+}
+
+function Tool({ children, defaultOpen, className }: { readonly children: React.ReactNode; readonly defaultOpen?: boolean; readonly className?: string }) {
+  return <Collapsible className={cn("my-2 border-b border-border/60 py-2", className)} defaultOpen={defaultOpen}>{children}</Collapsible>;
+}
+
+function ToolHeader({ title, statusLabel }: { readonly title: string; readonly statusLabel: string; readonly [key: string]: unknown }) {
+  return <CollapsibleTrigger asChild><button aria-label={title} className="flex w-full cursor-pointer items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground" type="button"><span className="font-medium text-foreground">{title}</span><span className="text-xs">{statusLabel}</span><ChevronDownIcon className="ml-auto size-3.5 transition-transform group-data-[state=open]:rotate-180" /></button></CollapsibleTrigger>;
+}
+
+function ToolContent({ children }: { readonly children: React.ReactNode }) {
+  return <CollapsibleContent><div className="mt-2 space-y-2">{children}</div></CollapsibleContent>;
+}
+
+function ToolInput({ input, label }: { readonly input: unknown; readonly label: string }) {
+  return <details className="text-xs"><summary className="cursor-pointer text-muted-foreground">{label}</summary><pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2">{safeStringify(input)}</pre></details>;
+}
+
+function ToolOutput({ output, resultLabel, errorLabel, errorText }: { readonly output: unknown; readonly resultLabel: string; readonly errorLabel: string; readonly errorText?: string }) {
+  return <div className="text-xs"><span className={errorText ? "text-destructive" : "text-muted-foreground"}>{errorText ? errorLabel : resultLabel}</span><pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2">{errorText ?? safeStringify(output)}</pre></div>;
+}
+
+function safeStringify(value: unknown): string {
+  try { return JSON.stringify(value ?? {}, null, 2); } catch { return String(value); }
+}
 
 export type AgentInputResponse = {
   readonly optionId?: string;
@@ -61,6 +112,7 @@ export function AgentMessage({
   message,
   onOpenSubagent,
   onInputResponses,
+  showCopyAction = true,
 }: {
   readonly canRespond: boolean;
   readonly events: readonly HandleMessageStreamEvent[];
@@ -70,6 +122,7 @@ export function AgentMessage({
   readonly message: EveMessage;
   readonly onOpenSubagent?: (sessionId: string) => void;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly showCopyAction?: boolean;
 }) {
   const task = presentAgentTurn(message, events);
   const lastTextIndex = message.parts.reduce(
@@ -146,7 +199,7 @@ export function AgentMessage({
           />
         ))}
       </MessageContent>
-      {message.role === "assistant" && responseText && !isStreaming ? (
+      {showCopyAction && message.role === "assistant" && responseText && !isStreaming ? (
         <CopyResponseAction locale={locale} text={responseText} />
       ) : null}
     </Message>
@@ -192,7 +245,8 @@ function AgentMessagePart({
       return <AttachmentPart locale={locale} part={part} />;
     case "authorization":
       return <AuthorizationPrompt locale={locale} part={part} />;
-    case "dynamic-tool":
+    case "dynamic-tool": {
+      const patch = toolPatch(part);
       return (
         <Tool
           className="mb-0"
@@ -207,21 +261,50 @@ function AgentMessagePart({
             type="dynamic-tool"
           />
           <ToolContent>
-            {part.toolMetadata?.eve?.kind === "subagent-call" ? (
-              <SubagentProgress events={events} locale={locale} onOpenSubagent={onOpenSubagent} part={part} />
-            ) : null}
-            <ToolInput input={part.input} label={localize(locale, "Parameters", "参数")} />
+            {patch ? (
+              <div className="max-h-[28rem] overflow-auto" data-tool-view="diff">
+                <DiffViewer patch={patch} showIcon size="sm" variant="muted" />
+              </div>
+            ) : (
+              <>
+                {part.toolMetadata?.eve?.kind === "subagent-call" ? (
+                  <SubagentProgress events={events} locale={locale} onOpenSubagent={onOpenSubagent} part={part} />
+                ) : null}
+                <ToolInput input={part.input} label={localize(locale, "Parameters", "参数")} />
+              </>
+            )}
             <InputRequestActions
               canRespond={canRespond}
               locale={locale}
               part={part}
               onInputResponses={onInputResponses}
             />
-            <ToolOutput errorLabel={localize(locale, "Error", "错误")} errorText={part.errorText} output={part.output} resultLabel={localize(locale, "Result", "结果")} />
+            {patch && !part.errorText ? null : (
+              <ToolOutput errorLabel={localize(locale, "Error", "错误")} errorText={part.errorText} output={part.output} resultLabel={localize(locale, "Result", "结果")} />
+            )}
           </ToolContent>
         </Tool>
       );
+    }
   }
+}
+
+function toolPatch(part: EveDynamicToolPart): string | undefined {
+  const toolName = part.toolName.toLocaleLowerCase().replaceAll("-", "_");
+  if (!["apply_patch", "patch_file"].includes(toolName)) return undefined;
+  return patchFromValue(part.input) ?? patchFromValue(part.output);
+}
+
+function patchFromValue(value: unknown): string | undefined {
+  if (typeof value === "string") return looksLikeUnifiedDiff(value) ? value : undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const patch = record.patch ?? record.diff;
+  return typeof patch === "string" && looksLikeUnifiedDiff(patch) ? patch : undefined;
+}
+
+function looksLikeUnifiedDiff(value: string): boolean {
+  return /^(?:diff --git |--- )/m.test(value) && /^\+\+\+ /m.test(value) && /^@@ /m.test(value);
 }
 
 function SubagentProgress({
@@ -348,7 +431,7 @@ function ExecutionGroup({
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in">
-        <div className="mt-2 space-y-3 border-l border-border pl-4">
+        <div className="mt-2 space-y-3 border-t border-border/60 pt-3">
           {children}
         </div>
       </CollapsibleContent>
@@ -628,7 +711,7 @@ function reasoningLabel(locale: AgentLocale, streaming: boolean, duration?: numb
     return <Shimmer duration={1}>{localize(locale, "Thinking...", "思考中…")}</Shimmer>;
   }
   if (duration === undefined) {
-    return <p>{localize(locale, "Thought for a few seconds", "思考了几秒")}</p>;
+    return <p>{localize(locale, "Reasoning complete", "思考完成")}</p>;
   }
   return <p>{localize(locale, `Thought for ${duration} seconds`, `思考了 ${duration} 秒`)}</p>;
 }

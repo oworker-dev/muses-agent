@@ -4,12 +4,10 @@ import { ClientError, defaultMessageReducer, type HandleMessageStreamEvent } fro
 import { AlertCircleIcon, ArrowLeftIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
-import { Conversation, ConversationContent } from "../ai-elements/conversation.js";
-import { PromptInputProvider, type PromptInputMessage } from "../ai-elements/prompt-input.js";
 import { createAgentSession } from "./agent-client.js";
 import { AgentActivity } from "./agent-activity.js";
 import { AgentChildSessionView } from "./agent-child-session.js";
-import { AgentComposer } from "./agent-composer.js";
+import { AgentComposer, type PromptInputMessage } from "./agent-composer.js";
 import { AgentMessage } from "./agent-message.js";
 import { AgentSettingsDialog } from "./agent-settings-dialog.js";
 import { AgentSidebar } from "./agent-sidebar.js";
@@ -773,33 +771,20 @@ function RecoveryView({
   );
   const messages = messagesFor(locale);
   return (
-    <PromptInputProvider>
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <Conversation className="min-h-0 flex-1">
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10">
-            {visibleMessages.map((message) => <AgentMessage canRespond={false} events={thread.events} fallbackStartedAt={thread.pendingTurn?.submittedAt} isStreaming locale={locale} message={message} key={message.id} onInputResponses={() => undefined} />)}
-            {error ? (
-              <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm">
-                <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{messages.recoveryFailed}</p>
-                  <p className="mt-0.5 break-words text-muted-foreground">{error}</p>
-                </div>
-                <Button onClick={onRetry} size="sm" variant="outline">
-                  <RotateCcwIcon className="size-4" />
-                  {messages.retry}
-                </Button>
-              </div>
-            ) : (
-              <AgentActivity
-                events={thread.events}
-                messages={messages}
-                mode="recovery"
-              />
-            )}
-          </ConversationContent>
-        </Conversation>
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
+    <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-7 px-4 py-8 sm:px-6 lg:py-10">
+          {visibleMessages.map((message) => <AgentMessage canRespond={false} events={thread.events} fallbackStartedAt={thread.pendingTurn?.submittedAt} isStreaming locale={locale} message={message} key={message.id} onInputResponses={() => undefined} />)}
+          {error ? (
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm">
+              <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+              <div className="min-w-0 flex-1"><p className="font-medium">{messages.recoveryFailed}</p><p className="mt-0.5 break-words text-muted-foreground">{error}</p></div>
+              <Button onClick={onRetry} size="sm" variant="outline"><RotateCcwIcon className="size-4" />{messages.retry}</Button>
+            </div>
+          ) : <AgentActivity events={thread.events} messages={messages} mode="recovery" />}
+        </div>
+      </div>
+      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
           {thread.queuedTurns.length > 0 || queueError ? (
             <FollowUpQueue
               error={queueError}
@@ -824,9 +809,8 @@ function RecoveryView({
             status="streaming"
             usage={summarizeUsage(thread.events)}
           />
-        </div>
-      </main>
-    </PromptInputProvider>
+      </div>
+    </main>
   );
 }
 

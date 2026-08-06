@@ -3,6 +3,7 @@ export { AgentMailboxHttpError, createHttpAgentMailbox, type HttpAgentMailboxOpt
 export { AgentThreadStorageConflictError, AgentThreadStorageHttpError, createHttpAgentThreadStorage, type HttpAgentThreadStorageOptions, } from "./http-thread-storage.js";
 export { AgentMessage } from "./agent-message.js";
 export type { AgentInputResponse } from "./agent-message.js";
+export type { PromptInputMessage } from "./agent-composer.js";
 export type { AgentExtensionInfo, AgentThread, AgentPendingTurn, AgentQueuedTurn, AgentThreadPatch, AgentThreadPreferences, AgentModelOption, AgentPromptMenuItem, AgentRuntimeStatus, AgentWorkspaceClientConfig, AgentWorkspaceConfig, AgentWorkspaceHostSlots, AgentWorkspaceMailbox, AgentMailboxItemStatus, AgentMailboxReceipt, } from "./contracts.js";
 export { filterPromptMenuItems, findPromptTrigger, replacePromptTrigger, type PromptTrigger, } from "./prompt-menu.js";
 export { AGENT_THREAD_STORAGE_VERSION, appendThreadEvent, browserThreadStorage, compactThreadEvents, createAgentThread, parseThreadCollection, } from "./thread-storage.js";

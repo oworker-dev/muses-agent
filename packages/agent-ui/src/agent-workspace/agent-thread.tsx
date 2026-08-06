@@ -3,33 +3,16 @@
 import type { UserContent } from "ai";
 import type { HandleMessageStreamEvent } from "eve/client";
 import { useEveAgent, type EveMessage } from "eve/react";
-import { AlertCircleIcon, ArrowDownIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
+import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type ExternalThreadQueueAdapter } from "@assistant-ui/react";
+import { AlertCircleIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Conversation,
-  ConversationContent,
-  ConversationScrollButton,
-} from "../ai-elements/conversation.js";
-import { PromptInputProvider, type PromptInputMessage } from "../ai-elements/prompt-input.js";
-import {
-  Queue,
-  QueueItem,
-  QueueItemAction,
-  QueueItemActions,
-  QueueItemContent,
-  QueueItemIndicator,
-  QueueList,
-  QueueSection,
-  QueueSectionContent,
-  QueueSectionLabel,
-  QueueSectionTrigger,
-} from "../ai-elements/queue.js";
 import { Button } from "../ui/button.js";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 import { cn } from "../utils.js";
-import { AgentActivity } from "./agent-activity.js";
-import { AgentComposer } from "./agent-composer.js";
 import { createAgentSession } from "./agent-client.js";
-import { AgentMessage, type AgentInputResponse } from "./agent-message.js";
+import type { AgentInputResponse } from "./agent-message.js";
+import { AssistantThreadSurface } from "./assistant-thread-surface.js";
 import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig, AgentWorkspaceMailbox } from "./contracts.js";
 import { messagesFor, type AgentLocale, type AgentMessages } from "./i18n.js";
 import { appendThreadEvent, titleFromPrompt } from "./thread-storage.js";
@@ -341,7 +324,7 @@ export function AgentThreadView({
     if (cancellationRef.current.turnId) cancelTurn(cancellationRef.current.turnId);
   };
 
-  const submit = async (message: PromptInputMessage) => {
+  const submit = async (message: import("./agent-composer.js").PromptInputMessage) => {
     const text = message.text.trim();
     if ((text.length === 0 && message.files.length === 0) || awaitingInput || !providerReady) return;
     if (isBusy || turnAdmissionBusyRef.current) {
@@ -396,6 +379,69 @@ export function AgentThreadView({
     }
     await agent.send({ message: parts });
   };
+
+  const visibleMessages = agent.data.messages.filter((message) =>
+    !isProxiedInputOnlyMessage(message, agent.events),
+  );
+  const assistantMessages = convertEveMessages({ ...agent.data, messages: visibleMessages }, {
+    error: agent.error,
+    isRunning: isBusy,
+  });
+  const queueAdapter: ExternalThreadQueueAdapter = {
+    edit: () => {
+      throw new Error("Editing a durable mailbox item is not supported.");
+    },
+    enqueue: (message) => {
+      void submit(promptFromAssistantMessage(getEveMessageContent(message)));
+    },
+    items: thread.queuedTurns.map((turn) => ({
+      id: turn.id,
+      parts: [{ text: turn.text, type: "text" }],
+      prompt: turn.text,
+    })),
+    move: () => {
+      throw new Error("Reordering durable mailbox items is not supported.");
+    },
+    remove: removeQueuedTurn,
+    // Eve injects follow-ups at the next safe turn boundary. The default
+    // assistant-ui steer lane is deliberately mapped to that durable FIFO.
+    steer: (message) => {
+      void submit(promptFromAssistantMessage(getEveMessageContent(message)));
+    },
+    steerItems: [],
+  };
+  const assistantRuntime = useExternalStoreRuntime({
+    isDisabled: !providerReady || awaitingInput,
+    isRunning: isBusy,
+    messages: assistantMessages,
+    queue: queueAdapter,
+    onCancel: async () => {
+      requestCancellation();
+    },
+    onEdit: async (message: AppendMessage) => {
+      const content = getEveMessageContent(message);
+      const prompt = promptFromAssistantMessage(content);
+      if (!prompt.text && prompt.files.length === 0) return;
+      // Eve owns the durable history. Editing the latest user turn retires the
+      // current run, clears the projected tail, and starts a clean Eve session.
+      await session.reset();
+      agent.reset();
+      onChange({ events: [], pendingTurn: undefined, session: { streamIndex: 0 }, status: "ready", updatedAt: Date.now() });
+      await submit(prompt);
+    },
+    onNew: async (message: AppendMessage) => {
+      await submit(promptFromAssistantMessage(getEveMessageContent(message)));
+    },
+    onReload: async () => {
+      const lastUser = [...agent.data.messages].reverse().find((message) => message.role === "user");
+      const text = lastUser?.parts.find((part) => part.type === "text")?.text;
+      if (text) await submit({ files: [], text });
+    },
+    onRespondToToolApproval: async (response) => {
+      prepareTurn();
+      await agent.send({ inputResponses: [{ optionId: response.optionId, requestId: response.approvalId, text: response.reason }] });
+    },
+  });
 
   useEffect(() => {
     if (!mailbox || !agent.session.sessionId) return;
@@ -522,100 +568,37 @@ export function AgentThreadView({
   const showPendingTurn = Boolean(
     thread.pendingTurn && !hasProjectedUserText(agent.data.messages, thread.pendingTurn.text),
   );
-  const visibleMessages = agent.data.messages.filter((message) =>
-    !isProxiedInputOnlyMessage(message, agent.events),
-  );
-  const isEmpty = visibleMessages.length === 0 && !showPendingTurn && !errorMessage;
   const activeTaskIsVisible = (isBusy || awaitingInput) && visibleMessages.some((message) =>
     message.role === "assistant" &&
     message.parts.some((part) => part.type === "dynamic-tool"),
   );
+
   return (
-    <PromptInputProvider>
+    <AssistantRuntimeProvider runtime={assistantRuntime}>
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {isEmpty ? (
-          <EmptyThread disabled={!providerReady} messages={messages} onPrompt={(prompt) => void submit({ files: [], text: prompt })} />
-        ) : (
-          <Conversation className="min-h-0 flex-1">
-            <ConversationContent className="mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10">
-              {visibleMessages.map((message, index) => (
-                <AgentMessage
-                  canRespond={!isBusy}
-                  events={agent.events}
-                  fallbackStartedAt={thread.pendingTurn?.submittedAt}
-                  isStreaming={agent.status === "streaming" && index === visibleMessages.length - 1}
-                  key={message.id}
-                  locale={locale}
-                  message={message}
-                  onInputResponses={respond}
-                  onOpenSubagent={onOpenSubagent}
-                />
-              ))}
-              {showPendingTurn && thread.pendingTurn ? (
-                <PendingUserTurn text={thread.pendingTurn.text} />
-              ) : null}
-              {isBusy ? (
-                <AgentActivity
-                  events={agent.events}
-                  messages={messages}
-                  quietUntilSlow={activeTaskIsVisible}
-                />
-              ) : null}
-              {errorMessage ? (
-                <TurnError
-                  message={errorMessage}
-                  preserved={Boolean(thread.pendingTurn)}
-                  messages={messages}
-                />
-              ) : null}
-            </ConversationContent>
-            <ConversationScrollButton>
-              <ArrowDownIcon className="size-4" />
-            </ConversationScrollButton>
-          </Conversation>
-        )}
-
-        <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
-          {awaitingInput ? (
-            <p className="mb-2 text-center text-sm text-amber-700 dark:text-amber-300" role="status">
-              {messages.waitingForApproval}
-            </p>
-          ) : null}
-          {thread.queuedTurns.length > 0 || queueError ? (
-            <FollowUpQueue
-              error={queueError}
-              messages={messages}
-              onRemove={removeQueuedTurn}
-              onRetry={markQueuedTurnForRetry}
-              turns={thread.queuedTurns}
-            />
-          ) : null}
-          <AgentComposer
-            commands={commands}
-            disabled={!providerReady || awaitingInput}
-            inputDisabled={awaitingInput}
-            mentions={mentions}
-            messages={messages}
-            models={models}
-            onPreferencesChange={(preferences) => onChange({ preferences })}
-            onStop={requestCancellation}
-            onSubmit={submit}
-            preferences={thread.preferences}
-            reasoningLevels={reasoningLevels}
-            status={isBusy && cancellationState !== "idle" ? "submitted" : errorMessage ? "error" : agent.status}
-            usage={usage}
-          />
-        </div>
+        <AssistantThreadSurface
+          commands={commands}
+          events={agent.events}
+          eveMessages={visibleMessages}
+          fallbackStartedAt={thread.pendingTurn?.submittedAt}
+          isBusy={isBusy}
+          locale={locale}
+          mentions={mentions}
+          messages={messages}
+          models={models}
+          onInputResponses={respond}
+          onOpenSubagent={onOpenSubagent}
+          onPreferencesChange={(preferences) => onChange({ preferences })}
+          pendingTurnText={showPendingTurn ? thread.pendingTurn?.text : undefined}
+          preferences={thread.preferences}
+          quietActivity={activeTaskIsVisible}
+          reasoningLevels={reasoningLevels}
+          usage={usage}
+        />
+        {errorMessage ? <TurnError message={errorMessage} messages={messages} preserved={Boolean(thread.pendingTurn)} /> : null}
+        {thread.queuedTurns.length > 0 || queueError ? <FollowUpQueue error={queueError} messages={messages} onRemove={removeQueuedTurn} onRetry={markQueuedTurnForRetry} turns={thread.queuedTurns} /> : null}
       </main>
-    </PromptInputProvider>
-  );
-}
-
-function PendingUserTurn({ text }: { readonly text: string }) {
-  return (
-    <div className="ml-auto max-w-[85%] rounded-lg bg-muted px-4 py-3 text-[15px] leading-6 text-foreground">
-      <p className="whitespace-pre-wrap break-words">{text}</p>
-    </div>
+    </AssistantRuntimeProvider>
   );
 }
 
@@ -633,45 +616,27 @@ export function FollowUpQueue({
   readonly turns: readonly AgentQueuedTurn[];
 }) {
   return (
-    <Queue className="mb-2 rounded-md shadow-none">
-      <QueueSection defaultOpen>
-        <QueueSectionTrigger>
-          <QueueSectionLabel
-            count={turns.length}
-            icon={<Clock3Icon className="size-4" />}
-            label={messages.queuedFollowUps}
-          />
-        </QueueSectionTrigger>
-        <QueueSectionContent>
-          <QueueList>
-            {turns.map((turn) => (
-              <QueueItem className="flex-row items-center" key={turn.id}>
-                <QueueItemIndicator className={turn.state === "delivery-failed" ? "border-destructive bg-destructive/10" : undefined} />
-                <QueueItemContent>{turn.text}</QueueItemContent>
-                {turn.state === "delivery-failed" ? (
-                  <span className="shrink-0 text-xs text-destructive">{messages.queueDeliveryFailed}</span>
-                ) : turn.state === "admission-ambiguous" ? (
-                  <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">{messages.queueAdmissionAmbiguous}</span>
-                ) : null}
-                <QueueItemActions>
-                  {turn.state === "delivery-failed" ? (
-                    <QueueItemAction aria-label={messages.retryQueuedMessage} onClick={() => onRetry(turn.id)}>
-                      <RotateCcwIcon className="size-3.5" />
-                    </QueueItemAction>
-                  ) : null}
-                  {turn.state !== "admission-ambiguous" ? (
-                    <QueueItemAction aria-label={messages.removeQueuedMessage} onClick={() => onRemove(turn.id)}>
-                      <XIcon className="size-3.5" />
-                    </QueueItemAction>
-                  ) : null}
-                </QueueItemActions>
-              </QueueItem>
-            ))}
-          </QueueList>
-        </QueueSectionContent>
-      </QueueSection>
+    <div className="mx-auto mb-2 w-full max-w-3xl overflow-hidden rounded-xl border border-border/70 bg-background text-sm">
+      <Collapsible defaultOpen>
+        <CollapsibleTrigger asChild>
+          <button aria-label={`${messages.queuedFollowUps} (${turns.length})`} className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-muted-foreground hover:text-foreground" type="button"><Clock3Icon className="size-4" />{messages.queuedFollowUps}<span className="rounded-full bg-muted px-1.5 text-xs">{turns.length}</span></button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="border-t border-border/60">
+          <div className="space-y-1 p-2">
+          {turns.map((turn) => (
+            <div className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/60" key={turn.id}>
+              <span className={cn("size-1.5 shrink-0 rounded-full", turn.state === "delivery-failed" ? "bg-destructive" : "bg-amber-500")} />
+              <span className="min-w-0 flex-1 truncate">{turn.text}</span>
+              {turn.state === "delivery-failed" ? <span className="shrink-0 text-xs text-destructive">{messages.queueDeliveryFailed}</span> : turn.state === "admission-ambiguous" ? <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">{messages.queueAdmissionAmbiguous}</span> : null}
+              {turn.state === "delivery-failed" ? <Button aria-label={messages.retryQueuedMessage} className="size-7" onClick={() => onRetry(turn.id)} size="icon-sm" variant="ghost"><RotateCcwIcon className="size-3.5" /></Button> : null}
+              {turn.state !== "admission-ambiguous" ? <Button aria-label={messages.removeQueuedMessage} className="size-7" onClick={() => onRemove(turn.id)} size="icon-sm" variant="ghost"><XIcon className="size-3.5" /></Button> : null}
+            </div>
+          ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
       {error ? <p className="px-2 text-xs text-destructive" role="alert">{error}</p> : null}
-    </Queue>
+    </div>
   );
 }
 
@@ -688,6 +653,13 @@ function createPendingTurnId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `pending-${Date.now()}`;
+}
+
+function promptFromAssistantMessage(content: NonNullable<import("eve/client").SendTurnPayload["message"]>): import("./agent-composer.js").PromptInputMessage {
+  if (typeof content === "string") return { files: [], text: content };
+  const text = content.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text").map((part) => part.text).join("\n");
+  const files = content.filter((part): part is Extract<typeof part, { type: "file" }> => part.type === "file").map((part) => ({ filename: part.filename, mediaType: part.mediaType, url: typeof part.data === "string" ? part.data : String(part.data) }));
+  return { files, text };
 }
 
 function isSessionBoundary(event: HandleMessageStreamEvent): boolean {

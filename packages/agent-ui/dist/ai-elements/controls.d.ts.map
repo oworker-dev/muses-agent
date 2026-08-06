@@ -1,1 +1,0 @@
-{"version":3,"file":"controls.d.ts","sourceRoot":"","sources":["../../src/ai-elements/controls.tsx"],"names":[],"mappings":"AAGA,OAAO,EAAE,QAAQ,IAAI,iBAAiB,EAAE,MAAM,eAAe,CAAC;AAC9D,OAAO,KAAK,EAAE,cAAc,EAAE,MAAM,OAAO,CAAC;AAE5C,MAAM,MAAM,aAAa,GAAG,cAAc,CAAC,OAAO,iBAAiB,CAAC,CAAC;AAErE,eAAO,MAAM,QAAQ,GAAI,yBAAyB,aAAa,4CAS9D,CAAC"}

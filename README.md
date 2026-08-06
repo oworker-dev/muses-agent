@@ -9,7 +9,7 @@ provided as authenticated tools, skills, connections, or client context.
 
 ## Current status
 
-The project has a working Eve runtime and a reusable AI Elements Web workspace:
+The project has a working Eve runtime and a reusable assistant-ui Web workspace:
 
 - durable multi-turn sessions and reconnectable event streams;
 - model and reasoning selection;
@@ -28,7 +28,7 @@ The project has a working Eve runtime and a reusable AI Elements Web workspace:
 - Host JWT enforcement across create, continue, stream, cancel, and reset routes.
 - buildable Contracts, Client, Host, and React UI alpha SDK packages;
 - optional iframe, native `AgentWorkspace`, and custom-host UI integration paths.
-- complete AI Elements and shadcn/ui source registries exported for reusable host composition.
+- assistant-ui primitives and shadcn/ui-compatible base components exported for reusable host composition.
 - authenticated static website previews and generic artifact delivery for Python, image, audio, video, and document outputs.
 
 This is an integration preview, not a completed production release. The current
@@ -555,7 +555,7 @@ registry primitives. Application membership and business authorization remain
 the host's responsibility.
 
 `@oworker/open-agent-ui` owns the host-neutral React `AgentWorkspace`, thread storage,
-event projection, individual AI Elements subpaths, and a precompiled stylesheet.
+event projection, assistant-ui based primitives, and a precompiled stylesheet.
 The host must inject its reviewed model catalog and defaults; identity,
 entitlement, billing, and tool policy remain server-authoritative. Both the
 standalone page and optional `/embed` adapter consume this package rather than

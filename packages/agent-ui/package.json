@@ -2,7 +2,7 @@
   "name": "@oworker/open-agent-ui",
   "version": "0.1.0-alpha.9",
   "private": true,
-  "description": "Reusable React workspace and AI Elements for the Open Agent service.",
+  "description": "Reusable assistant-ui React workspace and Eve session projection for the Open Agent service.",
   "type": "module",
   "sideEffects": [
     "./dist/styles.css"
@@ -22,14 +22,6 @@
       "types": "./dist/agent-workspace/index.d.ts",
       "import": "./dist/agent-workspace/index.js"
     },
-    "./ai-elements": {
-      "types": "./dist/ai-elements/index.d.ts",
-      "import": "./dist/ai-elements/index.js"
-    },
-    "./ai-elements/*": {
-      "types": "./dist/ai-elements/*.d.ts",
-      "import": "./dist/ai-elements/*.js"
-    },
     "./ui/*": {
       "types": "./dist/ui/*.d.ts",
       "import": "./dist/ui/*.js"
@@ -42,6 +34,9 @@
     "check": "tsc --noEmit -p tsconfig.build.json"
   },
   "dependencies": {
+    "@assistant-ui/eve": "^0.0.8",
+    "@assistant-ui/react": "^0.15.5",
+    "@assistant-ui/react-markdown": "0.14.8",
     "@base-ui/react": "^1.6.0",
     "@hookform/resolvers": "^5.7.1",
     "@radix-ui/react-use-controllable-state": "1.2.2",
@@ -51,12 +46,11 @@
     "@streamdown/code": "1.1.1",
     "@streamdown/math": "1.0.2",
     "@streamdown/mermaid": "1.0.2",
-    "@xyflow/react": "^12.11.2",
-    "ansi-to-react": "^6.2.6",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
     "date-fns": "^4.4.0",
+    "diff": "9.0.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "1.16.0",
@@ -64,6 +58,7 @@
     "motion": "12.40.0",
     "nanoid": "5.1.11",
     "next-themes": "^0.4.6",
+    "parse-diff": "0.12.0",
     "radix-ui": "1.4.3",
     "react-day-picker": "^10.0.1",
     "react-hook-form": "^7.84.0",

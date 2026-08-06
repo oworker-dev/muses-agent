@@ -1,106 +1,58 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { AtSignIcon, CheckIcon, ChevronDownIcon, CommandIcon, FileIcon, PlusIcon, ShieldCheckIcon, SquareIcon, XIcon, } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Context, ContextContent, ContextContentBody, ContextContentHeader, ContextTrigger, } from "../ai-elements/context.js";
-import { ModelSelector, ModelSelectorContent, ModelSelectorEmpty, ModelSelectorGroup, ModelSelectorInput, ModelSelectorItem, ModelSelectorList, ModelSelectorName, ModelSelectorTrigger, } from "../ai-elements/model-selector.js";
-import { PromptInput, PromptInputActionAddAttachments, PromptInputActionAddScreenshot, PromptInputActionMenu, PromptInputActionMenuContent, PromptInputActionMenuTrigger, PromptInputCommand, PromptInputCommandEmpty, PromptInputCommandGroup, PromptInputCommandItem, PromptInputCommandList, PromptInputFooter, PromptInputHeader, PromptInputSelect, PromptInputSelectContent, PromptInputSelectItem, PromptInputSelectTrigger, PromptInputSelectValue, PromptInputSubmit, PromptInputTextarea, PromptInputTools, usePromptInputAttachments, usePromptInputController, } from "../ai-elements/prompt-input.js";
+import { AtSignIcon, CheckIcon, ChevronDownIcon, CommandIcon, FileIcon, PaperclipIcon, SendIcon, SquareIcon, XIcon, } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
-import { filterPromptMenuItems, findPromptTrigger, replacePromptTrigger, } from "./prompt-menu.js";
+import { cn } from "../utils.js";
+import { filterPromptMenuItems, findPromptTrigger, replacePromptTrigger } from "./prompt-menu.js";
 import { formatTokenCount } from "./usage.js";
 export function AgentComposer({ commands = [], disabled = false, inputDisabled = false, mentions = [], messages, models, onPreferencesChange, onSubmit, onStop, preferences, reasoningLevels, status, usage, }) {
-    const attachments = usePromptInputAttachments();
-    const executionMode = preferences.executionMode ?? "standard";
-    const isRunning = status === "streaming" || status === "submitted";
-    return (_jsxs(PromptInput, { className: "relative overflow-visible border-border bg-card shadow-[0_12px_36px_-20px_rgba(0,0,0,0.28)]", maxFileSize: 10 * 1024 * 1024, multiple: true, onSubmit: (message) => {
-            void onSubmit(message).catch(() => undefined);
-        }, children: [attachments.files.length > 0 ? (_jsx(PromptInputHeader, { children: _jsx(ComposerAttachments, { messages: messages }) })) : null, _jsx(ComposerTextarea, { commands: commands, disabled: disabled || inputDisabled, mentions: mentions, messages: messages }), _jsxs(PromptInputFooter, { className: "min-h-10 gap-1.5 px-2.5 pb-2.5", children: [_jsxs(PromptInputTools, { className: "min-w-0 flex-1 gap-0.5", children: [!isRunning ? (_jsxs(PromptInputActionMenu, { children: [_jsx(PromptInputActionMenuTrigger, { "aria-label": messages.addFiles, tooltip: messages.addFiles, children: _jsx(PlusIcon, { className: "size-4" }) }), _jsxs(PromptInputActionMenuContent, { align: "start", side: "top", children: [_jsx(PromptInputActionAddAttachments, { label: messages.addFiles }), _jsx(PromptInputActionAddScreenshot, { label: messages.takeScreenshot })] })] })) : null, _jsx(ExecutionModeSelect, { label: messages.executionMode, onChange: (nextMode) => onPreferencesChange({ ...preferences, executionMode: nextMode }), value: executionMode })] }), _jsxs("div", { className: "ml-auto flex min-w-0 shrink items-center justify-end gap-0.5", children: [_jsx(ModelSelect, { label: messages.model, messages: messages, models: models, onChange: (modelId) => onPreferencesChange({ ...preferences, modelId }), value: preferences.modelId }), _jsx(ReasoningSelect, { label: messages.reasoning, onChange: (reasoning) => onPreferencesChange({ ...preferences, reasoning }), reasoningLevels: reasoningLevels, value: preferences.reasoning }), _jsx(ContextUsage, { messages: messages, models: models, modelId: preferences.modelId, usage: usage }), isRunning ? (_jsxs(_Fragment, { children: [_jsx(PromptInputSubmit, { "aria-label": messages.queueFollowUp, className: "static size-8", disabled: disabled || inputDisabled, status: "ready" }), _jsx(Button, { "aria-label": messages.cancel, className: "size-8", onClick: onStop, size: "icon-sm", type: "button", variant: "outline", children: _jsx(SquareIcon, { className: "size-3.5 fill-current" }) })] })) : (_jsx(PromptInputSubmit, { "aria-label": messages.send, className: "static size-8", disabled: disabled, onStop: onStop, status: status }))] })] })] }));
-}
-function ComposerTextarea({ commands, disabled, mentions, messages, }) {
-    const controller = usePromptInputController();
-    const textareaRef = useRef(null);
-    const [dismissedInput, setDismissedInput] = useState();
-    const trigger = findPromptTrigger(controller.textInput.value);
+    const [text, setText] = useState("");
+    const [files, setFiles] = useState([]);
+    const [openMenu, setOpenMenu] = useState();
+    const fileInputRef = useRef(null);
+    const trigger = findPromptTrigger(text);
     const sourceItems = trigger?.kind === "command" ? commands : mentions;
     const items = useMemo(() => trigger ? filterPromptMenuItems(sourceItems, trigger.query) : [], [sourceItems, trigger]);
-    const [selectedIndex, setSelectedIndex] = useState(0);
-    const isOpen = Boolean(trigger && controller.textInput.value !== dismissedInput && sourceItems.length > 0);
-    useEffect(() => setSelectedIndex(0), [controller.textInput.value]);
-    const choose = (item) => {
-        if (!trigger)
+    const isRunning = status === "streaming" || status === "submitted";
+    const selectedModel = models.find((model) => model.id === preferences.modelId) ?? models[0];
+    const submit = async () => {
+        const message = { files, text: text.trim() };
+        if ((!message.text && files.length === 0) || disabled || inputDisabled)
             return;
-        const next = replacePromptTrigger(controller.textInput.value, trigger, item.value);
-        controller.textInput.setInput(next);
-        setDismissedInput(next);
-        requestAnimationFrame(() => textareaRef.current?.focus());
+        setText("");
+        setFiles([]);
+        await onSubmit(message);
     };
-    return (_jsxs(_Fragment, { children: [isOpen ? (_jsx("div", { className: "absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-40 overflow-hidden rounded-md border bg-popover shadow-lg", children: _jsx(PromptInputCommand, { value: items[selectedIndex]?.id ?? "", children: _jsxs(PromptInputCommandList, { className: "max-h-64", children: [_jsx(PromptInputCommandEmpty, { children: messages.noPromptItems }), _jsx(PromptInputCommandGroup, { heading: trigger?.kind === "command" ? messages.skillsAndCommands : messages.contextItems, children: items.map((item, index) => (_jsxs(PromptInputCommandItem, { onMouseEnter: () => setSelectedIndex(index), onSelect: () => choose(item), value: item.id, children: [trigger?.kind === "command" ? _jsx(CommandIcon, { className: "size-4" }) : _jsx(AtSignIcon, { className: "size-4" }), _jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate font-medium", children: item.label }), item.description ? _jsx("span", { className: "block truncate text-xs text-muted-foreground", children: item.description }) : null] }), _jsx("span", { className: "shrink-0 font-mono text-xs text-muted-foreground", children: item.value })] }, item.id))) })] }) }) })) : null, _jsx(PromptInputTextarea, { "aria-label": messages.inputPlaceholder, className: "min-h-14 max-h-40 px-4 py-3 text-[15px] leading-6", disabled: disabled, onKeyDown: (event) => {
-                    if (!isOpen)
-                        return;
-                    if (event.key === "ArrowDown") {
+    return (_jsxs("form", { className: "relative rounded-2xl border border-border/80 bg-background px-3 py-2 shadow-[0_10px_36px_-24px_rgba(15,23,42,0.45)] transition-colors focus-within:border-border", onSubmit: (event) => { event.preventDefault(); void submit(); }, children: [files.length > 0 ? (_jsx("div", { className: "mb-2 flex flex-wrap gap-1.5", children: files.map((file, index) => (_jsxs("span", { className: "inline-flex max-w-52 items-center gap-1.5 rounded-lg bg-muted px-2 py-1 text-xs", children: [_jsx(FileIcon, { className: "size-3.5 shrink-0 text-muted-foreground" }), _jsx("span", { className: "truncate", children: file.filename ?? messages.attachment }), _jsx("button", { "aria-label": `${messages.removeAttachment}: ${file.filename ?? messages.attachment}`, className: "text-muted-foreground hover:text-foreground", onClick: () => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)), type: "button", children: _jsx(XIcon, { className: "size-3" }) })] }, `${file.filename ?? "file"}-${index}`))) })) : null, trigger && items.length > 0 ? (_jsxs("div", { className: "absolute inset-x-2 bottom-[calc(100%+0.5rem)] z-50 overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-xl", children: [_jsx("p", { className: "px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground", children: trigger.kind === "command" ? messages.skillsAndCommands : messages.contextItems }), items.map((item) => (_jsxs("button", { className: "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-accent", onClick: () => setText(replacePromptTrigger(text, trigger, item.value)), type: "button", children: [trigger.kind === "command" ? _jsx(CommandIcon, { className: "size-4 text-muted-foreground" }) : _jsx(AtSignIcon, { className: "size-4 text-muted-foreground" }), _jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate font-medium", children: item.label }), item.description ? _jsx("span", { className: "block truncate text-xs text-muted-foreground", children: item.description }) : null] }), _jsx("span", { className: "font-mono text-xs text-muted-foreground", children: item.value })] }, item.id)))] })) : null, _jsx("textarea", { "aria-label": messages.inputPlaceholder, className: "min-h-14 max-h-40 w-full resize-none border-0 bg-transparent px-1 py-1 text-[15px] leading-6 outline-none placeholder:text-muted-foreground", disabled: disabled || inputDisabled, onChange: (event) => setText(event.target.value), onKeyDown: (event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
                         event.preventDefault();
-                        setSelectedIndex((current) => items.length === 0 ? 0 : (current + 1) % items.length);
+                        void submit();
                     }
-                    else if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        setSelectedIndex((current) => items.length === 0 ? 0 : (current - 1 + items.length) % items.length);
-                    }
-                    else if ((event.key === "Enter" || event.key === "Tab") && items[selectedIndex]) {
-                        event.preventDefault();
-                        choose(items[selectedIndex]);
-                    }
-                    else if (event.key === "Escape") {
-                        event.preventDefault();
-                        setDismissedInput(controller.textInput.value);
-                    }
-                }, placeholder: messages.inputPlaceholder, ref: textareaRef })] }));
+                }, placeholder: messages.inputPlaceholder, value: text }), _jsxs("div", { className: "flex min-h-8 items-center gap-1", children: [_jsx("input", { accept: "image/*,.pdf,.txt,.md,.json,.csv", className: "hidden", multiple: true, onChange: (event) => {
+                            const next = Array.from(event.target.files ?? []).map((file) => ({ filename: file.name, mediaType: file.type || "application/octet-stream", url: URL.createObjectURL(file) }));
+                            setFiles((current) => [...current, ...next]);
+                            event.currentTarget.value = "";
+                        }, ref: fileInputRef, type: "file" }), _jsx(Button, { "aria-label": messages.addFiles, className: "size-8 rounded-full", onClick: () => fileInputRef.current?.click(), size: "icon-sm", type: "button", variant: "ghost", children: _jsx(PaperclipIcon, { className: "size-4" }) }), _jsx(MenuSelect, { label: messages.executionMode, options: ["standard", "automation", "cautious"].map((value) => ({ id: value, label: executionLabel(messages, value) })), onChange: (id) => onPreferencesChange({ ...preferences, executionMode: id }), onOpenChange: () => setOpenMenu(openMenu === "execution" ? undefined : "execution"), open: openMenu === "execution", value: preferences.executionMode ?? "standard" }), _jsxs("span", { className: "ml-auto flex items-center gap-0.5", children: [_jsx(MenuSelect, { label: messages.model, options: models.map((model) => ({ id: model.id, label: model.label })), onChange: (id) => onPreferencesChange({ ...preferences, modelId: id }), onOpenChange: () => setOpenMenu(openMenu === "model" ? undefined : "model"), open: openMenu === "model", value: selectedModel?.id ?? preferences.modelId }), _jsx(MenuSelect, { label: messages.reasoning, options: reasoningLevels.map((level) => ({ id: level, label: level })), onChange: (id) => onPreferencesChange({ ...preferences, reasoning: id }), onOpenChange: () => setOpenMenu(openMenu === "reasoning" ? undefined : "reasoning"), open: openMenu === "reasoning", value: preferences.reasoning }), _jsx(ContextUsage, { model: selectedModel, messages: messages, usage: usage }), isRunning ? (_jsxs(_Fragment, { children: [_jsx(Button, { "aria-label": messages.queueFollowUp, className: cn("size-8 rounded-full", text.trim() ? "bg-foreground text-background hover:bg-foreground/90" : ""), disabled: disabled || inputDisabled || !text.trim(), size: "icon-sm", type: "submit", variant: text.trim() ? "default" : "ghost", children: _jsx(SendIcon, { className: "size-4" }) }), _jsx(Button, { "aria-label": messages.cancel, className: "size-8 rounded-full", onClick: onStop, size: "icon-sm", type: "button", variant: "ghost", children: _jsx(SquareIcon, { className: "size-3.5 fill-current" }) })] })) : _jsx(Button, { "aria-label": messages.send, className: cn("size-8 rounded-full", text.trim() || files.length > 0 ? "bg-foreground text-background hover:bg-foreground/90" : ""), disabled: disabled || inputDisabled, size: "icon-sm", type: "submit", variant: text.trim() || files.length > 0 ? "default" : "ghost", children: _jsx(SendIcon, { className: "size-4" }) })] })] })] }));
 }
-function ComposerAttachments({ messages }) {
-    const attachments = usePromptInputAttachments();
-    return (_jsx("div", { className: "flex max-w-full flex-wrap gap-1.5", children: attachments.files.map((file) => (_jsxs("span", { className: "inline-flex max-w-52 items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-xs", children: [_jsx(FileIcon, { className: "size-3.5 shrink-0 text-muted-foreground" }), _jsx("span", { className: "truncate", children: file.filename ?? messages.attachment }), _jsx("button", { "aria-label": `${messages.removeAttachment}: ${file.filename ?? messages.attachment}`, className: "rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground", onClick: () => attachments.remove(file.id), type: "button", children: _jsx(XIcon, { className: "size-3" }) })] }, file.id))) }));
+function MenuSelect({ label, options, onChange, onOpenChange, open, value }) {
+    const selected = options.find((option) => option.id === value) ?? options[0];
+    return (_jsxs("div", { className: "relative", children: [_jsxs(Button, { "aria-label": label, className: "h-8 max-w-32 gap-1 rounded-full px-2 text-xs", onClick: onOpenChange, size: "sm", type: "button", variant: "ghost", children: [_jsx("span", { className: "max-w-24 truncate", children: selected?.label ?? value }), _jsx(ChevronDownIcon, { className: "size-3.5 shrink-0 text-muted-foreground" })] }), open ? _jsx("div", { className: "absolute bottom-[calc(100%+0.5rem)] right-0 z-50 min-w-40 overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-xl", children: options.map((option) => _jsxs("button", { className: cn("flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-accent", option.id === value && "bg-accent"), onClick: () => { onChange(option.id); onOpenChange(); }, type: "button", children: [_jsx("span", { className: "truncate", children: option.label }), option.id === value ? _jsx(CheckIcon, { className: "size-3.5" }) : null] }, option.id)) }) : null] }));
 }
-function ModelSelect({ label, messages, models, onChange, value, }) {
-    const [open, setOpen] = useState(false);
-    const selected = models.find((option) => option.id === value) ?? models[0];
-    return (_jsxs(ModelSelector, { onOpenChange: setOpen, open: open, children: [_jsx(ModelSelectorTrigger, { asChild: true, children: _jsxs(Button, { "aria-label": label, className: "h-8 max-w-36 gap-1 px-1.5 text-xs", type: "button", variant: "ghost", children: [_jsx("span", { className: "hidden truncate sm:inline", children: selected.label }), _jsx("span", { className: "truncate sm:hidden", children: compactModelLabel(selected.label) }), _jsx(ChevronDownIcon, { className: "size-3.5 shrink-0 text-muted-foreground" })] }) }), _jsxs(ModelSelectorContent, { className: "max-w-[calc(100%-2rem)] sm:max-w-md", title: label, children: [_jsx(ModelSelectorInput, { placeholder: messages.searchModels }), _jsxs(ModelSelectorList, { children: [_jsx(ModelSelectorEmpty, { children: messages.noModels }), _jsx(ModelSelectorGroup, { heading: label, children: models.map((option) => (_jsxs(ModelSelectorItem, { onSelect: () => {
-                                        onChange(option.id);
-                                        setOpen(false);
-                                    }, value: `${option.label} ${option.id}`, children: [_jsx(ModelSelectorName, { children: option.label }), option.id === selected.id ? _jsx(CheckIcon, { className: "size-4" }) : null] }, option.id))) })] })] })] }));
+function ContextUsage({ model, messages, usage }) {
+    const ratio = model ? Math.min(100, Math.round((usage.contextInputTokens / model.contextWindowTokens) * 100)) : 0;
+    return _jsxs("span", { className: "hidden items-center gap-1 px-2 text-xs text-muted-foreground sm:flex", title: `${messages.contextWindow}: ${formatTokenCount(usage.contextInputTokens)} / ${formatTokenCount(model?.contextWindowTokens ?? 0)}`, children: [_jsx("span", { className: "h-1.5 w-12 overflow-hidden rounded-full bg-muted", children: _jsx("span", { className: "block h-full rounded-full bg-foreground/60", style: { width: `${ratio}%` } }) }), _jsx("span", { className: "tabular-nums", children: formatTokenCount(usage.contextInputTokens) })] });
 }
-function ContextUsage({ messages, models, modelId, usage, }) {
-    const model = models.find((option) => option.id === modelId) ?? models[0];
-    const languageUsage = {
-        inputTokens: usage.inputTokens,
-        inputTokenDetails: {
-            cacheReadTokens: usage.cacheReadTokens,
-            cacheWriteTokens: usage.cacheWriteTokens,
-            noCacheTokens: Math.max(0, usage.inputTokens - usage.cacheReadTokens),
-        },
-        outputTokens: usage.outputTokens,
-        outputTokenDetails: { reasoningTokens: undefined, textTokens: usage.outputTokens },
-        totalTokens: usage.inputTokens + usage.outputTokens,
-    };
-    return (_jsxs(Context, { maxTokens: model.contextWindowTokens, modelId: modelId, usedTokens: usage.contextInputTokens, usage: languageUsage, children: [_jsx(ContextTrigger, { "aria-label": messages.context, className: "h-8 gap-1 px-1.5" }), _jsxs(ContextContent, { align: "end", side: "top", children: [_jsx(ContextContentHeader, {}), _jsxs(ContextContentBody, { className: "space-y-2", children: [usage.isEstimated ? _jsx("p", { className: "text-xs text-muted-foreground", children: messages.liveEstimate }) : null, _jsx(UsageRow, { label: messages.inputTokens, value: usage.inputTokens }), _jsx(UsageRow, { label: messages.outputTokens, value: usage.outputTokens }), _jsx(UsageRow, { label: messages.cacheReadTokens, value: usage.cacheReadTokens }), _jsx(UsageRow, { label: messages.cacheWriteTokens, value: usage.cacheWriteTokens }), usage.costUsd > 0 ? _jsxs("div", { className: "flex justify-between gap-4 border-t pt-2 text-xs", children: [_jsx("span", { className: "text-muted-foreground", children: messages.estimatedCost }), _jsxs("span", { children: ["$", usage.costUsd.toFixed(4)] })] }) : null] })] })] }));
+function executionLabel(messages, mode) {
+    if (mode === "automation")
+        return messages.executionAutomation;
+    if (mode === "cautious")
+        return messages.executionCautious;
+    return messages.executionStandard;
 }
-function UsageRow({ label, value }) {
-    return _jsxs("div", { className: "flex justify-between gap-4 text-xs", children: [_jsx("span", { className: "text-muted-foreground", children: label }), _jsx("span", { className: "font-mono", children: formatTokenCount(value) })] });
-}
-function ReasoningSelect({ label, onChange, reasoningLevels, value }) {
-    return (_jsxs(PromptInputSelect, { onValueChange: (next) => { if (reasoningLevels.includes(next))
-            onChange(next); }, value: value, children: [_jsx(PromptInputSelectTrigger, { "aria-label": label, className: "h-8 max-w-24 px-1.5 text-xs", children: _jsx(PromptInputSelectValue, { children: value }) }), _jsx(PromptInputSelectContent, { align: "start", position: "popper", side: "top", children: reasoningLevels.map((level) => (_jsx(PromptInputSelectItem, { value: level, children: level }, level))) })] }));
-}
-function ExecutionModeSelect({ label, onChange, value }) {
-    const labels = {
-        automation: "Auto",
-        cautious: "Review",
-        standard: "Standard",
-    };
-    return (_jsxs(PromptInputSelect, { onValueChange: (next) => {
-            if (next === "automation" || next === "cautious" || next === "standard")
-                onChange(next);
-        }, value: value, children: [_jsx(PromptInputSelectTrigger, { "aria-label": label, className: "h-8 w-8 gap-0 px-0 text-xs sm:w-auto sm:max-w-28 sm:gap-1 sm:px-1.5", children: _jsxs(PromptInputSelectValue, { children: [_jsx(ShieldCheckIcon, { className: "size-3.5" }), _jsx("span", { className: "hidden sm:inline", children: labels[value] })] }) }), _jsxs(PromptInputSelectContent, { align: "start", position: "popper", side: "top", children: [_jsx(PromptInputSelectItem, { value: "standard", children: "Standard" }), _jsx(PromptInputSelectItem, { value: "cautious", children: "Review" }), _jsx(PromptInputSelectItem, { value: "automation", children: "Auto" })] })] }));
-}
-function compactModelLabel(label) {
-    return label.replace(/^GPT-/iu, "").replace(/^OpenAI\s+/iu, "");
+export function formatUsage(usage) {
+    if (!usage)
+        return "";
+    return [usage.inputTokens, usage.outputTokens].filter((value) => typeof value === "number").map(formatTokenCount).join(" / ");
 }
 //# sourceMappingURL=agent-composer.js.map

@@ -2,19 +2,66 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { CheckIcon, CheckCircleIcon, ChevronDownIcon, CirclePauseIcon, CircleStopIcon, CopyIcon, ExternalLinkIcon, FileIcon, ImageIcon, KeyRoundIcon, LoaderCircleIcon, NetworkIcon, XCircleIcon, } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from "../ai-elements/message.js";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "../ai-elements/reasoning.js";
-import { Shimmer } from "../ai-elements/shimmer.js";
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput, } from "../ai-elements/tool.js";
 import { Button } from "../ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
+import { DiffViewer } from "../ui/diff-viewer.js";
 import { cn } from "../utils.js";
 import { presentAgentTurn, presentSubagentCall, } from "./turn-presentation.js";
-export function AgentMessage({ canRespond, events, fallbackStartedAt, isStreaming, locale, message, onOpenSubagent, onInputResponses, }) {
+function Message({ children, from, ...props }) {
+    return _jsx("article", { className: cn("group flex w-full flex-col", from === "user" ? "items-end" : "items-start"), ...props, children: children });
+}
+function MessageContent({ children }) {
+    return _jsx("div", { className: "min-w-0 max-w-full", children: children });
+}
+function MessageResponse({ children, isAnimating }) {
+    return _jsxs("p", { className: "whitespace-pre-wrap break-words", children: [children, isAnimating ? _jsx("span", { className: "ml-1 inline-block animate-pulse text-muted-foreground", children: "\u258D" }) : null] });
+}
+function MessageActions({ children, className }) {
+    return _jsx("div", { className: cn("mt-1 flex gap-1", className), children: children });
+}
+function MessageAction({ children, label, onClick, tooltip }) {
+    return _jsx(Button, { "aria-label": label, className: "size-7", onClick: onClick, size: "icon-sm", title: tooltip, variant: "ghost", children: children });
+}
+function Reasoning({ children, defaultOpen, isStreaming }) {
+    return _jsxs("details", { className: "my-2 rounded-lg bg-muted/40 px-3 py-2 text-sm text-muted-foreground", open: defaultOpen || isStreaming, children: [_jsx("summary", { className: "cursor-pointer select-none font-medium", children: isStreaming ? "Thinking…" : "Reasoning" }), children] });
+}
+function ReasoningTrigger({ getThinkingMessage }) {
+    return _jsx("span", { className: "sr-only", children: getThinkingMessage(false) });
+}
+function ReasoningContent({ children }) {
+    return _jsx("div", { className: "mt-2 whitespace-pre-wrap break-words", children: children });
+}
+function Shimmer({ children }) {
+    return _jsx("span", { className: "animate-pulse", children: children });
+}
+function Tool({ children, defaultOpen, className }) {
+    return _jsx(Collapsible, { className: cn("my-2 border-b border-border/60 py-2", className), defaultOpen: defaultOpen, children: children });
+}
+function ToolHeader({ title, statusLabel }) {
+    return _jsx(CollapsibleTrigger, { asChild: true, children: _jsxs("button", { "aria-label": title, className: "flex w-full cursor-pointer items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground", type: "button", children: [_jsx("span", { className: "font-medium text-foreground", children: title }), _jsx("span", { className: "text-xs", children: statusLabel }), _jsx(ChevronDownIcon, { className: "ml-auto size-3.5 transition-transform group-data-[state=open]:rotate-180" })] }) });
+}
+function ToolContent({ children }) {
+    return _jsx(CollapsibleContent, { children: _jsx("div", { className: "mt-2 space-y-2", children: children }) });
+}
+function ToolInput({ input, label }) {
+    return _jsxs("details", { className: "text-xs", children: [_jsx("summary", { className: "cursor-pointer text-muted-foreground", children: label }), _jsx("pre", { className: "mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2", children: safeStringify(input) })] });
+}
+function ToolOutput({ output, resultLabel, errorLabel, errorText }) {
+    return _jsxs("div", { className: "text-xs", children: [_jsx("span", { className: errorText ? "text-destructive" : "text-muted-foreground", children: errorText ? errorLabel : resultLabel }), _jsx("pre", { className: "mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2", children: errorText ?? safeStringify(output) })] });
+}
+function safeStringify(value) {
+    try {
+        return JSON.stringify(value ?? {}, null, 2);
+    }
+    catch {
+        return String(value);
+    }
+}
+export function AgentMessage({ canRespond, events, fallbackStartedAt, isStreaming, locale, message, onOpenSubagent, onInputResponses, showCopyAction = true, }) {
     const task = presentAgentTurn(message, events);
     const lastTextIndex = message.parts.reduce((last, part, index) => (part.type === "text" ? index : last), -1);
     const responseText = task?.finalPart?.text ?? (task ? undefined : lastText(message.parts));
-    return (_jsxs(Message, { "data-optimistic": message.metadata?.optimistic ? "true" : undefined, from: message.role, children: [_jsx(MessageContent, { children: task ? (_jsxs(_Fragment, { children: [_jsxs(ExecutionGroup, { fallbackStartedAt: fallbackStartedAt, locale: locale, task: task, children: [task.processParts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: task.status === "running" || task.status === "waiting", locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false }, partKey(part, index)))), task.proxiedInputParts.map((part) => (_jsxs("div", { className: "space-y-2", children: [_jsx("p", { className: "text-xs font-medium text-amber-700 dark:text-amber-300", children: localize(locale, "A delegated task needs your approval", "子代理任务需要你的批准") }), _jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: true, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false })] }, `proxied-input:${part.toolCallId}`)))] }), task.finalPart ? (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: task.finalPart, showCaret: isStreaming && task.finalPart.state === "streaming" })) : null] })) : message.parts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: isStreaming && message.role === "assistant" && index === lastTextIndex }, partKey(part, index)))) }), message.role === "assistant" && responseText && !isStreaming ? (_jsx(CopyResponseAction, { locale: locale, text: responseText })) : null] }));
+    return (_jsxs(Message, { "data-optimistic": message.metadata?.optimistic ? "true" : undefined, from: message.role, children: [_jsx(MessageContent, { children: task ? (_jsxs(_Fragment, { children: [_jsxs(ExecutionGroup, { fallbackStartedAt: fallbackStartedAt, locale: locale, task: task, children: [task.processParts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: task.status === "running" || task.status === "waiting", locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false }, partKey(part, index)))), task.proxiedInputParts.map((part) => (_jsxs("div", { className: "space-y-2", children: [_jsx("p", { className: "text-xs font-medium text-amber-700 dark:text-amber-300", children: localize(locale, "A delegated task needs your approval", "子代理任务需要你的批准") }), _jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: true, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false })] }, `proxied-input:${part.toolCallId}`)))] }), task.finalPart ? (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: task.finalPart, showCaret: isStreaming && task.finalPart.state === "streaming" })) : null] })) : message.parts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: isStreaming && message.role === "assistant" && index === lastTextIndex }, partKey(part, index)))) }), showCopyAction && message.role === "assistant" && responseText && !isStreaming ? (_jsx(CopyResponseAction, { locale: locale, text: responseText })) : null] }));
 }
 function AgentMessagePart({ canRespond, events, inActiveExecution, locale, onOpenSubagent, onInputResponses, part, showCaret, }) {
     switch (part.type) {
@@ -28,9 +75,29 @@ function AgentMessagePart({ canRespond, events, inActiveExecution, locale, onOpe
             return _jsx(AttachmentPart, { locale: locale, part: part });
         case "authorization":
             return _jsx(AuthorizationPrompt, { locale: locale, part: part });
-        case "dynamic-tool":
-            return (_jsxs(Tool, { className: "mb-0", defaultOpen: (inActiveExecution && part.state !== "output-available") || part.state === "approval-requested" || part.state === "approval-responded", children: [_jsx(ToolHeader, { showStatus: part.state !== "output-available", state: part.state, statusLabel: toolStatusLabel(locale, part.state), title: toolTitle(locale, part), toolName: part.toolName, type: "dynamic-tool" }), _jsxs(ToolContent, { children: [part.toolMetadata?.eve?.kind === "subagent-call" ? (_jsx(SubagentProgress, { events: events, locale: locale, onOpenSubagent: onOpenSubagent, part: part })) : null, _jsx(ToolInput, { input: part.input, label: localize(locale, "Parameters", "参数") }), _jsx(InputRequestActions, { canRespond: canRespond, locale: locale, part: part, onInputResponses: onInputResponses }), _jsx(ToolOutput, { errorLabel: localize(locale, "Error", "错误"), errorText: part.errorText, output: part.output, resultLabel: localize(locale, "Result", "结果") })] })] }));
+        case "dynamic-tool": {
+            const patch = toolPatch(part);
+            return (_jsxs(Tool, { className: "mb-0", defaultOpen: (inActiveExecution && part.state !== "output-available") || part.state === "approval-requested" || part.state === "approval-responded", children: [_jsx(ToolHeader, { showStatus: part.state !== "output-available", state: part.state, statusLabel: toolStatusLabel(locale, part.state), title: toolTitle(locale, part), toolName: part.toolName, type: "dynamic-tool" }), _jsxs(ToolContent, { children: [patch ? (_jsx("div", { className: "max-h-[28rem] overflow-auto", "data-tool-view": "diff", children: _jsx(DiffViewer, { patch: patch, showIcon: true, size: "sm", variant: "muted" }) })) : (_jsxs(_Fragment, { children: [part.toolMetadata?.eve?.kind === "subagent-call" ? (_jsx(SubagentProgress, { events: events, locale: locale, onOpenSubagent: onOpenSubagent, part: part })) : null, _jsx(ToolInput, { input: part.input, label: localize(locale, "Parameters", "参数") })] })), _jsx(InputRequestActions, { canRespond: canRespond, locale: locale, part: part, onInputResponses: onInputResponses }), patch && !part.errorText ? null : (_jsx(ToolOutput, { errorLabel: localize(locale, "Error", "错误"), errorText: part.errorText, output: part.output, resultLabel: localize(locale, "Result", "结果") }))] })] }));
+        }
     }
+}
+function toolPatch(part) {
+    const toolName = part.toolName.toLocaleLowerCase().replaceAll("-", "_");
+    if (!["apply_patch", "patch_file"].includes(toolName))
+        return undefined;
+    return patchFromValue(part.input) ?? patchFromValue(part.output);
+}
+function patchFromValue(value) {
+    if (typeof value === "string")
+        return looksLikeUnifiedDiff(value) ? value : undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return undefined;
+    const record = value;
+    const patch = record.patch ?? record.diff;
+    return typeof patch === "string" && looksLikeUnifiedDiff(patch) ? patch : undefined;
+}
+function looksLikeUnifiedDiff(value) {
+    return /^(?:diff --git |--- )/m.test(value) && /^\+\+\+ /m.test(value) && /^@@ /m.test(value);
 }
 function SubagentProgress({ events, locale, onOpenSubagent, part, }) {
     const presentation = presentSubagentCall(events, part.toolCallId);
@@ -67,7 +134,7 @@ function ExecutionGroup({ children, fallbackStartedAt, locale, task, }) {
             setOpen(false);
         previousStatus.current = task.status;
     }, [isActive, task.status]);
-    return (_jsxs(Collapsible, { className: "group/execution w-full", onOpenChange: setOpen, open: open, children: [_jsx(CollapsibleTrigger, { asChild: true, children: _jsxs("button", { className: "flex w-full items-center gap-2 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground", type: "button", children: [task.status === "running" ? (_jsx(LoaderCircleIcon, { className: "size-4 shrink-0 animate-spin" })) : task.status === "waiting" ? (_jsx(CirclePauseIcon, { className: "size-4 shrink-0 text-amber-600 dark:text-amber-300" })) : task.status === "completed" ? (_jsx(CheckCircleIcon, { className: "size-4 shrink-0" })) : (_jsx(XCircleIcon, { className: "size-4 shrink-0" })), _jsx("span", { children: executionLabel(locale, task.status) }), startedAt ? _jsx("span", { className: "tabular-nums", children: formatDuration(elapsedSeconds) }) : null, _jsx(ChevronDownIcon, { className: "size-3.5 transition-transform group-data-[state=open]/execution:rotate-180" })] }) }), _jsx(CollapsibleContent, { className: "overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in", children: _jsx("div", { className: "mt-2 space-y-3 border-l border-border pl-4", children: children }) })] }));
+    return (_jsxs(Collapsible, { className: "group/execution w-full", onOpenChange: setOpen, open: open, children: [_jsx(CollapsibleTrigger, { asChild: true, children: _jsxs("button", { className: "flex w-full items-center gap-2 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground", type: "button", children: [task.status === "running" ? (_jsx(LoaderCircleIcon, { className: "size-4 shrink-0 animate-spin" })) : task.status === "waiting" ? (_jsx(CirclePauseIcon, { className: "size-4 shrink-0 text-amber-600 dark:text-amber-300" })) : task.status === "completed" ? (_jsx(CheckCircleIcon, { className: "size-4 shrink-0" })) : (_jsx(XCircleIcon, { className: "size-4 shrink-0" })), _jsx("span", { children: executionLabel(locale, task.status) }), startedAt ? _jsx("span", { className: "tabular-nums", children: formatDuration(elapsedSeconds) }) : null, _jsx(ChevronDownIcon, { className: "size-3.5 transition-transform group-data-[state=open]/execution:rotate-180" })] }) }), _jsx(CollapsibleContent, { className: "overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in", children: _jsx("div", { className: "mt-2 space-y-3 border-t border-border/60 pt-3", children: children }) })] }));
 }
 function CopyResponseAction({ locale, text }) {
     const [copied, setCopied] = useState(false);
@@ -222,7 +289,7 @@ function reasoningLabel(locale, streaming, duration) {
         return _jsx(Shimmer, { duration: 1, children: localize(locale, "Thinking...", "思考中…") });
     }
     if (duration === undefined) {
-        return _jsx("p", { children: localize(locale, "Thought for a few seconds", "思考了几秒") });
+        return _jsx("p", { children: localize(locale, "Reasoning complete", "思考完成") });
     }
     return _jsx("p", { children: localize(locale, `Thought for ${duration} seconds`, `思考了 ${duration} 秒`) });
 }

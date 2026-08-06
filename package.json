@@ -50,6 +50,7 @@
     "verify:sandbox-reaper": "node scripts/verify-sandbox-reaper.mjs"
   },
   "dependencies": {
+    "@assistant-ui/core": "0.3.6",
     "@oworker/open-agent-client": "0.1.0-alpha.9",
     "@oworker/open-agent-contracts": "0.1.0-alpha.9",
     "@oworker/open-agent-host": "0.1.0-alpha.9",
@@ -86,7 +87,8 @@
     "tailwind-merge": "3.6.0",
     "tailwindcss": "4.3.0",
     "use-stick-to-bottom": "1.1.4",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "zustand": "5.0.14"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

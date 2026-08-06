@@ -1,7 +1,7 @@
 # @oworker/open-agent-ui
 
-Reusable React workspace and AI Elements for the independent Open Agent
-service. The package owns presentation and durable Eve session projection, but
+Reusable assistant-ui React workspace for the independent Open Agent service.
+The package owns presentation and durable Eve session projection, but
 does not own host identity, model entitlement, billing, or host business state.
 
 Import the precompiled stylesheet once in the host application:
@@ -31,9 +31,8 @@ export function AgentPage() {
 }
 ```
 
-The package carries the complete AI Elements and shadcn/ui registries used by
-the product. Import their barrels or stable subpaths such as
-`@oworker/open-agent-ui/ai-elements/context` and `@oworker/open-agent-ui/ui/button`.
+The default Web UI is built from assistant-ui primitives and the Eve adapter.
 `commands`, `mentions`, and `extensions` are host-injected catalogs; Muses
-canvas concepts never become a dependency of this package. Hosts that own their
-UI can omit this package and use `@oworker/open-agent-client/eve-session` directly.
+canvas concepts never become a dependency of this package. Hosts can use the
+default UI, replace tool renderers, or omit this package and use
+`@oworker/open-agent-client/eve-session` directly.

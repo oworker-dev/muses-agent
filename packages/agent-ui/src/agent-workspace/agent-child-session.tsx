@@ -3,7 +3,6 @@
 import { ClientError, defaultMessageReducer, type HandleMessageStreamEvent } from "eve/client";
 import { AlertCircleIcon, ArrowDownIcon, CirclePauseIcon, Clock3Icon, LoaderCircleIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Conversation, ConversationContent, ConversationScrollButton } from "../ai-elements/conversation.js";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -177,8 +176,8 @@ export function AgentChildSessionView({
           </AlertDialog>
         ) : null}
       </div>
-      <Conversation className="min-h-0 flex-1">
-        <ConversationContent className="mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-7 px-4 py-8 sm:px-6 lg:py-10">
           {visibleMessages.map((message, index) => (
             <AgentMessage
               canRespond={false}
@@ -204,9 +203,9 @@ export function AgentChildSessionView({
               </Button>
             </div>
           ) : null}
-        </ConversationContent>
-        <ConversationScrollButton><ArrowDownIcon className="size-4" /></ConversationScrollButton>
-      </Conversation>
+        </div>
+        <Button aria-label={localize(locale, "Scroll to bottom", "滚动到底部")} className="absolute bottom-24 left-1/2 size-8 -translate-x-1/2 rounded-full shadow-sm" size="icon-sm" variant="outline"><ArrowDownIcon className="size-4" /></Button>
+      </div>
     </main>
   );
 }

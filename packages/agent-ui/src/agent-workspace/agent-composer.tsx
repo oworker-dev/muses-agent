@@ -7,57 +7,14 @@ import {
   ChevronDownIcon,
   CommandIcon,
   FileIcon,
-  PlusIcon,
-  ShieldCheckIcon,
+  PaperclipIcon,
+  SendIcon,
   SquareIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Context,
-  ContextContent,
-  ContextContentBody,
-  ContextContentHeader,
-  ContextTrigger,
-} from "../ai-elements/context.js";
-import {
-  ModelSelector,
-  ModelSelectorContent,
-  ModelSelectorEmpty,
-  ModelSelectorGroup,
-  ModelSelectorInput,
-  ModelSelectorItem,
-  ModelSelectorList,
-  ModelSelectorName,
-  ModelSelectorTrigger,
-} from "../ai-elements/model-selector.js";
-import {
-  PromptInput,
-  PromptInputActionAddAttachments,
-  PromptInputActionAddScreenshot,
-  PromptInputActionMenu,
-  PromptInputActionMenuContent,
-  PromptInputActionMenuTrigger,
-  PromptInputCommand,
-  PromptInputCommandEmpty,
-  PromptInputCommandGroup,
-  PromptInputCommandItem,
-  PromptInputCommandList,
-  PromptInputFooter,
-  PromptInputHeader,
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-  type PromptInputMessage,
-  usePromptInputAttachments,
-  usePromptInputController,
-} from "../ai-elements/prompt-input.js";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
+import { cn } from "../utils.js";
 import type { AgentMessages } from "./i18n.js";
 import type {
   AgentModelOption,
@@ -65,13 +22,18 @@ import type {
   AgentPromptMenuItem,
   AgentThreadPreferences,
 } from "./contracts.js";
-import {
-  filterPromptMenuItems,
-  findPromptTrigger,
-  replacePromptTrigger,
-} from "./prompt-menu.js";
+import { filterPromptMenuItems, findPromptTrigger, replacePromptTrigger } from "./prompt-menu.js";
 import type { AgentUsageSummary } from "./usage.js";
 import { formatTokenCount } from "./usage.js";
+
+export type PromptInputMessage = {
+  readonly files: readonly {
+    readonly filename?: string;
+    readonly mediaType: string;
+    readonly url: string;
+  }[];
+  readonly text: string;
+};
 
 export function AgentComposer({
   commands = [],
@@ -102,339 +64,130 @@ export function AgentComposer({
   readonly status: "error" | "ready" | "streaming" | "submitted";
   readonly usage: AgentUsageSummary;
 }) {
-  const attachments = usePromptInputAttachments();
-  const executionMode = preferences.executionMode ?? "standard";
-  const isRunning = status === "streaming" || status === "submitted";
-
-  return (
-    <PromptInput
-      className="relative overflow-visible border-border bg-card shadow-[0_12px_36px_-20px_rgba(0,0,0,0.28)]"
-      maxFileSize={10 * 1024 * 1024}
-      multiple
-      onSubmit={(message) => {
-        // Eve projects an optimistic user message immediately. Do not keep the
-        // controlled composer populated for the lifetime of the remote turn.
-        void onSubmit(message).catch(() => undefined);
-      }}
-    >
-      {attachments.files.length > 0 ? (
-        <PromptInputHeader>
-          <ComposerAttachments messages={messages} />
-        </PromptInputHeader>
-      ) : null}
-      <ComposerTextarea commands={commands} disabled={disabled || inputDisabled} mentions={mentions} messages={messages} />
-      <PromptInputFooter className="min-h-10 gap-1.5 px-2.5 pb-2.5">
-        <PromptInputTools className="min-w-0 flex-1 gap-0.5">
-          {!isRunning ? (
-            <PromptInputActionMenu>
-              <PromptInputActionMenuTrigger aria-label={messages.addFiles} tooltip={messages.addFiles}>
-                <PlusIcon className="size-4" />
-              </PromptInputActionMenuTrigger>
-              <PromptInputActionMenuContent align="start" side="top">
-                <PromptInputActionAddAttachments label={messages.addFiles} />
-                <PromptInputActionAddScreenshot label={messages.takeScreenshot} />
-              </PromptInputActionMenuContent>
-            </PromptInputActionMenu>
-          ) : null}
-          <ExecutionModeSelect
-            label={messages.executionMode}
-            onChange={(nextMode) => onPreferencesChange({ ...preferences, executionMode: nextMode })}
-            value={executionMode}
-          />
-        </PromptInputTools>
-        <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-0.5">
-          <ModelSelect
-            label={messages.model}
-            messages={messages}
-            models={models}
-            onChange={(modelId) => onPreferencesChange({ ...preferences, modelId })}
-            value={preferences.modelId}
-          />
-          <ReasoningSelect
-            label={messages.reasoning}
-            onChange={(reasoning) => onPreferencesChange({ ...preferences, reasoning })}
-            reasoningLevels={reasoningLevels}
-            value={preferences.reasoning}
-          />
-          <ContextUsage messages={messages} models={models} modelId={preferences.modelId} usage={usage} />
-          {isRunning ? (
-            <>
-              <PromptInputSubmit
-                aria-label={messages.queueFollowUp}
-                className="static size-8"
-                disabled={disabled || inputDisabled}
-                status="ready"
-              />
-              <Button
-                aria-label={messages.cancel}
-                className="size-8"
-                onClick={onStop}
-                size="icon-sm"
-                type="button"
-                variant="outline"
-              >
-                <SquareIcon className="size-3.5 fill-current" />
-              </Button>
-            </>
-          ) : (
-            <PromptInputSubmit
-              aria-label={messages.send}
-              className="static size-8"
-              disabled={disabled}
-              onStop={onStop}
-              status={status}
-            />
-          )}
-        </div>
-      </PromptInputFooter>
-    </PromptInput>
-  );
-}
-
-function ComposerTextarea({
-  commands,
-  disabled,
-  mentions,
-  messages,
-}: {
-  readonly commands: readonly AgentPromptMenuItem[];
-  readonly disabled: boolean;
-  readonly mentions: readonly AgentPromptMenuItem[];
-  readonly messages: AgentMessages;
-}) {
-  const controller = usePromptInputController();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [dismissedInput, setDismissedInput] = useState<string>();
-  const trigger = findPromptTrigger(controller.textInput.value);
+  const [text, setText] = useState("");
+  const [files, setFiles] = useState<PromptInputMessage["files"]>([]);
+  const [openMenu, setOpenMenu] = useState<"model" | "reasoning" | "execution" | undefined>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const trigger = findPromptTrigger(text);
   const sourceItems = trigger?.kind === "command" ? commands : mentions;
   const items = useMemo(
     () => trigger ? filterPromptMenuItems(sourceItems, trigger.query) : [],
     [sourceItems, trigger],
   );
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const isOpen = Boolean(trigger && controller.textInput.value !== dismissedInput && sourceItems.length > 0);
+  const isRunning = status === "streaming" || status === "submitted";
+  const selectedModel = models.find((model) => model.id === preferences.modelId) ?? models[0];
 
-  useEffect(() => setSelectedIndex(0), [controller.textInput.value]);
-
-  const choose = (item: AgentPromptMenuItem) => {
-    if (!trigger) return;
-    const next = replacePromptTrigger(controller.textInput.value, trigger, item.value);
-    controller.textInput.setInput(next);
-    setDismissedInput(next);
-    requestAnimationFrame(() => textareaRef.current?.focus());
+  const submit = async () => {
+    const message = { files, text: text.trim() };
+    if ((!message.text && files.length === 0) || disabled || inputDisabled) return;
+    setText("");
+    setFiles([]);
+    await onSubmit(message);
   };
 
   return (
-    <>
-      {isOpen ? (
-        <div className="absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-40 overflow-hidden rounded-md border bg-popover shadow-lg">
-          <PromptInputCommand value={items[selectedIndex]?.id ?? ""}>
-            <PromptInputCommandList className="max-h-64">
-              <PromptInputCommandEmpty>{messages.noPromptItems}</PromptInputCommandEmpty>
-              <PromptInputCommandGroup heading={trigger?.kind === "command" ? messages.skillsAndCommands : messages.contextItems}>
-                {items.map((item, index) => (
-                  <PromptInputCommandItem
-                    key={item.id}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    onSelect={() => choose(item)}
-                    value={item.id}
-                  >
-                    {trigger?.kind === "command" ? <CommandIcon className="size-4" /> : <AtSignIcon className="size-4" />}
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{item.label}</span>
-                      {item.description ? <span className="block truncate text-xs text-muted-foreground">{item.description}</span> : null}
-                    </span>
-                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{item.value}</span>
-                  </PromptInputCommandItem>
-                ))}
-              </PromptInputCommandGroup>
-            </PromptInputCommandList>
-          </PromptInputCommand>
+    <form
+      className="relative rounded-2xl border border-border/80 bg-background px-3 py-2 shadow-[0_10px_36px_-24px_rgba(15,23,42,0.45)] transition-colors focus-within:border-border"
+      onSubmit={(event) => { event.preventDefault(); void submit(); }}
+    >
+      {files.length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {files.map((file, index) => (
+            <span className="inline-flex max-w-52 items-center gap-1.5 rounded-lg bg-muted px-2 py-1 text-xs" key={`${file.filename ?? "file"}-${index}`}>
+              <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{file.filename ?? messages.attachment}</span>
+              <button aria-label={`${messages.removeAttachment}: ${file.filename ?? messages.attachment}`} className="text-muted-foreground hover:text-foreground" onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))} type="button"><XIcon className="size-3" /></button>
+            </span>
+          ))}
         </div>
       ) : null}
-      <PromptInputTextarea
+      {trigger && items.length > 0 ? (
+        <div className="absolute inset-x-2 bottom-[calc(100%+0.5rem)] z-50 overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-xl">
+          <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {trigger.kind === "command" ? messages.skillsAndCommands : messages.contextItems}
+          </p>
+          {items.map((item) => (
+            <button className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-accent" key={item.id} onClick={() => setText(replacePromptTrigger(text, trigger, item.value))} type="button">
+              {trigger.kind === "command" ? <CommandIcon className="size-4 text-muted-foreground" /> : <AtSignIcon className="size-4 text-muted-foreground" />}
+              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{item.label}</span>{item.description ? <span className="block truncate text-xs text-muted-foreground">{item.description}</span> : null}</span>
+              <span className="font-mono text-xs text-muted-foreground">{item.value}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <textarea
         aria-label={messages.inputPlaceholder}
-        className="min-h-14 max-h-40 px-4 py-3 text-[15px] leading-6"
-        disabled={disabled}
+        className="min-h-14 max-h-40 w-full resize-none border-0 bg-transparent px-1 py-1 text-[15px] leading-6 outline-none placeholder:text-muted-foreground"
+        disabled={disabled || inputDisabled}
+        onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
-          if (!isOpen) return;
-          if (event.key === "ArrowDown") {
-            event.preventDefault();
-            setSelectedIndex((current) => items.length === 0 ? 0 : (current + 1) % items.length);
-          } else if (event.key === "ArrowUp") {
-            event.preventDefault();
-            setSelectedIndex((current) => items.length === 0 ? 0 : (current - 1 + items.length) % items.length);
-          } else if ((event.key === "Enter" || event.key === "Tab") && items[selectedIndex]) {
-            event.preventDefault();
-            choose(items[selectedIndex]);
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            setDismissedInput(controller.textInput.value);
-          }
+          if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submit(); }
         }}
         placeholder={messages.inputPlaceholder}
-        ref={textareaRef}
+        value={text}
       />
-    </>
+      <div className="flex min-h-8 items-center gap-1">
+        <input
+          accept="image/*,.pdf,.txt,.md,.json,.csv"
+          className="hidden"
+          multiple
+          onChange={(event) => {
+            const next = Array.from(event.target.files ?? []).map((file) => ({ filename: file.name, mediaType: file.type || "application/octet-stream", url: URL.createObjectURL(file) }));
+            setFiles((current) => [...current, ...next]);
+            event.currentTarget.value = "";
+          }}
+          ref={fileInputRef}
+          type="file"
+        />
+        <Button aria-label={messages.addFiles} className="size-8 rounded-full" onClick={() => fileInputRef.current?.click()} size="icon-sm" type="button" variant="ghost"><PaperclipIcon className="size-4" /></Button>
+        <MenuSelect label={messages.executionMode} options={(["standard", "automation", "cautious"] as AgentExecutionMode[]).map((value) => ({ id: value, label: executionLabel(messages, value) }))} onChange={(id) => onPreferencesChange({ ...preferences, executionMode: id as AgentExecutionMode })} onOpenChange={() => setOpenMenu(openMenu === "execution" ? undefined : "execution")} open={openMenu === "execution"} value={preferences.executionMode ?? "standard"} />
+        <span className="ml-auto flex items-center gap-0.5">
+          <MenuSelect label={messages.model} options={models.map((model) => ({ id: model.id, label: model.label }))} onChange={(id) => onPreferencesChange({ ...preferences, modelId: id })} onOpenChange={() => setOpenMenu(openMenu === "model" ? undefined : "model")} open={openMenu === "model"} value={selectedModel?.id ?? preferences.modelId} />
+          <MenuSelect label={messages.reasoning} options={reasoningLevels.map((level) => ({ id: level, label: level }))} onChange={(id) => onPreferencesChange({ ...preferences, reasoning: id })} onOpenChange={() => setOpenMenu(openMenu === "reasoning" ? undefined : "reasoning")} open={openMenu === "reasoning"} value={preferences.reasoning} />
+          <ContextUsage model={selectedModel} messages={messages} usage={usage} />
+          {isRunning ? (
+            <>
+              <Button
+                aria-label={messages.queueFollowUp}
+                className={cn("size-8 rounded-full", text.trim() ? "bg-foreground text-background hover:bg-foreground/90" : "")}
+                disabled={disabled || inputDisabled || !text.trim()}
+                size="icon-sm"
+                type="submit"
+                variant={text.trim() ? "default" : "ghost"}
+              >
+                <SendIcon className="size-4" />
+              </Button>
+              <Button aria-label={messages.cancel} className="size-8 rounded-full" onClick={onStop} size="icon-sm" type="button" variant="ghost"><SquareIcon className="size-3.5 fill-current" /></Button>
+            </>
+          ) : <Button aria-label={messages.send} className={cn("size-8 rounded-full", text.trim() || files.length > 0 ? "bg-foreground text-background hover:bg-foreground/90" : "")} disabled={disabled || inputDisabled} size="icon-sm" type="submit" variant={text.trim() || files.length > 0 ? "default" : "ghost"}><SendIcon className="size-4" /></Button>}
+        </span>
+      </div>
+    </form>
   );
 }
 
-function ComposerAttachments({ messages }: { readonly messages: AgentMessages }) {
-  const attachments = usePromptInputAttachments();
+function MenuSelect({ label, options, onChange, onOpenChange, open, value }: { readonly label: string; readonly options: readonly { readonly id: string; readonly label: string }[]; readonly onChange: (value: string) => void; readonly onOpenChange: () => void; readonly open: boolean; readonly value: string }) {
+  const selected = options.find((option) => option.id === value) ?? options[0];
   return (
-    <div className="flex max-w-full flex-wrap gap-1.5">
-      {attachments.files.map((file) => (
-        <span className="inline-flex max-w-52 items-center gap-1.5 rounded-md border bg-background px-2 py-1 text-xs" key={file.id}>
-          <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{file.filename ?? messages.attachment}</span>
-          <button
-            aria-label={`${messages.removeAttachment}: ${file.filename ?? messages.attachment}`}
-            className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={() => attachments.remove(file.id)}
-            type="button"
-          >
-            <XIcon className="size-3" />
-          </button>
-        </span>
-      ))}
+    <div className="relative">
+      <Button aria-label={label} className="h-8 max-w-32 gap-1 rounded-full px-2 text-xs" onClick={onOpenChange} size="sm" type="button" variant="ghost"><span className="max-w-24 truncate">{selected?.label ?? value}</span><ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" /></Button>
+      {open ? <div className="absolute bottom-[calc(100%+0.5rem)] right-0 z-50 min-w-40 overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-xl">{options.map((option) => <button className={cn("flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-accent", option.id === value && "bg-accent")} key={option.id} onClick={() => { onChange(option.id); onOpenChange(); }} type="button"><span className="truncate">{option.label}</span>{option.id === value ? <CheckIcon className="size-3.5" /> : null}</button>)}</div> : null}
     </div>
   );
 }
 
-function ModelSelect({
-  label,
-  messages,
-  models,
-  onChange,
-  value,
-}: {
-  readonly label: string;
-  readonly messages: AgentMessages;
-  readonly models: readonly AgentModelOption[];
-  readonly onChange: (id: string) => void;
-  readonly value: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = models.find((option) => option.id === value) ?? models[0];
-  return (
-    <ModelSelector onOpenChange={setOpen} open={open}>
-      <ModelSelectorTrigger asChild>
-        <Button aria-label={label} className="h-8 max-w-36 gap-1 px-1.5 text-xs" type="button" variant="ghost">
-          <span className="hidden truncate sm:inline">{selected.label}</span>
-          <span className="truncate sm:hidden">{compactModelLabel(selected.label)}</span>
-          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        </Button>
-      </ModelSelectorTrigger>
-      <ModelSelectorContent className="max-w-[calc(100%-2rem)] sm:max-w-md" title={label}>
-        <ModelSelectorInput placeholder={messages.searchModels} />
-        <ModelSelectorList>
-          <ModelSelectorEmpty>{messages.noModels}</ModelSelectorEmpty>
-          <ModelSelectorGroup heading={label}>
-            {models.map((option) => (
-              <ModelSelectorItem
-                key={option.id}
-                onSelect={() => {
-                  onChange(option.id);
-                  setOpen(false);
-                }}
-                value={`${option.label} ${option.id}`}
-              >
-                <ModelSelectorName>{option.label}</ModelSelectorName>
-                {option.id === selected.id ? <CheckIcon className="size-4" /> : null}
-              </ModelSelectorItem>
-            ))}
-          </ModelSelectorGroup>
-        </ModelSelectorList>
-      </ModelSelectorContent>
-    </ModelSelector>
-  );
+function ContextUsage({ model, messages, usage }: { readonly model?: AgentModelOption; readonly messages: AgentMessages; readonly usage: AgentUsageSummary }) {
+  const ratio = model ? Math.min(100, Math.round((usage.contextInputTokens / model.contextWindowTokens) * 100)) : 0;
+  return <span className="hidden items-center gap-1 px-2 text-xs text-muted-foreground sm:flex" title={`${messages.contextWindow}: ${formatTokenCount(usage.contextInputTokens)} / ${formatTokenCount(model?.contextWindowTokens ?? 0)}`}><span className="h-1.5 w-12 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full bg-foreground/60" style={{ width: `${ratio}%` }} /></span><span className="tabular-nums">{formatTokenCount(usage.contextInputTokens)}</span></span>;
 }
 
-function ContextUsage({
-  messages,
-  models,
-  modelId,
-  usage,
-}: {
-  readonly messages: AgentMessages;
-  readonly models: readonly AgentModelOption[];
-  readonly modelId: string;
-  readonly usage: AgentUsageSummary;
-}) {
-  const model = models.find((option) => option.id === modelId) ?? models[0];
-  const languageUsage: LanguageModelUsage = {
-    inputTokens: usage.inputTokens,
-    inputTokenDetails: {
-      cacheReadTokens: usage.cacheReadTokens,
-      cacheWriteTokens: usage.cacheWriteTokens,
-      noCacheTokens: Math.max(0, usage.inputTokens - usage.cacheReadTokens),
-    },
-    outputTokens: usage.outputTokens,
-    outputTokenDetails: { reasoningTokens: undefined, textTokens: usage.outputTokens },
-    totalTokens: usage.inputTokens + usage.outputTokens,
-  };
-  return (
-    <Context maxTokens={model.contextWindowTokens} modelId={modelId} usedTokens={usage.contextInputTokens} usage={languageUsage}>
-      <ContextTrigger aria-label={messages.context} className="h-8 gap-1 px-1.5" />
-      <ContextContent align="end" side="top">
-        <ContextContentHeader />
-        <ContextContentBody className="space-y-2">
-          {usage.isEstimated ? <p className="text-xs text-muted-foreground">{messages.liveEstimate}</p> : null}
-          <UsageRow label={messages.inputTokens} value={usage.inputTokens} />
-          <UsageRow label={messages.outputTokens} value={usage.outputTokens} />
-          <UsageRow label={messages.cacheReadTokens} value={usage.cacheReadTokens} />
-          <UsageRow label={messages.cacheWriteTokens} value={usage.cacheWriteTokens} />
-          {usage.costUsd > 0 ? <div className="flex justify-between gap-4 border-t pt-2 text-xs"><span className="text-muted-foreground">{messages.estimatedCost}</span><span>${usage.costUsd.toFixed(4)}</span></div> : null}
-        </ContextContentBody>
-      </ContextContent>
-    </Context>
-  );
+function executionLabel(messages: AgentMessages, mode: AgentExecutionMode): string {
+  if (mode === "automation") return messages.executionAutomation;
+  if (mode === "cautious") return messages.executionCautious;
+  return messages.executionStandard;
 }
 
-function UsageRow({ label, value }: { readonly label: string; readonly value: number }) {
-  return <div className="flex justify-between gap-4 text-xs"><span className="text-muted-foreground">{label}</span><span className="font-mono">{formatTokenCount(value)}</span></div>;
-}
-
-function ReasoningSelect({ label, onChange, reasoningLevels, value }: { readonly label: string; readonly onChange: (level: string) => void; readonly reasoningLevels: readonly string[]; readonly value: string }) {
-  return (
-    <PromptInputSelect onValueChange={(next) => { if (reasoningLevels.includes(next)) onChange(next); }} value={value}>
-      <PromptInputSelectTrigger aria-label={label} className="h-8 max-w-24 px-1.5 text-xs">
-        <PromptInputSelectValue>{value}</PromptInputSelectValue>
-      </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="start" position="popper" side="top">
-        {reasoningLevels.map((level) => (
-          <PromptInputSelectItem key={level} value={level}>{level}</PromptInputSelectItem>
-        ))}
-      </PromptInputSelectContent>
-    </PromptInputSelect>
-  );
-}
-
-function ExecutionModeSelect({ label, onChange, value }: { readonly label: string; readonly onChange: (mode: AgentExecutionMode) => void; readonly value: AgentExecutionMode }) {
-  const labels: Record<AgentExecutionMode, string> = {
-    automation: "Auto",
-    cautious: "Review",
-    standard: "Standard",
-  };
-  return (
-    <PromptInputSelect onValueChange={(next) => {
-      if (next === "automation" || next === "cautious" || next === "standard") onChange(next);
-    }} value={value}>
-      <PromptInputSelectTrigger aria-label={label} className="h-8 w-8 gap-0 px-0 text-xs sm:w-auto sm:max-w-28 sm:gap-1 sm:px-1.5">
-        <PromptInputSelectValue>
-          <ShieldCheckIcon className="size-3.5" />
-          <span className="hidden sm:inline">{labels[value]}</span>
-        </PromptInputSelectValue>
-      </PromptInputSelectTrigger>
-      <PromptInputSelectContent align="start" position="popper" side="top">
-        <PromptInputSelectItem value="standard">Standard</PromptInputSelectItem>
-        <PromptInputSelectItem value="cautious">Review</PromptInputSelectItem>
-        <PromptInputSelectItem value="automation">Auto</PromptInputSelectItem>
-      </PromptInputSelectContent>
-    </PromptInputSelect>
-  );
-}
-
-function compactModelLabel(label: string): string {
-  return label.replace(/^GPT-/iu, "").replace(/^OpenAI\s+/iu, "");
+export function formatUsage(usage: LanguageModelUsage | undefined): string {
+  if (!usage) return "";
+  return [usage.inputTokens, usage.outputTokens].filter((value): value is number => typeof value === "number").map(formatTokenCount).join(" / ");
 }
