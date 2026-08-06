@@ -2,7 +2,7 @@ import { type AgentThreadStorage } from "./thread-storage.js";
 export type HttpAgentThreadStorageOptions = {
     readonly endpoint?: string;
     readonly fetch?: typeof globalThis.fetch;
-    readonly getAccessToken: () => string | Promise<string>;
+    readonly getAccessToken?: () => string | Promise<string>;
 };
 export declare class AgentThreadStorageConflictError extends Error {
     readonly currentRevision?: number;

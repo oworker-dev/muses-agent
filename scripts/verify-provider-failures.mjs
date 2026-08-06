@@ -14,7 +14,7 @@ try {
   children.push(spawnLogged("provider", process.execPath, [resolve("scripts/mock-openai-responses.mjs")], {
     ...process.env,
     MOCK_OPENAI_PORT: String(providerPort),
-    MOCK_PROVIDER_STALL_MS: "2500",
+    MOCK_PROVIDER_STALL_MS: "5000",
   }));
   await waitFor(`${providerUrl}/v1/models`);
 
@@ -29,7 +29,7 @@ try {
     AGENT_HOST_JWT_SECRET: "",
     AGENT_HOST_TOOLS_SECRET: "",
     AGENT_HOST_TOOLS_URL: "",
-    AGENT_PROVIDER_HTTP_TIMEOUT_MS: "1000",
+    AGENT_PROVIDER_HTTP_TIMEOUT_MS: "3000",
     AGENT_SANDBOX_BACKEND: "docker",
     NODE_ENV: "development",
     OPENAI_API_KEY: "mock-provider-key",
@@ -50,34 +50,35 @@ try {
     "PROVIDER_408_RECOVER. Do not use tools. Reply exactly: REQUEST_TIMEOUT_RECOVERED");
   assert(messageText(requestTimeout) === "REQUEST_TIMEOUT_RECOVERED", "408 recovery returned the wrong result.");
 
-  const stalledSession = createSession(eveUrl);
-  const stalled = await consume(stalledSession, "PROVIDER_STALL_ONCE. Reply exactly: STALE");
-  assertRecoverableFailure(stalled, "provider timeout");
-  const resumedAfterStall = await consume(
-    stalledSession,
-    "Continue the same task. Reply exactly: TIMEOUT_RECOVERED",
-  );
-  assertCompleted(resumedAfterStall, "timeout continuation");
-  assert(messageText(resumedAfterStall) === "TIMEOUT_RECOVERED", "Timeout continuation returned the wrong result.");
+  const timeoutRecovered = await completedTurn(eveUrl,
+    "PROVIDER_STALL_ONCE. Reply exactly: TIMEOUT_RECOVERED");
+  assert(completedMessageText(timeoutRecovered) === "TIMEOUT_RECOVERED",
+    "The transient Provider timeout did not recover automatically.");
 
-  const interruptedSession = createSession(eveUrl);
-  const interrupted = await consume(
-    interruptedSession,
-    "PROVIDER_STREAM_INTERRUPT_ONCE. Reply exactly: STALE",
-  );
-  assertRecoverableFailure(interrupted, "stream interruption");
+  const interrupted = await completedTurn(eveUrl,
+    "PROVIDER_STREAM_INTERRUPT_ONCE. Reply exactly: STREAM_RECOVERED");
   assert(
     interrupted.some((event) =>
       event.type === "message.appended" && event.data.messageDelta.includes("PARTIAL_BEFORE_INTERRUPT")
     ),
     "The interrupted stream did not expose its partial output for diagnosis.",
   );
-  const resumedAfterInterrupt = await consume(
-    interruptedSession,
-    "Continue without repeating completed side effects. Reply exactly: STREAM_RECOVERED",
+  assert(completedMessageText(interrupted) === "STREAM_RECOVERED",
+    "The pre-tool stream interruption did not recover automatically.");
+
+  const exhaustedSession = createSession(eveUrl);
+  const exhausted = await consume(
+    exhaustedSession,
+    "PROVIDER_STALL_THREE. Reply exactly: STALE",
   );
-  assertCompleted(resumedAfterInterrupt, "stream continuation");
-  assert(messageText(resumedAfterInterrupt) === "STREAM_RECOVERED", "Stream continuation returned the wrong result.");
+  assertRecoverableFailure(exhausted, "exhausted provider timeout");
+  const resumedAfterExhaustion = await consume(
+    exhaustedSession,
+    "Continue the same task. Reply exactly: EXHAUSTED_TIMEOUT_RECOVERED",
+  );
+  assertCompleted(resumedAfterExhaustion, "exhausted timeout continuation");
+  assert(completedMessageText(resumedAfterExhaustion) === "EXHAUSTED_TIMEOUT_RECOVERED",
+    "The session did not continue after exhausting the transient retry budget.");
 
   const state = await fetch(`${providerUrl}/debug/state`).then((response) => response.json());
   assert(state.scenarioAttempts.PROVIDER_429_RECOVER === 3,
@@ -86,15 +87,23 @@ try {
     `Expected three 500 attempts, received ${state.scenarioAttempts.PROVIDER_500_RECOVER}.`);
   assert(state.scenarioAttempts.PROVIDER_408_RECOVER === 3,
     `Expected three 408 attempts, received ${state.scenarioAttempts.PROVIDER_408_RECOVER}.`);
+  assert(state.scenarioAttempts.PROVIDER_STALL_ONCE === 2,
+    `Expected two timeout attempts, received ${state.scenarioAttempts.PROVIDER_STALL_ONCE}.`);
+  assert(state.scenarioAttempts.PROVIDER_STREAM_INTERRUPT_ONCE === 2,
+    `Expected two interrupted-stream attempts, received ${state.scenarioAttempts.PROVIDER_STREAM_INTERRUPT_ONCE}.`);
+  assert(state.scenarioAttempts.PROVIDER_STALL_THREE === 3,
+    `Expected the three-attempt timeout budget to be exhausted, received ${state.scenarioAttempts.PROVIDER_STALL_THREE}.`);
 
   console.log(JSON.stringify({
     automaticRecovery: {
       rateLimitAttempts: state.scenarioAttempts.PROVIDER_429_RECOVER,
       requestTimeoutAttempts: state.scenarioAttempts.PROVIDER_408_RECOVER,
       serverErrorAttempts: state.scenarioAttempts.PROVIDER_500_RECOVER,
+      streamInterruptionAttempts: state.scenarioAttempts.PROVIDER_STREAM_INTERRUPT_ONCE,
+      timeoutAttempts: state.scenarioAttempts.PROVIDER_STALL_ONCE,
     },
     ok: true,
-    recoverableFailures: ["provider-timeout", "stream-interruption"],
+    recoverableFailures: ["provider-timeout-retry-budget-exhausted"],
     sameSessionContinuation: true,
   }));
 } catch (error) {
@@ -139,6 +148,12 @@ function messageText(events) {
     .filter((event) => event.type === "message.appended")
     .map((event) => event.data.messageDelta)
     .join("");
+}
+
+function completedMessageText(events) {
+  return events
+    .filter((event) => event.type === "message.completed" && event.data.finishReason !== "tool-calls")
+    .at(-1)?.data.message;
 }
 
 function spawnLogged(name, command, args, environment) {

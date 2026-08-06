@@ -15,9 +15,12 @@ export class EveOwnedProviderAttemptError extends Error {
 }
 
 export class ProviderStreamInterruptedError extends Error {
-  constructor() {
+  readonly isRetryable?: boolean;
+
+  constructor(options: { readonly retryable?: boolean } = {}) {
     super("The model Provider stream ended before completion.");
     this.name = "ProviderStreamInterruptedError";
+    if (options.retryable === true) this.isRetryable = true;
   }
 }
 
@@ -72,8 +75,29 @@ function providerRetryable(
     const explicit = Reflect.get(error, "isRetryable");
     if (typeof explicit === "boolean") return explicit;
   }
+  if (isTransientNetworkError(error)) return true;
   if (statusCode === undefined) return undefined;
   return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+}
+
+const TRANSIENT_NETWORK_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EAI_AGAIN",
+  "ENOTFOUND",
+  "EPIPE",
+  "ETIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
+function isTransientNetworkError(error: unknown): boolean {
+  if (error instanceof Error && (error.name === "TimeoutError" || error instanceof TypeError)) {
+    return true;
+  }
+  if (!error || typeof error !== "object") return false;
+  const code = Reflect.get(error, "code");
+  return typeof code === "string" && TRANSIENT_NETWORK_CODES.has(code);
 }
 
 function isAbortError(error: unknown): boolean {
@@ -83,6 +107,7 @@ function isAbortError(error: unknown): boolean {
 export function preventReplayAfterStreamStarts<T>(stream: ReadableStream<T>): ReadableStream<T> {
   const reader = stream.getReader();
   let receivedProviderOutput = false;
+  let crossedToolBoundary = false;
   return new ReadableStream<T>({
     async pull(controller) {
       try {
@@ -93,17 +118,25 @@ export function preventReplayAfterStreamStarts<T>(stream: ReadableStream<T>): Re
         }
         const part = result.value;
         if (receivedProviderOutput && isStreamErrorPart(part)) {
-          controller.enqueue({ ...part, error: new ProviderStreamInterruptedError() });
+          controller.enqueue({
+            ...part,
+            error: new ProviderStreamInterruptedError({ retryable: !crossedToolBoundary }),
+          });
           return;
         }
-        if (!isStreamErrorPart(part)) receivedProviderOutput = true;
+        if (!isStreamErrorPart(part)) {
+          receivedProviderOutput = true;
+          if (crossesToolBoundary(part)) crossedToolBoundary = true;
+        }
         controller.enqueue(part);
       } catch (error) {
         if (isAbortError(error) || !receivedProviderOutput) {
           controller.error(error);
           return;
         }
-        controller.error(new ProviderStreamInterruptedError());
+        controller.error(
+          new ProviderStreamInterruptedError({ retryable: !crossedToolBoundary }),
+        );
       }
     },
     cancel(reason) {
@@ -114,4 +147,10 @@ export function preventReplayAfterStreamStarts<T>(stream: ReadableStream<T>): Re
 
 function isStreamErrorPart(value: unknown): value is { readonly type: "error"; readonly error: unknown } {
   return typeof value === "object" && value !== null && "type" in value && value.type === "error";
+}
+
+function crossesToolBoundary(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !("type" in value)) return true;
+  const type = Reflect.get(value, "type");
+  return typeof type !== "string" || type.startsWith("tool-") || type === "raw";
 }

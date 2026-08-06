@@ -10,6 +10,7 @@ export type { AgentInputResponse } from "./agent-message.js";
 export type {
   AgentExtensionInfo,
   AgentThread,
+  AgentPendingTurn,
   AgentThreadPatch,
   AgentThreadPreferences,
   AgentModelOption,
@@ -27,7 +28,9 @@ export {
 } from "./prompt-menu.js";
 export {
   AGENT_THREAD_STORAGE_VERSION,
+  appendThreadEvent,
   browserThreadStorage,
+  compactThreadEvents,
   createAgentThread,
   parseThreadCollection,
 } from "./thread-storage.js";

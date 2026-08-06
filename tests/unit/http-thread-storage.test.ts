@@ -48,6 +48,22 @@ test("surfaces a conflict instead of overwriting another client", async () => {
   );
 });
 
+test("supports same-origin cookie authentication without an authorization header", async () => {
+  let authorization: string | null = "unexpected";
+  const storage = createHttpAgentThreadStorage({
+    fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("authorization");
+      return Response.json({
+        collection: { threads: [], version: AGENT_THREAD_STORAGE_VERSION },
+        revision: 0,
+      });
+    }) as typeof fetch,
+  });
+
+  await storage.load("standalone");
+  assert.equal(authorization, null);
+});
+
 function fakeThreadServer() {
   let revision = 0;
   let collection = { threads: [], version: AGENT_THREAD_STORAGE_VERSION } as const;

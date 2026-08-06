@@ -5,6 +5,7 @@ export type AgentUsageSummary = {
     readonly contextInputTokens: number;
     readonly costUsd: number;
     readonly inputTokens: number;
+    readonly isEstimated: boolean;
     readonly outputTokens: number;
     readonly steps: number;
 };

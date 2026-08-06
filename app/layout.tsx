@@ -20,8 +20,8 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "open-agent",
-  description: "A Next.js starter for eve agents with AI Elements.",
+  title: "Open Agent",
+  description: "A host-neutral, web-native autonomous Agent workspace.",
 };
 
 export default function RootLayout({ children }: { readonly children: ReactNode }) {

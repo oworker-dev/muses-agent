@@ -1,4 +1,4 @@
-const DEFAULT_PROVIDER_HTTP_TIMEOUT_MS = 120_000;
+const DEFAULT_PROVIDER_HTTP_TIMEOUT_MS = 600_000;
 
 export function readProviderHttpTimeoutMs(
   environment: Readonly<Record<string, string | undefined>> = process.env,

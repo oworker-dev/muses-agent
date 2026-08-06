@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 import { withEve } from "eve/next";
+import { configureEveNextProductionPort } from "./scripts/production-preview-topology.mjs";
+
+configureEveNextProductionPort();
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: allowedDevelopmentOrigins(),

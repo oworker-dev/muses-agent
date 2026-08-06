@@ -93,7 +93,8 @@ RUN_AGENT_LIVE_E2E=1 npm run test:e2e -- --grep "real conversation"
 `verify:provider-failures` boots a real Eve runtime against a fault-injecting
 OpenAI Responses-compatible server. It proves that HTTP 408, 429, and 5xx
 responses are retried only by Eve and recover on the third Provider request;
-the AI SDK does not multiply those attempts with its own retry loop. It also
+recognized network disconnects and timeouts use the same Eve-owned retry
+budget, and the AI SDK does not multiply those attempts with its own retry loop. It also
 proves that a hung request and a stream interrupted after Provider output emit
 `step.failed` and `turn.failed`, park at `session.waiting`, and accept a
 successful follow-up in the same durable session without `session.failed`.
@@ -169,6 +170,12 @@ AGENT_EMBED_ALLOWED_ORIGINS=https://muses.example.com \
 EVE_NEXT_PRODUCTION_PORT=4275 npm run build
 ```
 
+`npm run build:eve` always compiles `@workflow/world-postgres` into the Eve
+artifact. `start:preview` and `doctor:production` reject an artifact whose
+compiled manifest falls back to the local disk World; setting only the runtime
+environment is too late. Use `npm run build:eve:local` only for an explicit
+local-disk development build.
+
 This Docker topology is for a trusted single-tenant operator or staging
 baseline. Eve 0.27.8 does not expose Docker CPU, memory, PID, Linux capability,
 or non-root controls through its backend. `doctor:production` therefore rejects
@@ -230,14 +237,25 @@ the durable event log, because upstream SDK exception messages may contain the
 request body and would otherwise leak through OpenTelemetry exception stacks.
 
 Every direct Provider HTTP/SSE request has a hard deadline configured by
-`AGENT_PROVIDER_HTTP_TIMEOUT_MS` (120 seconds by default). Eve is the only
+`AGENT_PROVIDER_HTTP_TIMEOUT_MS` (10 minutes by default). Eve is the only
 automatic retry authority: transient 408, 429, and 5xx failures receive Eve's
-bounded three-attempt policy. A request that reaches the hard deadline, or a
-stream that breaks after Provider output begins, ends the current turn as a
-recoverable failure and preserves its continuation token. The client must ask
-the user to continue or retry explicitly; the runtime does not automatically
-replay a possibly completed tool or external side effect. Caller cancellation
-remains distinct and propagates as Eve's normal cancellation flow.
+bounded three-attempt policy. A stream interruption may also be retried after
+text or reasoning output, because no external action has occurred. Once the
+Provider stream reaches a tool-input, tool-call, tool-result, or opaque raw
+boundary, an interruption ends the current turn as a recoverable failure and
+preserves its continuation token; replaying that step could duplicate an
+external side effect. Caller cancellation remains distinct and propagates as
+Eve's normal cancellation flow.
+
+The Web client treats descendant `input.requested` events as part of the owning
+root task even though Eve preserves the child turn id. A parent may therefore
+emit `turn.completed` and `session.waiting` while a child remains parked for
+approval; the execution stays expanded, ordinary Composer input is disabled,
+and the proxied approval remains actionable. A later root `turn.started`
+clears that waiting state. For stale browser streams, the client performs a
+bounded read-only durable-tail probe after a no-progress interval. It switches
+to recovery only when the server has events the live connection missed, so a
+slow Provider is not misreported as a reconnect.
 
 `AGENT_MODEL_MAX_OUTPUT_TOKENS` (4096 by default) bounds one Provider request.
 It prevents compatible gateways from reserving an unnecessarily large output

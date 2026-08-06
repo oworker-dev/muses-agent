@@ -1,7 +1,8 @@
 import type { AgentThread } from "./contracts.js";
 import type { AgentLocale, AgentMessages } from "./i18n.js";
-export declare function AgentSidebar({ activeThreadId, deletingThreadIds, hostFooter, locale, messages, onClose, onDelete, onNew, onRename, onSelect, onSettings, open, threads, }: {
+export declare function AgentSidebar({ activeThreadId, brand, deletingThreadIds, hostFooter, locale, messages, onClose, onDelete, onNew, onRename, onSelect, onSettings, open, threads, }: {
     readonly activeThreadId: string | undefined;
+    readonly brand: string;
     readonly deletingThreadIds: ReadonlySet<string>;
     readonly hostFooter?: React.ReactNode;
     readonly locale: AgentLocale;

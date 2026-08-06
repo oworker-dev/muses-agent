@@ -62,6 +62,18 @@ function injectFailure(response, body) {
     return false;
   }
 
+  if (raw.includes("PROVIDER_STALL_THREE")) {
+    const attempt = recordScenarioAttempt("PROVIDER_STALL_THREE");
+    if (attempt <= 3) {
+      const delayMs = Number(process.env.MOCK_PROVIDER_STALL_MS || 2_500);
+      setTimeout(() => {
+        if (!response.destroyed) sendJson(response, responseResult({ kind: "text", text: "STALE" }));
+      }, delayMs);
+      return true;
+    }
+    return false;
+  }
+
   if (raw.includes("PROVIDER_STREAM_INTERRUPT_ONCE")) {
     const attempt = recordScenarioAttempt("PROVIDER_STREAM_INTERRUPT_ONCE");
     if (attempt === 1) {

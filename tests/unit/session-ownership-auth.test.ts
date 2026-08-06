@@ -7,6 +7,8 @@ import {
   publicationOwnerFromAuth,
   withSessionOwnership,
 } from "../../agent/lib/session-ownership-auth.ts";
+import { standaloneCookieAuth } from "../../agent/lib/standalone-auth.ts";
+import { authenticateStandaloneRequest } from "../../server/http/standalone-request-auth.ts";
 import type {
   AgentSessionOwner,
   AgentSessionOwnershipResult,
@@ -89,6 +91,49 @@ test("allows a synthetic publication owner only for local development", () => {
   assert.throws(
     () => publicationOwnerFromAuth(localAuth, { NODE_ENV: "production" }),
     /tenant-scoped/,
+  );
+});
+
+test("claims standalone sessions and rejects a different browser credential", async () => {
+  const first = authenticateStandaloneRequest(new Request("https://agent.test/"));
+  const second = authenticateStandaloneRequest(new Request("https://agent.test/"));
+  const firstCookie = first.setCookie?.split(";", 1)[0] ?? "";
+  const secondCookie = second.setCookie?.split(";", 1)[0] ?? "";
+  const claimed = new Map<string, AgentSessionOwner>();
+  const store: AgentSessionOwnershipStore = {
+    async claim(sessionId, currentOwner) {
+      claimed.set(sessionId, currentOwner);
+    },
+    async verify(sessionId, currentOwner) {
+      const existing = claimed.get(sessionId);
+      if (!existing) return "missing";
+      return existing.tenantId === currentOwner.tenantId &&
+        existing.principalId === currentOwner.principalId
+        ? "owned"
+        : "forbidden";
+    },
+    async waitForOwnership(sessionId, currentOwner) {
+      return this.verify(sessionId, currentOwner);
+    },
+  };
+  await store.claim("session-standalone", first.identity);
+  const auth = withSessionOwnership(standaloneCookieAuth(), store);
+
+  const sameBrowser = await auth(new Request(
+    "https://agent.test/eve/v1/session/session-standalone/stream",
+    { headers: { cookie: firstCookie } },
+  ));
+  assert.equal(sameBrowser?.principalId, first.identity.principalId);
+
+  await assert.rejects(
+    async () => await auth(new Request(
+      "https://agent.test/eve/v1/session/session-standalone/stream",
+      { headers: { cookie: secondCookie } },
+    )),
+    (error: unknown) =>
+      error instanceof Error &&
+      "response" in error &&
+      (error.response as Response).status === 403,
   );
 });
 

@@ -19,6 +19,7 @@ import type { AgentRunPolicy } from "../../contracts/agent-run";
 import { createPostgresSessionOwnershipStoreFromEnvironment } from "../../server/data/session-ownership-store";
 import { createPostgresAgentExtensionStoreFromEnvironment } from "../../server/data/agent-extension-store";
 import { hostJwtAuthFromEnvironment } from "../lib/host-auth";
+import { standaloneCookieAuth } from "../lib/standalone-auth";
 import { withSessionOwnership } from "../lib/session-ownership-auth";
 import { parseAgentRunPolicy } from "../lib/run-policy";
 import { parseRemoteTraceParent } from "../lib/observability";
@@ -144,6 +145,14 @@ export default eveChannel({
       : withAgentPreferences(hostJwtAuthFromEnvironment()),
     // Lets the eve TUI and your Vercel deployments reach the deployed agent.
     withAgentPreferences(vercelOidc()),
+    // Standalone Web sessions use an opaque browser credential issued by the
+    // standalone thread API. This path is host-neutral and has no Muses logic.
+    sessionOwnershipStore
+      ? withSessionOwnership(
+          withAgentPreferences(standaloneCookieAuth()),
+          sessionOwnershipStore,
+        )
+      : withAgentPreferences(standaloneCookieAuth()),
     // Open on localhost for `eve dev` and the REPL; ignored in production.
     withAgentPreferences(localDev()),
   ],

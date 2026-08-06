@@ -1,5 +1,5 @@
 import type { HandleMessageStreamEvent, SessionState } from "eve/client";
-import type { AgentThread, AgentThreadPreferences, AgentThreadStatus } from "./contracts.js";
+import type { AgentPendingTurn, AgentThread, AgentThreadPreferences, AgentThreadStatus } from "./contracts.js";
 
 export const AGENT_THREAD_STORAGE_VERSION = 1;
 const EMPTY_SESSION: SessionState = { streamIndex: 0 };
@@ -116,13 +116,20 @@ function parseThread(value: unknown): AgentThread | undefined {
   const preferences = isRecord(value.preferences) ? value.preferences : {};
   const session = isRecord(value.session) ? value.session : {};
   const status = isThreadStatus(value.status) ? value.status : "ready";
+  const pendingTurn = parsePendingTurn(value.pendingTurn);
+  const rawEvents = Array.isArray(value.events)
+    ? (value.events as readonly HandleMessageStreamEvent[])
+    : [];
+  const storedStreamIndex =
+    typeof session.streamIndex === "number" && session.streamIndex >= 0
+      ? session.streamIndex
+      : 0;
 
   return {
     createdAt,
-    events: Array.isArray(value.events)
-      ? (value.events as readonly HandleMessageStreamEvent[])
-      : [],
+    events: compactThreadEvents(rawEvents),
     id: value.id,
+    ...(pendingTurn ? { pendingTurn } : {}),
     preferences: {
       executionMode: isExecutionMode(preferences.executionMode)
         ? preferences.executionMode
@@ -134,15 +141,91 @@ function parseThread(value: unknown): AgentThread | undefined {
       continuationToken:
         typeof session.continuationToken === "string" ? session.continuationToken : undefined,
       sessionId: typeof session.sessionId === "string" ? session.sessionId : undefined,
-      streamIndex:
-        typeof session.streamIndex === "number" && session.streamIndex >= 0
-          ? session.streamIndex
-          : 0,
+      streamIndex: Math.max(storedStreamIndex, rawEvents.length),
     },
     status,
     title: value.title,
     updatedAt,
   };
+}
+
+function parsePendingTurn(value: unknown): AgentPendingTurn | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.id !== "string" || !value.id ||
+    typeof value.text !== "string" || !value.text.trim() ||
+    typeof value.submittedAt !== "number" || !Number.isFinite(value.submittedAt) ||
+    (value.state !== "submitting" && value.state !== "delivery-failed")
+  ) {
+    return undefined;
+  }
+  return {
+    id: value.id,
+    state: value.state,
+    submittedAt: value.submittedAt,
+    text: value.text,
+  };
+}
+
+export function appendThreadEvent(
+  events: readonly HandleMessageStreamEvent[],
+  event: HandleMessageStreamEvent,
+): readonly HandleMessageStreamEvent[] {
+  if (event.type === "message.appended" || event.type === "reasoning.appended") {
+    const last = events.at(-1);
+    return last?.type === event.type &&
+      last.data.turnId === event.data.turnId &&
+      last.data.stepIndex === event.data.stepIndex
+      ? [...events.slice(0, -1), event]
+      : [...events, event];
+  }
+  if (event.type === "message.completed" || event.type === "reasoning.completed") {
+    const incrementalType = event.type === "message.completed"
+      ? "message.appended"
+      : "reasoning.appended";
+    const last = events.at(-1);
+    return last?.type === incrementalType &&
+      last.data.turnId === event.data.turnId &&
+      last.data.stepIndex === event.data.stepIndex
+      ? [...events.slice(0, -1), event]
+      : [...events, event];
+  }
+  return [...events, event];
+}
+
+export function compactThreadEvents(
+  events: readonly HandleMessageStreamEvent[],
+): readonly HandleMessageStreamEvent[] {
+  const compacted: HandleMessageStreamEvent[] = [];
+  for (const event of events) {
+    if (event.type === "message.appended" || event.type === "reasoning.appended") {
+      const last = compacted.at(-1);
+      if (
+        last?.type === event.type &&
+        last.data.turnId === event.data.turnId &&
+        last.data.stepIndex === event.data.stepIndex
+      ) {
+        compacted[compacted.length - 1] = event;
+        continue;
+      }
+    }
+    if (event.type === "message.completed" || event.type === "reasoning.completed") {
+      const incrementalType = event.type === "message.completed"
+        ? "message.appended"
+        : "reasoning.appended";
+      const last = compacted.at(-1);
+      if (
+        last?.type === incrementalType &&
+        last.data.turnId === event.data.turnId &&
+        last.data.stepIndex === event.data.stepIndex
+      ) {
+        compacted[compacted.length - 1] = event;
+        continue;
+      }
+    }
+    compacted.push(event);
+  }
+  return compacted;
 }
 
 function isExecutionMode(value: unknown): value is AgentThreadPreferences["executionMode"] {
@@ -160,7 +243,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isThreadStatus(value: unknown): value is AgentThreadStatus {
-  return value === "error" || value === "ready" || value === "streaming" || value === "submitted";
+  return value === "error" || value === "ready" || value === "streaming" || value === "submitted" || value === "waiting";
 }
 
 function numberOrNow(value: unknown): number {

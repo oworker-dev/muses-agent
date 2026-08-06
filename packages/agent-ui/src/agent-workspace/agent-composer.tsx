@@ -7,7 +7,8 @@ import {
   ChevronDownIcon,
   CommandIcon,
   FileIcon,
-  PaperclipIcon,
+  PlusIcon,
+  ShieldCheckIcon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -74,6 +75,7 @@ import { formatTokenCount } from "./usage.js";
 export function AgentComposer({
   commands = [],
   disabled = false,
+  inputDisabled = false,
   mentions = [],
   messages,
   models,
@@ -87,6 +89,7 @@ export function AgentComposer({
 }: {
   readonly commands?: readonly AgentPromptMenuItem[];
   readonly disabled?: boolean;
+  readonly inputDisabled?: boolean;
   readonly mentions?: readonly AgentPromptMenuItem[];
   readonly messages: AgentMessages;
   readonly models: readonly AgentModelOption[];
@@ -103,7 +106,7 @@ export function AgentComposer({
 
   return (
     <PromptInput
-      className="relative overflow-visible border-border/80 bg-card/95 shadow-[0_12px_38px_-24px_rgba(0,0,0,0.5)]"
+      className="relative overflow-visible border-border bg-card shadow-[0_12px_36px_-20px_rgba(0,0,0,0.28)]"
       maxFileSize={10 * 1024 * 1024}
       multiple
       onSubmit={(message) => {
@@ -117,18 +120,25 @@ export function AgentComposer({
           <ComposerAttachments messages={messages} />
         </PromptInputHeader>
       ) : null}
-      <ComposerTextarea commands={commands} disabled={disabled} mentions={mentions} messages={messages} />
-      <PromptInputFooter className="min-h-11 flex-wrap gap-1.5 pr-2">
-        <PromptInputTools className="min-w-0 flex-1 flex-wrap gap-0.5">
+      <ComposerTextarea commands={commands} disabled={disabled || inputDisabled} mentions={mentions} messages={messages} />
+      <PromptInputFooter className="min-h-10 gap-1.5 px-2.5 pb-2.5">
+        <PromptInputTools className="min-w-0 flex-1 gap-0.5">
           <PromptInputActionMenu>
             <PromptInputActionMenuTrigger aria-label={messages.addFiles} tooltip={messages.addFiles}>
-              <PaperclipIcon className="size-4" />
+              <PlusIcon className="size-4" />
             </PromptInputActionMenuTrigger>
             <PromptInputActionMenuContent align="start" side="top">
               <PromptInputActionAddAttachments label={messages.addFiles} />
               <PromptInputActionAddScreenshot label={messages.takeScreenshot} />
             </PromptInputActionMenuContent>
           </PromptInputActionMenu>
+          <ExecutionModeSelect
+            label={messages.executionMode}
+            onChange={(nextMode) => onPreferencesChange({ ...preferences, executionMode: nextMode })}
+            value={executionMode}
+          />
+        </PromptInputTools>
+        <div className="ml-auto flex min-w-0 shrink items-center justify-end gap-0.5">
           <ModelSelect
             label={messages.model}
             messages={messages}
@@ -142,13 +152,6 @@ export function AgentComposer({
             reasoningLevels={reasoningLevels}
             value={preferences.reasoning}
           />
-          <ExecutionModeSelect
-            label={messages.executionMode}
-            onChange={(nextMode) => onPreferencesChange({ ...preferences, executionMode: nextMode })}
-            value={executionMode}
-          />
-        </PromptInputTools>
-        <div className="ml-auto flex shrink-0 items-center gap-1">
           <ContextUsage messages={messages} models={models} modelId={preferences.modelId} usage={usage} />
           <PromptInputSubmit
             aria-label={status === "ready" || status === "error" ? messages.send : messages.cancel}
@@ -226,7 +229,7 @@ function ComposerTextarea({
       ) : null}
       <PromptInputTextarea
         aria-label={messages.inputPlaceholder}
-        className="min-h-24 text-[15px] leading-6 sm:min-h-28"
+        className="min-h-14 max-h-40 px-4 py-3 text-[15px] leading-6"
         disabled={disabled}
         onKeyDown={(event) => {
           if (!isOpen) return;
@@ -291,8 +294,9 @@ function ModelSelect({
   return (
     <ModelSelector onOpenChange={setOpen} open={open}>
       <ModelSelectorTrigger asChild>
-        <Button aria-label={label} className="h-8 max-w-44 gap-1.5 px-2 text-xs" type="button" variant="ghost">
-          <span className="truncate">{selected.label}</span>
+        <Button aria-label={label} className="h-8 max-w-36 gap-1 px-1.5 text-xs" type="button" variant="ghost">
+          <span className="hidden truncate sm:inline">{selected.label}</span>
+          <span className="truncate sm:hidden">{compactModelLabel(selected.label)}</span>
           <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </ModelSelectorTrigger>
@@ -350,6 +354,7 @@ function ContextUsage({
       <ContextContent align="end" side="top">
         <ContextContentHeader />
         <ContextContentBody className="space-y-2">
+          {usage.isEstimated ? <p className="text-xs text-muted-foreground">{messages.liveEstimate}</p> : null}
           <UsageRow label={messages.inputTokens} value={usage.inputTokens} />
           <UsageRow label={messages.outputTokens} value={usage.outputTokens} />
           <UsageRow label={messages.cacheReadTokens} value={usage.cacheReadTokens} />
@@ -368,7 +373,7 @@ function UsageRow({ label, value }: { readonly label: string; readonly value: nu
 function ReasoningSelect({ label, onChange, reasoningLevels, value }: { readonly label: string; readonly onChange: (level: string) => void; readonly reasoningLevels: readonly string[]; readonly value: string }) {
   return (
     <PromptInputSelect onValueChange={(next) => { if (reasoningLevels.includes(next)) onChange(next); }} value={value}>
-      <PromptInputSelectTrigger aria-label={label} className="h-8 max-w-28 px-2 text-xs">
+      <PromptInputSelectTrigger aria-label={label} className="h-8 max-w-24 px-1.5 text-xs">
         <PromptInputSelectValue>{value}</PromptInputSelectValue>
       </PromptInputSelectTrigger>
       <PromptInputSelectContent align="start" position="popper" side="top">
@@ -390,8 +395,11 @@ function ExecutionModeSelect({ label, onChange, value }: { readonly label: strin
     <PromptInputSelect onValueChange={(next) => {
       if (next === "automation" || next === "cautious" || next === "standard") onChange(next);
     }} value={value}>
-      <PromptInputSelectTrigger aria-label={label} className="h-8 max-w-24 px-2 text-xs">
-        <PromptInputSelectValue>{labels[value]}</PromptInputSelectValue>
+      <PromptInputSelectTrigger aria-label={label} className="h-8 w-8 gap-0 px-0 text-xs sm:w-auto sm:max-w-28 sm:gap-1 sm:px-1.5">
+        <PromptInputSelectValue>
+          <ShieldCheckIcon className="size-3.5" />
+          <span className="hidden sm:inline">{labels[value]}</span>
+        </PromptInputSelectValue>
       </PromptInputSelectTrigger>
       <PromptInputSelectContent align="start" position="popper" side="top">
         <PromptInputSelectItem value="standard">Standard</PromptInputSelectItem>
@@ -400,4 +408,8 @@ function ExecutionModeSelect({ label, onChange, value }: { readonly label: strin
       </PromptInputSelectContent>
     </PromptInputSelect>
   );
+}
+
+function compactModelLabel(label: string): string {
+  return label.replace(/^GPT-/iu, "").replace(/^OpenAI\s+/iu, "");
 }

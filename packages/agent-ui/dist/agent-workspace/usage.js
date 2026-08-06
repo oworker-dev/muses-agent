@@ -6,27 +6,74 @@ export function summarizeUsage(events) {
     let inputTokens = 0;
     let outputTokens = 0;
     let steps = 0;
-    for (const event of events) {
+    let lastCompletedStepIndex = -1;
+    for (const [eventIndex, event] of events.entries()) {
         if (event.type !== "step.completed" || !event.data.usage)
             continue;
         const usage = event.data.usage;
         cacheReadTokens += usage.cacheReadTokens ?? 0;
         cacheWriteTokens += usage.cacheWriteTokens ?? 0;
-        contextInputTokens = usage.inputTokens ?? contextInputTokens;
+        contextInputTokens = (usage.inputTokens ?? contextInputTokens) + (usage.outputTokens ?? 0);
         costUsd += usage.costUsd ?? 0;
         inputTokens += usage.inputTokens ?? 0;
         outputTokens += usage.outputTokens ?? 0;
         steps += 1;
+        lastCompletedStepIndex = eventIndex;
     }
+    const pending = estimatePendingTokens(events.slice(lastCompletedStepIndex + 1));
+    contextInputTokens += pending.context;
+    outputTokens += pending.output;
     return {
         cacheReadTokens,
         cacheWriteTokens,
         contextInputTokens,
         costUsd,
         inputTokens,
+        isEstimated: pending.context > 0,
         outputTokens,
         steps,
     };
+}
+function estimatePendingTokens(events) {
+    const cumulativeText = new Map();
+    let contextCharacters = 0;
+    for (const event of events) {
+        if (event.type === "message.appended") {
+            cumulativeText.set(`message:${event.data.turnId}:${event.data.stepIndex}`, event.data.messageSoFar);
+        }
+        else if (event.type === "reasoning.appended") {
+            cumulativeText.set(`reasoning:${event.data.turnId}:${event.data.stepIndex}`, event.data.reasoningSoFar);
+        }
+        else if (event.type === "message.completed") {
+            cumulativeText.set(`message:${event.data.turnId}:${event.data.stepIndex}`, event.data.message ?? "");
+        }
+        else if (event.type === "reasoning.completed") {
+            cumulativeText.set(`reasoning:${event.data.turnId}:${event.data.stepIndex}`, event.data.reasoning);
+        }
+        else if (event.type === "message.received") {
+            contextCharacters += event.data.message.length;
+        }
+        else if (event.type === "action.result") {
+            contextCharacters += safeSerializedLength(event.data.result.output);
+        }
+    }
+    let outputCharacters = 0;
+    for (const value of cumulativeText.values())
+        outputCharacters += value.length;
+    return {
+        context: Math.ceil((contextCharacters + outputCharacters) / 4),
+        output: Math.ceil(outputCharacters / 4),
+    };
+}
+function safeSerializedLength(value) {
+    if (typeof value === "string")
+        return value.length;
+    try {
+        return JSON.stringify(value)?.length ?? 0;
+    }
+    catch {
+        return 0;
+    }
 }
 export function formatTokenCount(value) {
     if (value >= 1_000_000)

@@ -7,6 +7,7 @@ export type ToolPart = ToolUIPart | DynamicToolUIPart;
 export type ToolHeaderProps = {
     title?: string;
     className?: string;
+    showStatus?: boolean;
     statusLabel?: string;
 } & ({
     type: ToolUIPart["type"];
@@ -18,7 +19,7 @@ export type ToolHeaderProps = {
     toolName: string;
 });
 export declare const getStatusBadge: (status: ToolPart["state"], label?: string) => import("react/jsx-runtime").JSX.Element;
-export declare const ToolHeader: ({ className, title, type, state, statusLabel, toolName, ...props }: ToolHeaderProps) => import("react/jsx-runtime").JSX.Element;
+export declare const ToolHeader: ({ className, title, type, state, showStatus, statusLabel, toolName, ...props }: ToolHeaderProps) => import("react/jsx-runtime").JSX.Element;
 export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 export declare const ToolContent: ({ className, ...props }: ToolContentProps) => import("react/jsx-runtime").JSX.Element;
 export type ToolInputProps = ComponentProps<"div"> & {

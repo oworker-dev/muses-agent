@@ -7,7 +7,7 @@ import {
 export type HttpAgentThreadStorageOptions = {
   readonly endpoint?: string;
   readonly fetch?: typeof globalThis.fetch;
-  readonly getAccessToken: () => string | Promise<string>;
+  readonly getAccessToken?: () => string | Promise<string>;
 };
 
 export class AgentThreadStorageConflictError extends Error {
@@ -87,14 +87,16 @@ async function request(
   url: string,
   init?: RequestInit,
 ): Promise<Response> {
-  const accessToken = await options.getAccessToken();
-  if (!accessToken.trim()) throw new Error("Agent thread storage access token is empty.");
+  const accessToken = await options.getAccessToken?.();
+  if (accessToken !== undefined && !accessToken.trim()) {
+    throw new Error("Agent thread storage access token is empty.");
+  }
   return await fetchImplementation(url, {
     ...init,
     credentials: "same-origin",
     headers: {
       ...init?.headers,
-      authorization: `Bearer ${accessToken}`,
+      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
     },
   });
 }

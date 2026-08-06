@@ -55,10 +55,17 @@ Eve exposes two different handles:
 next turn only after `session.waiting`. Terminal alternatives are
 `session.completed` and `session.failed`.
 
-The authoritative browser event cursor is the number of persisted server stream
-events. During an active request, Eve's serialized session cursor can lag those
-events. Hard-refresh recovery therefore starts at `savedEvents.length`, consumes
-one reconnecting `session.stream()` flow, and stops at a session boundary.
+The authoritative browser cursor is `session.streamIndex`, the absolute number
+of consumed server events. It is deliberately independent from the UI event
+snapshot: cumulative `message.appended` and `reasoning.appended` deltas are
+compacted to their latest projection so long conversations do not grow
+quadratically in browser storage. During an active request, the workspace
+advances the absolute cursor for every consumed event and persists an accepted
+`sessionId` before replacing an idle browser stream. Recovery uses bounded
+`session.stream({ follow: false })` reads to catch up to each durable tail until
+it observes a session boundary. If a previous browser persisted the absolute
+cursor but missed the final UI event, a tail-relative lookup repairs only that
+missing boundary without replaying the turn or advancing the absolute cursor.
 
 The reference app stores thread data in `localStorage` through the default
 `AgentThreadStorage`. That is a UX cache, not production persistence. Hosts can
@@ -411,6 +418,29 @@ and causes are discarded before the durable error reaches telemetry. Production
 still needs a deployed collector conformance run, billing
 reconciliation, latency and error dashboards, and retention controls. UI
 projections are not an audit log.
+
+The root session stream is the control-plane source of truth for Web HITL.
+Descendant approvals are proxied as `input.requested` with the child turn id;
+the UI associates them with the current root-turn interval by event order,
+rather than requiring parent and child turn ids to match. An unresolved request
+keeps the root task in `waiting` until a later root `turn.started` event. This
+preserves Eve's native pause/resume behavior while preventing a completed parent
+boundary from hiding a blocked child.
+
+Delegated work is projected from Eve's native `subagent.called`,
+`subagent.completed`, and correlated `action.result` events. The parent task
+shows starting, running, failed, and returned-result states with elapsed time,
+and explains that the child shares the current sandbox workspace. It does not
+invent child reasoning or tool progress: those details belong to the child
+session stream identified by `childSessionId`. This makes a quiet parent stream
+understandable without pretending that unavailable child events were observed.
+
+Browser recovery is evidence-driven. A live stream with no new events may mean
+either a slow Provider or a stale transport, so the client periodically probes
+the durable stream tail without changing the visible run state. It enters the
+bounded catch-up path only when the probe finds missing events. Provider retry
+remains owned by Eve; UI elapsed-time messages describe waiting and durability
+without claiming an unobserved retry attempt.
 
 ## Release gates
 

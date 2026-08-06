@@ -2,10 +2,12 @@ export type AgentLocale = "en" | "zh-CN";
 declare const translations: {
     readonly en: {
         readonly addFiles: "Add files";
+        readonly agentWorking: "Agent is working";
         readonly attachment: "Attachment";
         readonly cancel: "Stop";
         readonly cacheReadTokens: "Cache read";
         readonly cacheWriteTokens: "Cache write";
+        readonly catchingUpDurableRun: "Catching up with the durable run";
         readonly closeNavigation: "Close navigation";
         readonly closeSettings: "Close settings";
         readonly context: "Context";
@@ -14,6 +16,7 @@ declare const translations: {
         readonly deleteUnavailable: "This session could not be retired. It was left intact.";
         readonly deletingThread: "Deleting thread";
         readonly dismiss: "Dismiss";
+        readonly elapsed: "Elapsed";
         readonly emptyTitle: "What should we work on?";
         readonly english: "English";
         readonly inputTokens: "Input";
@@ -21,6 +24,7 @@ declare const translations: {
         readonly interfaceLanguage: "Interface language";
         readonly language: "Language";
         readonly loading: "Loading...";
+        readonly liveEstimate: "Updating live; final usage is reconciled by the model Provider.";
         readonly model: "Model";
         readonly mockProvider: "A deterministic test Provider is connected. Real Agent turns are disabled until an administrator configures an LLM Provider.";
         readonly newTask: "New task";
@@ -29,6 +33,8 @@ declare const translations: {
         readonly noModels: "No matching models";
         readonly noPromptItems: "No matching items";
         readonly providerUnconfigured: "No LLM Provider is configured. Add a valid capability-scoped credential before starting Agent turns.";
+        readonly providerTakingLonger: "The model Provider is taking longer than usual";
+        readonly providerStillWaiting: "Still waiting. The run remains active and transient failures retry automatically.";
         readonly openNavigation: "Open navigation";
         readonly outputTokens: "Output";
         readonly reasoning: "Reasoning";
@@ -36,10 +42,12 @@ declare const translations: {
         readonly reconnecting: "Reconnecting to the active run...";
         readonly reload: "Reload";
         readonly recoveryFailed: "Could not reconnect to this run";
+        readonly recoveryConnectionSlow: "The connection is slow; work continues on the server";
         readonly removeAttachment: "Remove attachment";
         readonly requestFailed: "This turn failed";
-        readonly retry: "Continue";
-        readonly retryPrompt: "Continue from the previous request and recover from the failed turn.";
+        readonly requestPreserved: "Your original request is preserved in this task.";
+        readonly retry: "Reconnect";
+        readonly runningTools: "Running tools";
         readonly search: "Search tasks";
         readonly searchPlaceholder: "Search task history";
         readonly searchModels: "Search models";
@@ -47,6 +55,7 @@ declare const translations: {
         readonly settings: "Settings";
         readonly settingsDescription: "Choose how the standalone Agent workspace appears in this browser.";
         readonly simplifiedChinese: "简体中文";
+        readonly startingTask: "Starting task";
         readonly step: "step";
         readonly steps: "steps";
         readonly storageUnavailable: "Changes are not being saved. Reload to restore the latest server state.";
@@ -68,13 +77,17 @@ declare const translations: {
         readonly estimatedCost: "Estimated cost";
         readonly executionMode: "Execution mode";
         readonly usage: "Usage";
+        readonly waitingForModel: "Waiting for model";
+        readonly waitingForApproval: "This task is waiting for your approval above.";
     };
     readonly "zh-CN": {
         readonly addFiles: "添加文件";
+        readonly agentWorking: "Agent 正在执行";
         readonly attachment: "附件";
         readonly cancel: "停止";
         readonly cacheReadTokens: "缓存读取";
         readonly cacheWriteTokens: "缓存写入";
+        readonly catchingUpDurableRun: "正在同步持久化任务进度";
         readonly closeNavigation: "关闭导航栏";
         readonly closeSettings: "关闭设置";
         readonly context: "上下文";
@@ -83,6 +96,7 @@ declare const translations: {
         readonly deleteUnavailable: "当前会话未能安全终止，已保留原状态。";
         readonly deletingThread: "正在删除会话";
         readonly dismiss: "关闭";
+        readonly elapsed: "已运行";
         readonly emptyTitle: "我们要完成什么？";
         readonly english: "English";
         readonly inputTokens: "输入";
@@ -90,6 +104,7 @@ declare const translations: {
         readonly interfaceLanguage: "界面语言";
         readonly language: "语言";
         readonly loading: "正在加载…";
+        readonly liveEstimate: "正在实时估算，最终用量以模型 Provider 返回值为准。";
         readonly model: "模型";
         readonly mockProvider: "当前连接的是确定性测试 Provider。管理员配置真实 LLM Provider 前，Agent 对话已禁用。";
         readonly newTask: "新建任务";
@@ -98,6 +113,8 @@ declare const translations: {
         readonly noModels: "没有匹配的模型";
         readonly noPromptItems: "没有匹配项";
         readonly providerUnconfigured: "尚未配置 LLM Provider。请先添加有效的能力范围凭证，再启动 Agent 任务。";
+        readonly providerTakingLonger: "模型 Provider 的响应时间比平常更长";
+        readonly providerStillWaiting: "仍在等待。任务保持运行，短暂故障会自动重试。";
         readonly openNavigation: "打开导航栏";
         readonly outputTokens: "输出";
         readonly reasoning: "思考强度";
@@ -105,10 +122,12 @@ declare const translations: {
         readonly reconnecting: "正在重新连接当前任务…";
         readonly reload: "重新加载";
         readonly recoveryFailed: "无法重新连接当前任务";
+        readonly recoveryConnectionSlow: "连接较慢，任务仍在服务器上继续执行";
         readonly removeAttachment: "移除附件";
         readonly requestFailed: "本轮执行失败";
-        readonly retry: "继续";
-        readonly retryPrompt: "请从上一次请求继续，并恢复失败的任务。";
+        readonly requestPreserved: "原始请求已保留在当前任务中。";
+        readonly retry: "重新连接";
+        readonly runningTools: "正在运行工具";
         readonly search: "搜索任务";
         readonly searchPlaceholder: "搜索任务历史";
         readonly searchModels: "搜索模型";
@@ -116,6 +135,7 @@ declare const translations: {
         readonly settings: "设置";
         readonly settingsDescription: "选择独立 Agent 工作区在此浏览器中的显示方式。";
         readonly simplifiedChinese: "简体中文";
+        readonly startingTask: "正在启动任务";
         readonly step: "步";
         readonly steps: "步";
         readonly storageUnavailable: "当前更改未能保存，请重新加载以恢复服务器上的最新状态。";
@@ -137,6 +157,8 @@ declare const translations: {
         readonly estimatedCost: "预估费用";
         readonly executionMode: "执行模式";
         readonly usage: "用量";
+        readonly waitingForModel: "正在等待模型";
+        readonly waitingForApproval: "此任务正在等待你批准上方的操作。";
     };
 };
 export type AgentMessages = {

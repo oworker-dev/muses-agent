@@ -30,8 +30,7 @@
 
 :root {
   color-scheme: light;
-  /* Soft neutral page with white elevated surfaces so cards/composer pop. */
-  --background: oklch(0.971 0 0);
+  --background: oklch(1 0 0);
   --foreground: oklch(0.16 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.16 0 0);
@@ -41,9 +40,9 @@
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.94 0 0);
   --secondary-foreground: oklch(0.19 0 0);
-  --muted: oklch(0.94 0 0);
+  --muted: oklch(0.955 0 0);
   --muted-foreground: oklch(0.6 0 0);
-  --accent: oklch(0.94 0 0);
+  --accent: oklch(0.955 0 0);
   --accent-foreground: oklch(0.19 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.916 0 0);

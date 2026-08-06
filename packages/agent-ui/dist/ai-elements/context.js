@@ -26,13 +26,13 @@ export const Context = ({ usedTokens, maxTokens, usage, modelId, ...props }) => 
 const ContextIcon = () => {
     const { usedTokens, maxTokens } = useContextValue();
     const circumference = 2 * Math.PI * ICON_RADIUS;
-    const usedPercent = usedTokens / maxTokens;
+    const usedPercent = Math.min(1, Math.max(0, usedTokens / Math.max(1, maxTokens)));
     const dashOffset = circumference * (1 - usedPercent);
     return (_jsxs("svg", { "aria-label": "Model context usage", height: "20", role: "img", style: { color: "currentcolor" }, viewBox: `0 0 ${ICON_VIEWBOX} ${ICON_VIEWBOX}`, width: "20", children: [_jsx("circle", { cx: ICON_CENTER, cy: ICON_CENTER, fill: "none", opacity: "0.25", r: ICON_RADIUS, stroke: "currentColor", strokeWidth: ICON_STROKE_WIDTH }), _jsx("circle", { cx: ICON_CENTER, cy: ICON_CENTER, fill: "none", opacity: "0.7", r: ICON_RADIUS, stroke: "currentColor", strokeDasharray: `${circumference} ${circumference}`, strokeDashoffset: dashOffset, strokeLinecap: "round", strokeWidth: ICON_STROKE_WIDTH, style: { transform: "rotate(-90deg)", transformOrigin: "center" } })] }));
 };
 export const ContextTrigger = ({ children, ...props }) => {
     const { usedTokens, maxTokens } = useContextValue();
-    const usedPercent = usedTokens / maxTokens;
+    const usedPercent = Math.min(1, Math.max(0, usedTokens / Math.max(1, maxTokens)));
     const renderedPercent = new Intl.NumberFormat("en-US", {
         maximumFractionDigits: 1,
         style: "percent",
@@ -42,7 +42,7 @@ export const ContextTrigger = ({ children, ...props }) => {
 export const ContextContent = ({ className, ...props }) => (_jsx(HoverCardContent, { className: cn("min-w-60 divide-y overflow-hidden p-0", className), ...props }));
 export const ContextContentHeader = ({ children, className, ...props }) => {
     const { usedTokens, maxTokens } = useContextValue();
-    const usedPercent = usedTokens / maxTokens;
+    const usedPercent = Math.min(1, Math.max(0, usedTokens / Math.max(1, maxTokens)));
     const displayPct = new Intl.NumberFormat("en-US", {
         maximumFractionDigits: 1,
         style: "percent",

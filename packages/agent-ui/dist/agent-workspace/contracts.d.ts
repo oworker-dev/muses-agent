@@ -1,12 +1,18 @@
 import type { ClientAuth, ClientRedirectPolicy, HandleMessageStreamEvent, HeadersValue, PrepareSend, SessionState } from "eve/client";
 import type { ReactNode } from "react";
 import type { AgentThreadStorage } from "./thread-storage.js";
-export type AgentThreadStatus = "error" | "ready" | "streaming" | "submitted";
+export type AgentThreadStatus = "error" | "ready" | "streaming" | "submitted" | "waiting";
 export type AgentExecutionMode = "automation" | "cautious" | "standard";
 export type AgentThreadPreferences = {
     readonly executionMode?: AgentExecutionMode;
     readonly modelId: string;
     readonly reasoning: string;
+};
+export type AgentPendingTurn = {
+    readonly id: string;
+    readonly state: "delivery-failed" | "submitting";
+    readonly submittedAt: number;
+    readonly text: string;
 };
 export type AgentModelOption = {
     readonly contextWindowTokens: number;
@@ -35,6 +41,7 @@ export type AgentThread = {
     readonly createdAt: number;
     readonly events: readonly HandleMessageStreamEvent[];
     readonly id: string;
+    readonly pendingTurn?: AgentPendingTurn;
     readonly preferences: AgentThreadPreferences;
     readonly session: SessionState;
     readonly status: AgentThreadStatus;
@@ -60,9 +67,11 @@ export type AgentWorkspaceConfig = {
     readonly defaultPreferences: AgentThreadPreferences;
     readonly extensions?: readonly AgentExtensionInfo[];
     readonly hostSlots?: AgentWorkspaceHostSlots;
+    readonly initialThreadId?: string;
     readonly models: readonly AgentModelOption[];
     readonly mentions?: readonly AgentPromptMenuItem[];
     readonly onEvent?: (event: HandleMessageStreamEvent) => void;
+    readonly onActiveThreadChange?: (threadId: string) => void;
     readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
     readonly onStorageError?: (error: unknown) => void;
     readonly productName: string;

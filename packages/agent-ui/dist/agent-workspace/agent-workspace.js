@@ -1,19 +1,25 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { defaultMessageReducer } from "eve/client";
-import { AlertCircleIcon, LanguagesIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
+import { ClientError, defaultMessageReducer } from "eve/client";
+import { AlertCircleIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
 import { Conversation, ConversationContent } from "../ai-elements/conversation.js";
+import { PromptInputProvider } from "../ai-elements/prompt-input.js";
 import { createAgentSession } from "./agent-client.js";
+import { AgentActivity } from "./agent-activity.js";
+import { AgentComposer } from "./agent-composer.js";
 import { AgentMessage } from "./agent-message.js";
 import { AgentSettingsDialog } from "./agent-settings-dialog.js";
 import { AgentSidebar } from "./agent-sidebar.js";
 import { AgentThreadView } from "./agent-thread.js";
 import { messagesFor, resolveBrowserLocale } from "./i18n.js";
-import { AGENT_THREAD_STORAGE_VERSION, browserThreadStorage, createAgentThread, } from "./thread-storage.js";
+import { AGENT_THREAD_STORAGE_VERSION, browserThreadStorage, appendThreadEvent, compactThreadEvents, createAgentThread, } from "./thread-storage.js";
+import { hasUnresolvedInputRequests, isProxiedInputOnlyMessage, } from "./turn-presentation.js";
+import { summarizeUsage } from "./usage.js";
 const DEFAULT_STORAGE_KEY = "open-agent:threads:v1";
-export function AgentWorkspace({ agentName = "open-agent", client, commands = [], defaultPreferences, extensions = [], hostSlots, models, mentions = [], onEvent, onDeleteThread, onStorageError, productName = "Agent", reasoningLevels, runtimeStatus = { provider: "ready" }, storageKey = DEFAULT_STORAGE_KEY, threadStorage = browserThreadStorage, }) {
+const STORAGE_SAVE_DELAY_MS = 250;
+export function AgentWorkspace({ client, commands = [], defaultPreferences, extensions = [], hostSlots, initialThreadId, models, mentions = [], onEvent, onDeleteThread, onActiveThreadChange, onStorageError, productName = "Agent", reasoningLevels, runtimeStatus = { provider: "ready" }, storageKey = DEFAULT_STORAGE_KEY, threadStorage = browserThreadStorage, }) {
     validateWorkspaceCatalog(models, reasoningLevels, defaultPreferences);
     const catalogSignature = JSON.stringify({ models, reasoningLevels });
     const stableDefaults = useMemo(() => ({
@@ -35,6 +41,8 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
     const recoveryStarted = useRef(new Set());
     const recoveryControllers = useRef(new Map());
     const storageSaveQueue = useRef(Promise.resolve());
+    const storageSaveTimer = useRef(undefined);
+    const pendingCollection = useRef(undefined);
     const storageSaveBlocked = useRef(false);
     const messages = messagesFor(locale);
     useEffect(() => {
@@ -49,10 +57,14 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
             const restoredThreads = collection.threads.length > 0
                 ? collection.threads.map((thread) => normalizeThreadPreferences(thread, models, reasoningLevels, stableDefaults))
                 : [createAgentThread(Date.now(), messagesFor(restoredLocale).newTask, stableDefaults)];
-            const restoredActive = collection.activeThreadId &&
+            const requestedActive = initialThreadId &&
+                restoredThreads.some((thread) => thread.id === initialThreadId)
+                ? initialThreadId
+                : undefined;
+            const restoredActive = requestedActive ?? (collection.activeThreadId &&
                 restoredThreads.some((thread) => thread.id === collection.activeThreadId)
                 ? collection.activeThreadId
-                : restoredThreads[0]?.id;
+                : restoredThreads[0]?.id);
             setThreads(restoredThreads);
             setActiveThreadId(restoredActive);
             setLocale(restoredLocale);
@@ -79,7 +91,11 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
         return () => {
             cancelled = true;
         };
-    }, [catalogSignature, onStorageError, stableDefaults, storageKey, threadStorage]);
+    }, [catalogSignature, initialThreadId, onStorageError, stableDefaults, storageKey, threadStorage]);
+    useEffect(() => {
+        if (isHydrated && activeThreadId)
+            onActiveThreadChange?.(activeThreadId);
+    }, [activeThreadId, isHydrated, onActiveThreadChange]);
     useEffect(() => {
         if (!isHydrated)
             return;
@@ -94,17 +110,26 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
             threads,
             version: AGENT_THREAD_STORAGE_VERSION,
         };
-        storageSaveQueue.current = storageSaveQueue.current
-            .catch(() => undefined)
-            .then(async () => {
-            await threadStorage.save(storageKey, collection);
-            setStorageIssue(false);
-        })
-            .catch((error) => {
-            storageSaveBlocked.current = true;
-            setStorageIssue(true);
-            onStorageError?.(error);
-        });
+        pendingCollection.current = collection;
+        if (storageSaveTimer.current !== undefined)
+            return;
+        storageSaveTimer.current = window.setTimeout(() => {
+            storageSaveTimer.current = undefined;
+            const nextCollection = pendingCollection.current;
+            if (!nextCollection)
+                return;
+            storageSaveQueue.current = storageSaveQueue.current
+                .catch(() => undefined)
+                .then(async () => {
+                await threadStorage.save(storageKey, nextCollection);
+                setStorageIssue(false);
+            })
+                .catch((error) => {
+                storageSaveBlocked.current = true;
+                setStorageIssue(true);
+                onStorageError?.(error);
+            });
+        }, STORAGE_SAVE_DELAY_MS);
     }, [activeThreadId, isHydrated, onStorageError, storageKey, threadStorage, threads]);
     const updateThread = useCallback((threadId, patch) => {
         setThreads((current) => current.map((thread) => thread.id === threadId ? { ...thread, ...patch, updatedAt: patch.updatedAt ?? Date.now() } : thread));
@@ -186,28 +211,65 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
         setRecoveryErrors((current) => withoutMapKey(current, thread.id));
         const controller = new AbortController();
         recoveryControllers.current.set(thread.id, controller);
-        const recoveredCursor = thread.events.length;
+        const recoveredCursor = thread.session.streamIndex;
         const session = createAgentSession(client, thread.preferences, { ...thread.session, streamIndex: recoveredCursor });
         let cursor = recoveredCursor;
         let events = [...thread.events];
+        let checkedTailBoundary = false;
+        let recoveredContinuationToken = thread.session.continuationToken;
         let settled = false;
         try {
-            while (!settled) {
-                for await (const event of session.stream({ follow: false, signal: controller.signal, startIndex: cursor })) {
-                    events.push(event);
-                    cursor += 1;
-                    updateThread(thread.id, { events: [...events], session: { ...session.state, streamIndex: cursor }, status: statusFromEvents(events) });
-                    if (isRecoveryBoundary(event)) {
-                        settled = true;
-                        break;
+            while (!settled && !controller.signal.aborted) {
+                try {
+                    let consumed = 0;
+                    for await (const event of session.stream({ follow: false, signal: controller.signal, startIndex: cursor })) {
+                        events = [...appendThreadEvent(events, event)];
+                        cursor += 1;
+                        consumed += 1;
+                        if (event.type === "session.waiting")
+                            recoveredContinuationToken = event.data.continuationToken;
+                        updateThread(thread.id, { events: [...events], session: { ...session.state, streamIndex: cursor }, status: statusFromEvents(events) });
+                        if (isRecoveryBoundary(event)) {
+                            settled = true;
+                            break;
+                        }
                     }
+                    if (!settled && consumed === 0 && !checkedTailBoundary && events.length > 0 && !isRecoveryBoundary(events.at(-1))) {
+                        checkedTailBoundary = true;
+                        const missingBoundary = await readTailBoundary(session, controller.signal);
+                        if (missingBoundary) {
+                            events = [...appendThreadEvent(events, missingBoundary)];
+                            recoveredContinuationToken = missingBoundary.type === "session.waiting"
+                                ? missingBoundary.data.continuationToken
+                                : session.state.continuationToken;
+                            updateThread(thread.id, {
+                                events: [...events],
+                                session: { ...session.state, continuationToken: recoveredContinuationToken, streamIndex: cursor },
+                                status: statusFromEvents(events),
+                            });
+                            settled = true;
+                        }
+                    }
+                    setRecoveryErrors((current) => withoutMapKey(current, thread.id));
+                }
+                catch (error) {
+                    if (controller.signal.aborted || isAbortError(error))
+                        return;
+                    if (!isRetryableRecoveryError(error))
+                        throw error;
                 }
                 if (!settled && !controller.signal.aborted)
-                    await wait(600, controller.signal);
+                    await waitForRecoveryPoll(controller.signal);
             }
             if (controller.signal.aborted)
                 return;
-            updateThread(thread.id, { events: [...events], session: session.state, status: statusFromEvents(events) });
+            if (!settled)
+                throw new Error("The active Agent stream ended before reaching a durable boundary.");
+            updateThread(thread.id, {
+                events: compactThreadEvents(events),
+                session: { ...session.state, continuationToken: recoveredContinuationToken ?? session.state.continuationToken, streamIndex: cursor },
+                status: statusFromEvents(events),
+            });
         }
         catch (error) {
             if (controller.signal.aborted || isAbortError(error))
@@ -230,6 +292,7 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
         for (const controller of recoveryControllers.current.values())
             controller.abort();
         recoveryControllers.current.clear();
+        window.clearTimeout(storageSaveTimer.current);
     }, []);
     useEffect(() => {
         if (!isHydrated)
@@ -242,16 +305,75 @@ export function AgentWorkspace({ agentName = "open-agent", client, commands = []
     const activeIsRecovering = activeThread
         ? recoveringIds.has(activeThread.id) || recoveryErrors.has(activeThread.id)
         : false;
-    const modelLabel = models.find((option) => option.id === activeThread?.preferences.modelId)?.label ?? "Agent";
+    const stopRecoveringThread = useCallback(async (thread) => {
+        if (!thread.session.sessionId)
+            return;
+        try {
+            const session = createAgentSession(client, thread.preferences, thread.session);
+            const turnId = latestTurnId(thread.events);
+            await session.cancel(turnId ? { turnId } : undefined);
+            setRecoveryErrors((current) => withoutMapKey(current, thread.id));
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : messages.recoveryFailed;
+            setRecoveryErrors((current) => new Map(current).set(thread.id, message));
+            console.error("Agent recovery cancellation failed", error);
+        }
+    }, [client, messages.recoveryFailed]);
     if (!isHydrated || !activeThread)
         return _jsx("div", { className: "flex h-dvh items-center justify-center bg-background text-muted-foreground", children: messages.loading });
-    return (_jsxs("div", { className: "open-agent-ui flex h-dvh overflow-hidden bg-background text-foreground", children: [_jsx(AgentSidebar, { activeThreadId: activeThread.id, deletingThreadIds: deletingThreadIds, hostFooter: hostSlots?.sidebarFooter, locale: locale, messages: messages, onClose: () => setSidebarOpen(false), onDelete: deleteThread, onNew: createThread, onRename: renameThread, onSelect: selectThread, onSettings: () => setSettingsOpen(true), open: sidebarOpen, threads: threads }), _jsxs("section", { className: "flex min-w-0 flex-1 flex-col", children: [_jsxs("header", { className: "flex h-14 shrink-0 items-center justify-between border-b px-3 sm:px-5", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-2", children: [_jsx(Button, { "aria-label": messages.openNavigation, className: "lg:hidden", onClick: () => setSidebarOpen(true), size: "icon-sm", variant: "ghost", children: _jsx(MenuIcon, { className: "size-4" }) }), _jsx(Button, { "aria-label": messages.toggleNavigation, className: "hidden lg:inline-flex", onClick: () => setSidebarOpen((open) => !open), size: "icon-sm", variant: "ghost", children: sidebarOpen ? _jsx(PanelLeftCloseIcon, { className: "size-4" }) : _jsx(PanelLeftIcon, { className: "size-4" }) }), _jsxs("div", { className: "min-w-0", children: [_jsxs("div", { className: "flex items-center gap-2", children: [_jsx("h2", { className: "truncate font-medium text-[15px]", children: activeThread.title }), _jsx("span", { className: "hidden rounded-full border px-2 py-0.5 text-xs text-muted-foreground sm:inline-flex", children: modelLabel })] }), _jsxs("p", { className: "truncate text-xs text-muted-foreground", children: [productName, " \u00B7 ", agentName] })] })] }), _jsxs("div", { className: "flex items-center gap-1", children: [hostSlots?.threadHeaderEnd, _jsx(Button, { "aria-label": messages.language, onClick: () => setLocale((current) => current === "en" ? "zh-CN" : "en"), size: "icon-sm", variant: "ghost", children: _jsx(LanguagesIcon, { className: "size-4" }) })] })] }), storageIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.storageUnavailable }), _jsxs(Button, { onClick: () => window.location.reload(), size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.reload] })] })) : null, deletionIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.deleteUnavailable }), _jsx(Button, { onClick: () => setDeletionIssue(false), size: "sm", variant: "outline", children: messages.dismiss })] })) : null, runtimeStatus.provider !== "ready" ? (_jsxs("div", { className: "flex shrink-0 items-start gap-3 border-b border-amber-500/30 bg-amber-500/8 px-4 py-2.5 text-sm", role: "status", children: [_jsx(ServerOffIcon, { className: "mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: runtimeStatus.provider === "mock" ? messages.mockProvider : messages.providerUnconfigured })] })) : null, activeIsRecovering ? (_jsx(RecoveryView, { error: recoveryErrors.get(activeThread.id), events: activeThread.events, locale: locale, onRetry: () => setRecoveringIds((current) => new Set(current).add(activeThread.id)) })) : _jsx(AgentThreadView, { client: client, commands: commands, locale: locale, mentions: mentions, models: models, onChange: changeActiveThread, onEvent: onEvent, onRecoveryNeeded: recoverActiveThread, providerReady: runtimeStatus.provider !== "unconfigured", reasoningLevels: reasoningLevels, thread: activeThread }, activeThread.id)] }), _jsx(AgentSettingsDialog, { extensions: extensions, locale: locale, messages: messages, onLocaleChange: setLocale, onOpenChange: setSettingsOpen, open: settingsOpen })] }));
+    return (_jsxs("div", { className: "open-agent-ui flex h-dvh overflow-hidden bg-background text-foreground", children: [_jsx(AgentSidebar, { activeThreadId: activeThread.id, brand: productName, deletingThreadIds: deletingThreadIds, hostFooter: hostSlots?.sidebarFooter, locale: locale, messages: messages, onClose: () => setSidebarOpen(false), onDelete: deleteThread, onNew: createThread, onRename: renameThread, onSelect: selectThread, onSettings: () => setSettingsOpen(true), open: sidebarOpen, threads: threads }), _jsxs("section", { className: "flex min-w-0 flex-1 flex-col bg-card", children: [_jsxs("header", { className: "flex h-13 shrink-0 items-center justify-between border-b border-border/70 px-3 sm:px-4", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-2", children: [_jsx(Button, { "aria-label": messages.openNavigation, className: "lg:hidden", onClick: () => setSidebarOpen(true), size: "icon-sm", variant: "ghost", children: _jsx(MenuIcon, { className: "size-4" }) }), _jsx(Button, { "aria-label": messages.toggleNavigation, className: "hidden lg:inline-flex", onClick: () => setSidebarOpen((open) => !open), size: "icon-sm", variant: "ghost", children: sidebarOpen ? _jsx(PanelLeftCloseIcon, { className: "size-4" }) : _jsx(PanelLeftIcon, { className: "size-4" }) }), _jsx("h2", { className: "truncate font-medium text-[15px]", children: activeThread.title })] }), _jsx("div", { className: "flex items-center gap-1", children: hostSlots?.threadHeaderEnd })] }), storageIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.storageUnavailable }), _jsxs(Button, { onClick: () => window.location.reload(), size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.reload] })] })) : null, deletionIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.deleteUnavailable }), _jsx(Button, { onClick: () => setDeletionIssue(false), size: "sm", variant: "outline", children: messages.dismiss })] })) : null, runtimeStatus.provider !== "ready" ? (_jsxs("div", { className: "flex shrink-0 items-start gap-3 border-b border-amber-500/30 bg-amber-500/8 px-4 py-2.5 text-sm", role: "status", children: [_jsx(ServerOffIcon, { className: "mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: runtimeStatus.provider === "mock" ? messages.mockProvider : messages.providerUnconfigured })] })) : null, activeIsRecovering ? (_jsx(RecoveryView, { commands: commands, error: recoveryErrors.get(activeThread.id), locale: locale, mentions: mentions, models: models, onPreferencesChange: (preferences) => updateThread(activeThread.id, { preferences }), onRetry: () => setRecoveringIds((current) => new Set(current).add(activeThread.id)), onStop: () => void stopRecoveringThread(activeThread), providerReady: runtimeStatus.provider !== "unconfigured", reasoningLevels: reasoningLevels, thread: activeThread })) : _jsx(AgentThreadView, { client: client, commands: commands, locale: locale, mentions: mentions, models: models, onChange: changeActiveThread, onEvent: onEvent, onRecoveryNeeded: recoverActiveThread, providerReady: runtimeStatus.provider !== "unconfigured", reasoningLevels: reasoningLevels, thread: activeThread }, activeThread.id)] }), _jsx(AgentSettingsDialog, { extensions: extensions, locale: locale, messages: messages, onLocaleChange: setLocale, onOpenChange: setSettingsOpen, open: settingsOpen })] }));
 }
-function RecoveryView({ error, events, locale, onRetry, }) {
+function RecoveryView({ commands, error, locale, mentions, models, onPreferencesChange, onRetry, onStop, providerReady, reasoningLevels, thread, }) {
     const reducer = useMemo(() => defaultMessageReducer(), []);
-    const data = useMemo(() => events.reduce((current, event) => reducer.reduce(current, event), reducer.initial()), [events, reducer]);
+    const data = useMemo(() => thread.events.reduce((current, event) => reducer.reduce(current, event), reducer.initial()), [reducer, thread.events]);
+    const visibleMessages = data.messages.filter((message) => !isProxiedInputOnlyMessage(message, thread.events));
     const messages = messagesFor(locale);
-    return (_jsx("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: _jsx(Conversation, { className: "min-h-0 flex-1", children: _jsxs(ConversationContent, { className: "mx-auto w-full max-w-4xl gap-8 px-4 py-8 sm:px-8", children: [data.messages.map((message) => _jsx(AgentMessage, { canRespond: false, isStreaming: true, locale: locale, message: message, onInputResponses: () => undefined }, message.id)), error ? (_jsxs("div", { className: "flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm", children: [_jsx(AlertCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "font-medium", children: messages.recoveryFailed }), _jsx("p", { className: "mt-0.5 break-words text-muted-foreground", children: error })] }), _jsxs(Button, { onClick: onRetry, size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.retry] })] })) : _jsx("div", { className: "text-muted-foreground text-sm", children: messages.reconnecting })] }) }) }));
+    return (_jsx(PromptInputProvider, { children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx(Conversation, { className: "min-h-0 flex-1", children: _jsxs(ConversationContent, { className: "mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10", children: [visibleMessages.map((message) => _jsx(AgentMessage, { canRespond: false, events: thread.events, fallbackStartedAt: thread.pendingTurn?.submittedAt, isStreaming: true, locale: locale, message: message, onInputResponses: () => undefined }, message.id)), error ? (_jsxs("div", { className: "flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm", children: [_jsx(AlertCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "font-medium", children: messages.recoveryFailed }), _jsx("p", { className: "mt-0.5 break-words text-muted-foreground", children: error })] }), _jsxs(Button, { onClick: onRetry, size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.retry] })] })) : (_jsx(AgentActivity, { events: thread.events, messages: messages, mode: "recovery" }))] }) }), _jsx("div", { className: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6", children: _jsx(AgentComposer, { commands: commands, disabled: !providerReady, inputDisabled: true, mentions: mentions, messages: messages, models: models, onPreferencesChange: onPreferencesChange, onStop: onStop, onSubmit: ignoreRecoverySubmit, preferences: thread.preferences, reasoningLevels: reasoningLevels, status: "streaming", usage: summarizeUsage(thread.events) }) })] }) }));
+}
+const RECOVERY_POLL_INTERVAL_MS = 1_500;
+const RECOVERY_TAIL_LOOKUP_TIMEOUT_MS = 1_500;
+async function ignoreRecoverySubmit(_message) { }
+function latestTurnId(events) {
+    const event = [...events].reverse().find((candidate) => candidate.type === "turn.started");
+    return event?.type === "turn.started" ? event.data.turnId : undefined;
+}
+async function readTailBoundary(session, parentSignal) {
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    parentSignal.addEventListener("abort", abort, { once: true });
+    const timeout = window.setTimeout(abort, RECOVERY_TAIL_LOOKUP_TIMEOUT_MS);
+    try {
+        for await (const event of session.stream({
+            signal: controller.signal,
+            startIndex: -1,
+            streamReconnectPolicy: { reconnect: false },
+        })) {
+            return isRecoveryBoundary(event) ? event : undefined;
+        }
+    }
+    catch (error) {
+        if (!controller.signal.aborted && !isAbortError(error))
+            throw error;
+    }
+    finally {
+        window.clearTimeout(timeout);
+        parentSignal.removeEventListener("abort", abort);
+    }
+    return undefined;
+}
+function waitForRecoveryPoll(signal) {
+    if (signal.aborted)
+        return Promise.resolve();
+    return new Promise((resolve) => {
+        const finish = () => {
+            window.clearTimeout(timeout);
+            signal.removeEventListener("abort", finish);
+            resolve();
+        };
+        const timeout = window.setTimeout(finish, RECOVERY_POLL_INTERVAL_MS);
+        signal.addEventListener("abort", finish, { once: true });
+    });
 }
 function isRecoveryBoundary(event) {
     return event.type === "session.waiting" || event.type === "session.completed" || event.type === "session.failed";
@@ -265,25 +387,23 @@ function statusFromEvents(events) {
     const latestTurnBoundary = [...events].reverse().find((event) => event.type === "turn.completed" || event.type === "turn.failed" || event.type === "turn.cancelled");
     if (latestTurnBoundary?.type === "turn.failed")
         return "error";
-    if (last.type === "session.waiting" || last.type === "session.completed")
+    if (last.type === "session.waiting") {
+        return hasUnresolvedInputRequests(events) ? "waiting" : "ready";
+    }
+    if (last.type === "session.completed")
         return "ready";
     if (last.type === "turn.started" || last.type === "step.started" || last.type === "message.appended" || last.type === "reasoning.appended")
         return "streaming";
     return "submitted";
 }
-function wait(ms, signal) {
-    if (signal.aborted)
-        return Promise.resolve();
-    return new Promise((resolve) => {
-        const timeout = window.setTimeout(resolve, ms);
-        signal.addEventListener("abort", () => {
-            window.clearTimeout(timeout);
-            resolve();
-        }, { once: true });
-    });
-}
 function isAbortError(error) {
     return error instanceof Error && error.name === "AbortError";
+}
+function isRetryableRecoveryError(error) {
+    if (error instanceof ClientError) {
+        return error.status === 0 || [404, 409, 425, 429, 500, 502, 503, 504].includes(error.status);
+    }
+    return error instanceof TypeError || (error instanceof Error && /fetch|network|socket|stream/i.test(error.message));
 }
 function validateWorkspaceCatalog(models, reasoningLevels, defaults) {
     if (models.length === 0 || models.some((model) => !model.id.trim() || !model.label.trim() || !Number.isSafeInteger(model.contextWindowTokens) || model.contextWindowTokens <= 0)) {

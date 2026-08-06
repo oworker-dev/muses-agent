@@ -52,15 +52,16 @@ export function createHttpAgentThreadStorage(options) {
     };
 }
 async function request(fetchImplementation, options, url, init) {
-    const accessToken = await options.getAccessToken();
-    if (!accessToken.trim())
+    const accessToken = await options.getAccessToken?.();
+    if (accessToken !== undefined && !accessToken.trim()) {
         throw new Error("Agent thread storage access token is empty.");
+    }
     return await fetchImplementation(url, {
         ...init,
         credentials: "same-origin",
         headers: {
             ...init?.headers,
-            authorization: `Bearer ${accessToken}`,
+            ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
         },
     });
 }

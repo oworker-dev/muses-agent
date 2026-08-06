@@ -1,12 +1,15 @@
 import type { EveMessage } from "eve/react";
+import type { HandleMessageStreamEvent } from "eve/client";
 import type { AgentLocale } from "./i18n.js";
 export type AgentInputResponse = {
     readonly optionId?: string;
     readonly requestId: string;
     readonly text?: string;
 };
-export declare function AgentMessage({ canRespond, isStreaming, locale, message, onInputResponses, }: {
+export declare function AgentMessage({ canRespond, events, fallbackStartedAt, isStreaming, locale, message, onInputResponses, }: {
     readonly canRespond: boolean;
+    readonly events: readonly HandleMessageStreamEvent[];
+    readonly fallbackStartedAt?: number;
     readonly isStreaming: boolean;
     readonly locale: AgentLocale;
     readonly message: EveMessage;

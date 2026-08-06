@@ -7,7 +7,7 @@ import {
 } from "../../lib/provider-http.ts";
 
 test("parses a bounded provider HTTP timeout", () => {
-  assert.equal(readProviderHttpTimeoutMs({}), 120_000);
+  assert.equal(readProviderHttpTimeoutMs({}), 600_000);
   assert.equal(readProviderHttpTimeoutMs({ AGENT_PROVIDER_HTTP_TIMEOUT_MS: "45000" }), 45_000);
   assert.throws(
     () => readProviderHttpTimeoutMs({ AGENT_PROVIDER_HTTP_TIMEOUT_MS: "999" }),
