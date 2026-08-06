@@ -2,9 +2,15 @@ import type { HandleMessageStreamEvent, InputRequest } from "eve/client";
 import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
 export type AgentTurnStatus = "cancelled" | "completed" | "failed" | "running" | "waiting";
 export type SubagentCallPresentation = {
+    readonly childSessionId?: string;
     readonly endedAt?: number;
+    readonly name?: string;
     readonly startedAt?: number;
-    readonly status: "completed" | "failed" | "running" | "starting";
+    readonly status: "cancelled" | "completed" | "failed" | "running" | "starting";
+};
+export type SubagentSessionPresentation = SubagentCallPresentation & {
+    readonly callId: string;
+    readonly task?: string;
 };
 export type AgentTurnPresentation = {
     readonly endedAt?: number;
@@ -21,4 +27,5 @@ export declare function isProxiedInputOnlyMessage(message: EveMessage, events: r
 export declare function unresolvedInputRequests(events: readonly HandleMessageStreamEvent[]): readonly InputRequest[];
 export declare function hasUnresolvedInputRequests(events: readonly HandleMessageStreamEvent[]): boolean;
 export declare function presentSubagentCall(events: readonly HandleMessageStreamEvent[], callId: string): SubagentCallPresentation;
+export declare function presentSubagentSessions(events: readonly HandleMessageStreamEvent[]): readonly SubagentSessionPresentation[];
 //# sourceMappingURL=turn-presentation.d.ts.map

@@ -716,6 +716,9 @@
   .min-h-10 {
     min-height: calc(var(--spacing) * 10);
   }
+  .min-h-11 {
+    min-height: calc(var(--spacing) * 11);
+  }
   .min-h-14 {
     min-height: calc(var(--spacing) * 14);
   }
@@ -800,6 +803,9 @@
   .w-\[252px\] {
     width: 252px;
   }
+  .w-\[min\(22rem\,calc\(100vw-1\.5rem\)\)\] {
+    width: min(22rem, calc(100vw - 1.5rem));
+  }
   .w-auto {
     width: auto;
   }
@@ -865,6 +871,9 @@
   }
   .min-w-0 {
     min-width: calc(var(--spacing) * 0);
+  }
+  .min-w-4 {
+    min-width: calc(var(--spacing) * 4);
   }
   .min-w-5 {
     min-width: calc(var(--spacing) * 5);
@@ -1457,6 +1466,9 @@
   }
   .border-current {
     border-color: currentcolor;
+  }
+  .border-destructive {
+    border-color: var(--destructive, oklch(0.577 0.245 27.325));
   }
   .border-destructive\/30 {
     border-color: var(--destructive, oklch(0.577 0.245 27.325));
@@ -2257,6 +2269,10 @@
   }
   .italic {
     font-style: italic;
+  }
+  .ordinal {
+    --tw-ordinal: ordinal;
+    font-variant-numeric: var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,);
   }
   .tabular-nums {
     --tw-numeric-spacing: tabular-nums;
@@ -3821,6 +3837,11 @@
   .focus-visible\:border-ring {
     &:focus-visible {
       border-color: var(--ring, oklch(0.708 0 0));
+    }
+  }
+  .focus-visible\:bg-accent {
+    &:focus-visible {
+      background-color: var(--accent, oklch(0.94 0 0));
     }
   }
   .focus-visible\:ring-0 {

@@ -118,6 +118,8 @@ export function inspectProductionConfiguration(
   requireValue(environment, "AGENT_HOST_JWT_SECRET", error);
   requireValue(environment, "AGENT_HOST_JWT_ISSUER", error);
   requireValue(environment, "AGENT_HOST_JWT_AUDIENCE", error);
+  requireValue(environment, "AGENT_MAILBOX_DISPATCH_SECRET", error);
+  requireValue(environment, "AGENT_MAILBOX_WORKER_SECRET", error);
   requireValue(environment, "AGENT_EMBED_ALLOWED_ORIGINS", error);
   requireValue(environment, "AGENT_PUBLIC_BASE_URL", error);
   requireValue(environment, "AGENT_PREVIEW_SIGNING_SECRET", error);
@@ -162,6 +164,24 @@ export function inspectProductionConfiguration(
   if (jwtSecret && Buffer.byteLength(jwtSecret) < 32) {
     error("host-jwt-secret", "AGENT_HOST_JWT_SECRET must contain at least 32 bytes.");
   }
+
+  for (const [name, code] of [
+    ["AGENT_MAILBOX_DISPATCH_SECRET", "mailbox-dispatch-secret"],
+    ["AGENT_MAILBOX_WORKER_SECRET", "mailbox-worker-secret"],
+  ] as const) {
+    const secret = environment[name]?.trim();
+    if (secret && Buffer.byteLength(secret) < 32) {
+      error(code, `${name} must contain at least 32 bytes.`);
+    }
+  }
+
+  inspectInteger(
+    environment.AGENT_MAILBOX_WORKER_INTERVAL_MS,
+    "AGENT_MAILBOX_WORKER_INTERVAL_MS",
+    250,
+    60_000,
+    error,
+  );
 
   const algorithm = environment.AGENT_HOST_JWT_ALGORITHM?.trim() || "HS256";
   if (algorithm !== "HS256") {

@@ -59,6 +59,57 @@ create table if not exists "__AGENT_SCHEMA__"."agent_thread_collections" (
   constraint agent_thread_collection_object check (jsonb_typeof(collection) = 'object')
 );
 
+create table if not exists "__AGENT_SCHEMA__"."agent_mailbox_items" (
+  item_id text primary key,
+  tenant_id text not null,
+  principal_id text not null,
+  session_id text not null references "__AGENT_SCHEMA__"."agent_session_owners"(session_id),
+  client_message_id text not null,
+  principal_type text not null,
+  issuer text,
+  payload_fingerprint text not null,
+  payload jsonb not null,
+  status text not null default 'queued',
+  attempt_count integer not null default 0,
+  available_at timestamptz not null default now(),
+  claim_token text,
+  claim_expires_at timestamptz,
+  admission_started_at timestamptz,
+  accepted_session_id text,
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  accepted_at timestamptz,
+  committed_at timestamptz,
+  unique (tenant_id, principal_id, client_message_id),
+  constraint agent_mailbox_status check (status in (
+    'queued',
+    'delivering',
+    'accepted',
+    'committed',
+    'failed',
+    'submission-ambiguous',
+    'cancelled'
+  )),
+  constraint agent_mailbox_payload_object check (jsonb_typeof(payload) = 'object'),
+  constraint agent_mailbox_claim check (
+    (status = 'delivering' and claim_token is not null and claim_expires_at is not null)
+    or (status <> 'delivering' and claim_token is null and claim_expires_at is null)
+  )
+);
+
+alter table "__AGENT_SCHEMA__"."agent_mailbox_items"
+  add column if not exists admission_started_at timestamptz;
+
+create index if not exists agent_mailbox_ready_idx
+  on "__AGENT_SCHEMA__"."agent_mailbox_items" (status, available_at, created_at);
+
+create index if not exists agent_mailbox_session_idx
+  on "__AGENT_SCHEMA__"."agent_mailbox_items" (session_id, created_at);
+
+create index if not exists agent_mailbox_owner_idx
+  on "__AGENT_SCHEMA__"."agent_mailbox_items" (tenant_id, principal_id, created_at desc);
+
 create table if not exists "__AGENT_SCHEMA__"."agent_previews" (
   preview_id text primary key,
   session_id text not null,

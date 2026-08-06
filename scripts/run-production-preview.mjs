@@ -1,4 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import {
   assertBuiltEveProxy,
@@ -27,6 +28,8 @@ assertBuiltEveWorkflowWorld(compiledAgentManifest);
 
 const publicOrigin = await resolvePublicOrigin();
 const previewSigningSecret = await resolveProductionPreviewSigningSecret();
+const mailboxDispatchSecret = process.env.AGENT_MAILBOX_DISPATCH_SECRET?.trim() || randomBytes(32).toString("base64url");
+const mailboxWorkerSecret = process.env.AGENT_MAILBOX_WORKER_SECRET?.trim() || randomBytes(32).toString("base64url");
 const runtimeEnvironment = {
   ...process.env,
   AGENT_BASH_APPROVAL_MODE: "risky",
@@ -35,6 +38,8 @@ const runtimeEnvironment = {
   AGENT_DEPLOYMENT_TENANCY: "single-tenant",
   AGENT_EMBED_ALLOWED_ORIGINS: process.env.AGENT_EMBED_ALLOWED_ORIGINS || "http://localhost:4730,http://127.0.0.1:4730",
   AGENT_MODEL_MAX_OUTPUT_TOKENS: "4096",
+  AGENT_MAILBOX_DISPATCH_SECRET: mailboxDispatchSecret,
+  AGENT_MAILBOX_WORKER_SECRET: mailboxWorkerSecret,
   AGENT_PREVIEW_SIGNING_SECRET: previewSigningSecret,
   AGENT_PROVIDER_HTTP_TIMEOUT_MS: "600000",
   AGENT_PROVIDER_MODE: "live",
@@ -74,6 +79,16 @@ const web = spawn(
   { env: runtimeEnvironment, stdio: "inherit" },
 );
 
+await waitForHealth(`http://127.0.0.1:${WEB_PORT}`, web);
+
+const mailboxWorker = spawn(process.execPath, ["scripts/run-agent-mailbox-worker.mjs"], {
+  env: {
+    ...runtimeEnvironment,
+    AGENT_WEB_INTERNAL_URL: `http://127.0.0.1:${WEB_PORT}`,
+  },
+  stdio: "inherit",
+});
+
 console.log(`OPEN_AGENT_PUBLIC_URL=${publicOrigin}`);
 
 let stopping = false;
@@ -83,6 +98,7 @@ const stop = (signal = "SIGTERM") => {
   stopping = true;
   web.kill(signal);
   eve.kill(signal);
+  mailboxWorker.kill(signal);
 };
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
@@ -94,9 +110,14 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 const outcome = await Promise.race([
   childExit("eve", eve),
   childExit("web", web),
+  childExit("mailbox-worker", mailboxWorker),
 ]);
 stop();
-await Promise.allSettled([childExit("eve", eve), childExit("web", web)]);
+await Promise.allSettled([
+  childExit("eve", eve),
+  childExit("web", web),
+  childExit("mailbox-worker", mailboxWorker),
+]);
 if (!stopping || outcome.code !== 0) {
   console.error(`${outcome.name} exited`, { code: outcome.code, signal: outcome.signal });
 }

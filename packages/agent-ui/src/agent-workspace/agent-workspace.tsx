@@ -1,19 +1,21 @@
 "use client";
 
 import { ClientError, defaultMessageReducer, type HandleMessageStreamEvent } from "eve/client";
-import { AlertCircleIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
+import { AlertCircleIcon, ArrowLeftIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
 import { Conversation, ConversationContent } from "../ai-elements/conversation.js";
 import { PromptInputProvider, type PromptInputMessage } from "../ai-elements/prompt-input.js";
 import { createAgentSession } from "./agent-client.js";
 import { AgentActivity } from "./agent-activity.js";
+import { AgentChildSessionView } from "./agent-child-session.js";
 import { AgentComposer } from "./agent-composer.js";
 import { AgentMessage } from "./agent-message.js";
 import { AgentSettingsDialog } from "./agent-settings-dialog.js";
 import { AgentSidebar } from "./agent-sidebar.js";
-import { AgentThreadView } from "./agent-thread.js";
-import type { AgentModelOption, AgentPromptMenuItem, AgentThread, AgentThreadPatch, AgentThreadPreferences, AgentWorkspaceClientConfig } from "./contracts.js";
+import { AgentSubagentMenu } from "./agent-subagent-menu.js";
+import { AgentThreadView, FollowUpQueue } from "./agent-thread.js";
+import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentThreadPreferences, AgentWorkspaceClientConfig, AgentWorkspaceMailbox } from "./contracts.js";
 import { messagesFor, resolveBrowserLocale, type AgentLocale } from "./i18n.js";
 import {
   AGENT_THREAD_STORAGE_VERSION,
@@ -27,6 +29,7 @@ import {
 import {
   hasUnresolvedInputRequests,
   isProxiedInputOnlyMessage,
+  presentSubagentSessions,
 } from "./turn-presentation.js";
 import { summarizeUsage } from "./usage.js";
 
@@ -39,11 +42,14 @@ export function AgentWorkspace({
   defaultPreferences,
   extensions = [],
   hostSlots,
+  initialSubagentSessionId,
   initialThreadId,
+  mailbox,
   models,
   mentions = [],
   onEvent,
   onDeleteThread,
+  onActiveSubagentChange,
   onActiveThreadChange,
   onStorageError,
   productName = "Agent",
@@ -58,11 +64,14 @@ export function AgentWorkspace({
   readonly defaultPreferences: AgentThreadPreferences;
   readonly extensions?: readonly import("./contracts.js").AgentExtensionInfo[];
   readonly hostSlots?: { readonly sidebarFooter?: React.ReactNode; readonly threadHeaderEnd?: React.ReactNode };
+  readonly initialSubagentSessionId?: string;
   readonly initialThreadId?: string;
+  readonly mailbox?: AgentWorkspaceMailbox;
   readonly models: readonly AgentModelOption[];
   readonly mentions?: readonly import("./contracts.js").AgentPromptMenuItem[];
   readonly onEvent?: (event: HandleMessageStreamEvent) => void;
   readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
+  readonly onActiveSubagentChange?: (threadId: string, sessionId?: string) => void;
   readonly onActiveThreadChange?: (threadId: string) => void;
   readonly onStorageError?: (error: unknown) => void;
   readonly productName?: string;
@@ -82,10 +91,13 @@ export function AgentWorkspace({
     [defaultPreferences.executionMode, defaultPreferences.modelId, defaultPreferences.reasoning],
   );
   const [threads, setThreads] = useState<AgentThread[]>([]);
+  const threadsRef = useRef<readonly AgentThread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string>();
+  const [activeSubagentSessionId, setActiveSubagentSessionId] = useState<string>();
   const [isHydrated, setIsHydrated] = useState(false);
   const [recoveringIds, setRecoveringIds] = useState<Set<string>>(new Set());
   const [recoveryErrors, setRecoveryErrors] = useState<Map<string, string>>(new Map());
+  const [recoveryQueueErrors, setRecoveryQueueErrors] = useState<Map<string, string>>(new Map());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deletionIssue, setDeletionIssue] = useState(false);
@@ -99,6 +111,10 @@ export function AgentWorkspace({
   const pendingCollection = useRef<AgentThreadCollection | undefined>(undefined);
   const storageSaveBlocked = useRef(false);
   const messages = messagesFor(locale);
+
+  useEffect(() => {
+    threadsRef.current = threads;
+  }, [threads]);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,6 +137,7 @@ export function AgentWorkspace({
           : restoredThreads[0]?.id);
         setThreads(restoredThreads);
         setActiveThreadId(restoredActive);
+        setActiveSubagentSessionId(requestedActive ? initialSubagentSessionId : undefined);
         setLocale(restoredLocale);
         setSidebarOpen(window.matchMedia("(min-width: 1024px)").matches);
         setIsHydrated(true);
@@ -138,6 +155,7 @@ export function AgentWorkspace({
         const fallback = createAgentThread(Date.now(), messagesFor(restoredLocale).newTask, stableDefaults);
         setThreads([fallback]);
         setActiveThreadId(fallback.id);
+        setActiveSubagentSessionId(undefined);
         setLocale(restoredLocale);
         setSidebarOpen(window.matchMedia("(min-width: 1024px)").matches);
         setIsHydrated(true);
@@ -145,11 +163,16 @@ export function AgentWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [catalogSignature, initialThreadId, onStorageError, stableDefaults, storageKey, threadStorage]);
+  }, [catalogSignature, initialSubagentSessionId, initialThreadId, onStorageError, stableDefaults, storageKey, threadStorage]);
 
   useEffect(() => {
-    if (isHydrated && activeThreadId) onActiveThreadChange?.(activeThreadId);
-  }, [activeThreadId, isHydrated, onActiveThreadChange]);
+    if (!isHydrated || !activeThreadId) return;
+    if (activeSubagentSessionId) {
+      onActiveSubagentChange?.(activeThreadId, activeSubagentSessionId);
+      return;
+    }
+    onActiveThreadChange?.(activeThreadId);
+  }, [activeSubagentSessionId, activeThreadId, isHydrated, onActiveSubagentChange, onActiveThreadChange]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -185,13 +208,40 @@ export function AgentWorkspace({
   }, [activeThreadId, isHydrated, onStorageError, storageKey, threadStorage, threads]);
 
   const updateThread = useCallback((threadId: string, patch: AgentThreadPatch) => {
-    setThreads((current) => current.map((thread) => thread.id === threadId ? { ...thread, ...patch, updatedAt: patch.updatedAt ?? Date.now() } : thread));
+    setThreads((current) => {
+      const next = current.map((thread) => thread.id === threadId
+        ? { ...thread, ...patch, updatedAt: patch.updatedAt ?? Date.now() }
+        : thread);
+      threadsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const replaceQueuedTurn = useCallback((
+    threadId: string,
+    turnId: string,
+    replacement?: AgentQueuedTurn,
+  ) => {
+    setThreads((current) => {
+      const next = current.map((thread) => thread.id !== threadId
+        ? thread
+        : {
+            ...thread,
+            queuedTurns: replacement
+              ? thread.queuedTurns.map((turn) => turn.id === turnId ? replacement : turn)
+              : thread.queuedTurns.filter((turn) => turn.id !== turnId),
+            updatedAt: Date.now(),
+          });
+      threadsRef.current = next;
+      return next;
+    });
   }, []);
 
   const createThread = useCallback(() => {
     const thread = createAgentThread(Date.now(), messages.newTask, stableDefaults);
     setThreads((current) => [thread, ...current]);
     setActiveThreadId(thread.id);
+    setActiveSubagentSessionId(undefined);
     if (!window.matchMedia("(min-width: 1024px)").matches) setSidebarOpen(false);
   }, [messages.newTask, stableDefaults]);
 
@@ -216,20 +266,26 @@ export function AgentWorkspace({
     recoveryStarted.current.delete(threadId);
     setRecoveringIds((current) => withoutSetValue(current, threadId));
     setRecoveryErrors((current) => withoutMapKey(current, threadId));
+    setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
     setThreads((current) => {
       const next = current.filter((thread) => thread.id !== threadId);
       if (next.length === 0) {
         const replacement = createAgentThread(Date.now(), messages.newTask, stableDefaults);
         setActiveThreadId(replacement.id);
+        setActiveSubagentSessionId(undefined);
         return [replacement];
       }
-      if (threadId === activeThreadId) setActiveThreadId(next[0]?.id);
+      if (threadId === activeThreadId) {
+        setActiveThreadId(next[0]?.id);
+        setActiveSubagentSessionId(undefined);
+      }
       return next;
     });
   }, [activeThreadId, deletingThreadIds, messages.newTask, onDeleteThread, onStorageError, stableDefaults, threads]);
 
   const selectThread = useCallback((threadId: string) => {
     setActiveThreadId(threadId);
+    setActiveSubagentSessionId(undefined);
     if (!window.matchMedia("(min-width: 1024px)").matches) setSidebarOpen(false);
     const selected = threads.find((thread) => thread.id === threadId);
     if (selected && threadNeedsRecovery(selected)) {
@@ -249,12 +305,126 @@ export function AgentWorkspace({
   }, []);
 
   const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? threads[0];
+  const activeSubagent = activeThread && activeSubagentSessionId
+    ? findSubagentSession(activeThread.events, activeSubagentSessionId, locale)
+    : undefined;
+  const openSubagent = useCallback((sessionId: string) => {
+    if (!activeThread || !findSubagentSession(activeThread.events, sessionId, locale)) return;
+    setActiveSubagentSessionId(sessionId);
+  }, [activeThread, locale]);
+  const closeSubagent = useCallback(() => setActiveSubagentSessionId(undefined), []);
   const changeActiveThread = useCallback(
     (patch: AgentThreadPatch) => {
       if (activeThreadId) updateThread(activeThreadId, patch);
     },
     [activeThreadId, updateThread],
   );
+  const queueRecoveryMessage = useCallback(async (
+    threadId: string,
+    message: PromptInputMessage,
+  ) => {
+    const text = message.text.trim();
+    const thread = threadsRef.current.find((candidate) => candidate.id === threadId);
+    if (!mailbox || !thread?.session.sessionId || !text) return;
+    if (message.files.length > 0) {
+      setRecoveryQueueErrors((current) => new Map(current).set(
+        threadId,
+        messages.queueAttachmentsUnsupported,
+      ));
+      return;
+    }
+    if (thread.queuedTurns.length >= 5) {
+      setRecoveryQueueErrors((current) => new Map(current).set(threadId, messages.queueFull));
+      return;
+    }
+
+    const queuedTurn: AgentQueuedTurn = {
+      delivery: "server",
+      id: createQueuedTurnId(),
+      state: "queued",
+      submittedAt: Date.now(),
+      text,
+    };
+    setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
+    updateThread(threadId, { queuedTurns: [...thread.queuedTurns, queuedTurn] });
+
+    try {
+      const receipt = await mailbox.enqueue({
+        clientMessageId: queuedTurn.id,
+        message: queuedTurn.text,
+        preferences: thread.preferences,
+        sessionId: thread.session.sessionId,
+      });
+      const state = mailboxQueueState(receipt.status);
+      if (state === "cancelled") {
+        replaceQueuedTurn(threadId, queuedTurn.id);
+        return;
+      }
+      replaceQueuedTurn(threadId, queuedTurn.id, {
+        ...queuedTurn,
+        mailboxItemId: receipt.itemId,
+        state,
+      });
+    } catch (error) {
+      replaceQueuedTurn(threadId, queuedTurn.id, {
+        ...queuedTurn,
+        state: "delivery-failed",
+      });
+      setRecoveryQueueErrors((current) => new Map(current).set(
+        threadId,
+        error instanceof Error ? error.message : messages.queueDeliveryFailed,
+      ));
+    }
+  }, [mailbox, messages.queueAttachmentsUnsupported, messages.queueDeliveryFailed, messages.queueFull, replaceQueuedTurn, updateThread]);
+  const removeRecoveryQueuedTurn = useCallback(async (threadId: string, turnId: string) => {
+    const turn = threadsRef.current
+      .find((thread) => thread.id === threadId)
+      ?.queuedTurns.find((candidate) => candidate.id === turnId);
+    if (!turn) return;
+    setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
+    try {
+      if (mailbox && turn.mailboxItemId) await mailbox.cancel(turn.mailboxItemId);
+      replaceQueuedTurn(threadId, turnId);
+    } catch (error) {
+      setRecoveryQueueErrors((current) => new Map(current).set(
+        threadId,
+        error instanceof Error ? error.message : messages.queueDeliveryFailed,
+      ));
+    }
+  }, [mailbox, messages.queueDeliveryFailed, replaceQueuedTurn]);
+  const retryRecoveryQueuedTurn = useCallback(async (threadId: string, turnId: string) => {
+    const thread = threadsRef.current.find((candidate) => candidate.id === threadId);
+    const turn = thread?.queuedTurns.find((candidate) => candidate.id === turnId);
+    if (!mailbox || !thread?.session.sessionId || !turn || turn.state !== "delivery-failed") return;
+    setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
+    replaceQueuedTurn(threadId, turnId, { ...turn, state: "queued" });
+    try {
+      const receipt = turn.mailboxItemId
+        ? await mailbox.retry(turn.mailboxItemId)
+        : await mailbox.enqueue({
+            clientMessageId: turn.id,
+            message: turn.text,
+            preferences: thread.preferences,
+            sessionId: thread.session.sessionId,
+          });
+      const state = mailboxQueueState(receipt.status);
+      if (state === "cancelled") {
+        replaceQueuedTurn(threadId, turnId);
+        return;
+      }
+      replaceQueuedTurn(threadId, turnId, {
+        ...turn,
+        mailboxItemId: receipt.itemId,
+        state,
+      });
+    } catch (error) {
+      replaceQueuedTurn(threadId, turnId, { ...turn, state: "delivery-failed" });
+      setRecoveryQueueErrors((current) => new Map(current).set(
+        threadId,
+        error instanceof Error ? error.message : messages.queueDeliveryFailed,
+      ));
+    }
+  }, [mailbox, messages.queueDeliveryFailed, replaceQueuedTurn]);
   const recoverActiveThread = useCallback(() => {
     if (activeThreadId) requestThreadRecovery(activeThreadId);
   }, [activeThreadId, requestThreadRecovery]);
@@ -271,21 +441,82 @@ export function AgentWorkspace({
     let cursor = recoveredCursor;
     let events = [...thread.events];
     let checkedTailBoundary = false;
+    let pendingTurn = thread.pendingTurn;
+    let queuedTurns = thread.queuedTurns;
     let recoveredContinuationToken = thread.session.continuationToken;
     let settled = false;
+
+    const refreshMailboxQueue = async () => {
+      queuedTurns = threadsRef.current.find((candidate) => candidate.id === thread.id)?.queuedTurns ?? queuedTurns;
+      if (!mailbox) return;
+      const updates = new Map<string, AgentQueuedTurn["state"] | "remove">();
+      await Promise.all(queuedTurns.map(async (turn) => {
+        if (turn.delivery !== "server" || !turn.mailboxItemId) return;
+        try {
+          const receipt = await mailbox.inspect(turn.mailboxItemId);
+          const state = mailboxQueueState(receipt.status);
+          updates.set(turn.id, state === "cancelled" ? "remove" : state);
+        } catch {
+          // Keep the last durable UI snapshot during a transient mailbox outage.
+        }
+      }));
+      if (updates.size === 0) return;
+      const next = queuedTurns.flatMap((turn) => {
+        const state = updates.get(turn.id);
+        if (state === "remove") return [];
+        return state ? [{ ...turn, state }] : [turn];
+      });
+      if (sameQueuedTurns(queuedTurns, next)) return;
+      queuedTurns = next;
+      updateThread(thread.id, { queuedTurns });
+    };
+    const hasPendingServerQueue = () => queuedTurns.some((turn) =>
+      turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId),
+    );
+    const currentBoundarySettles = () => {
+      const last = events.at(-1);
+      if (!last || !isRecoveryBoundary(last)) return false;
+      return last.type !== "session.waiting" || !hasPendingServerQueue();
+    };
 
     try {
       while (!settled && !controller.signal.aborted) {
         try {
+          await refreshMailboxQueue();
+          if (currentBoundarySettles()) {
+            settled = true;
+            break;
+          }
+
           let consumed = 0;
           for await (const event of session.stream({ follow: false, signal: controller.signal, startIndex: cursor })) {
             events = [...appendThreadEvent(events, event)];
             cursor += 1;
             consumed += 1;
+            onEvent?.(event);
             if (event.type === "session.waiting") recoveredContinuationToken = event.data.continuationToken;
-            updateThread(thread.id, { events: [...events], session: { ...session.state, streamIndex: cursor }, status: statusFromEvents(events) });
+            if (event.type === "message.received") {
+              const wasPendingTurn = Boolean(pendingTurn);
+              pendingTurn = undefined;
+              if (!wasPendingTurn) {
+                const nextServerTurn = queuedTurns.find((turn) =>
+                  turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId),
+                );
+                if (nextServerTurn) {
+                  queuedTurns = queuedTurns.filter((turn) => turn.id !== nextServerTurn.id);
+                }
+              }
+            }
+            updateThread(thread.id, {
+              events: [...events],
+              pendingTurn,
+              queuedTurns,
+              session: { ...session.state, streamIndex: cursor },
+              status: statusFromEvents(events),
+            });
             if (isRecoveryBoundary(event)) {
-              settled = true;
+              await refreshMailboxQueue();
+              settled = event.type !== "session.waiting" || !hasPendingServerQueue();
               break;
             }
           }
@@ -297,14 +528,19 @@ export function AgentWorkspace({
               recoveredContinuationToken = missingBoundary.type === "session.waiting"
                 ? missingBoundary.data.continuationToken
                 : session.state.continuationToken;
+              await refreshMailboxQueue();
               updateThread(thread.id, {
                 events: [...events],
+                pendingTurn,
+                queuedTurns,
                 session: { ...session.state, continuationToken: recoveredContinuationToken, streamIndex: cursor },
                 status: statusFromEvents(events),
               });
-              settled = true;
+              settled = missingBoundary.type !== "session.waiting" || !hasPendingServerQueue();
             }
           }
+          await refreshMailboxQueue();
+          if (!settled && currentBoundarySettles()) settled = true;
           setRecoveryErrors((current) => withoutMapKey(current, thread.id));
         } catch (error) {
           if (controller.signal.aborted || isAbortError(error)) return;
@@ -316,6 +552,8 @@ export function AgentWorkspace({
       if (!settled) throw new Error("The active Agent stream ended before reaching a durable boundary.");
       updateThread(thread.id, {
         events: compactThreadEvents(events),
+        pendingTurn,
+        queuedTurns,
         session: { ...session.state, continuationToken: recoveredContinuationToken ?? session.state.continuationToken, streamIndex: cursor },
         status: statusFromEvents(events),
       });
@@ -333,7 +571,7 @@ export function AgentWorkspace({
         return next;
       });
     }
-  }, [client, messages.recoveryFailed, updateThread]);
+  }, [client, mailbox, messages.recoveryFailed, onEvent, updateThread]);
 
   useEffect(() => () => {
     for (const controller of recoveryControllers.current.values()) controller.abort();
@@ -375,9 +613,22 @@ export function AgentWorkspace({
           <div className="flex min-w-0 items-center gap-2">
             <Button aria-label={messages.openNavigation} className="lg:hidden" onClick={() => setSidebarOpen(true)} size="icon-sm" variant="ghost"><MenuIcon className="size-4" /></Button>
             <Button aria-label={messages.toggleNavigation} className="hidden lg:inline-flex" onClick={() => setSidebarOpen((open) => !open)} size="icon-sm" variant="ghost">{sidebarOpen ? <PanelLeftCloseIcon className="size-4" /> : <PanelLeftIcon className="size-4" />}</Button>
-            <h2 className="truncate font-medium text-[15px]">{activeThread.title}</h2>
+            {activeSubagentSessionId ? (
+              <Button aria-label={messages.backToTask} onClick={closeSubagent} size="icon-sm" variant="ghost">
+                <ArrowLeftIcon className="size-4" />
+              </Button>
+            ) : null}
+            <h2 className="truncate font-medium text-[15px]">
+              {activeSubagentSessionId ? activeSubagent?.label ?? messages.subagentSession : activeThread.title}
+            </h2>
           </div>
           <div className="flex items-center gap-1">
+            <AgentSubagentMenu
+              activeSessionId={activeSubagentSessionId}
+              events={activeThread.events}
+              locale={locale}
+              onOpen={openSubagent}
+            />
             {hostSlots?.threadHeaderEnd}
           </div>
         </header>
@@ -404,24 +655,79 @@ export function AgentWorkspace({
             <p className="min-w-0 flex-1 text-foreground">{runtimeStatus.provider === "mock" ? messages.mockProvider : messages.providerUnconfigured}</p>
           </div>
         ) : null}
-        {activeIsRecovering ? (
+        {activeSubagentSessionId ? (
+          activeSubagent ? (
+            <AgentChildSessionView
+              client={client}
+              locale={locale}
+              preferences={activeThread.preferences}
+              sessionId={activeSubagentSessionId}
+            />
+          ) : (
+            <UnavailableSubagentView locale={locale} onBack={closeSubagent} />
+          )
+        ) : activeIsRecovering ? (
           <RecoveryView
             commands={commands}
             error={recoveryErrors.get(activeThread.id)}
             locale={locale}
+            mailboxEnabled={Boolean(mailbox)}
             mentions={mentions}
             models={models}
+            onRemoveQueuedTurn={(turnId) => void removeRecoveryQueuedTurn(activeThread.id, turnId)}
             onPreferencesChange={(preferences) => updateThread(activeThread.id, { preferences })}
             onRetry={() => setRecoveringIds((current) => new Set(current).add(activeThread.id))}
+            onRetryQueuedTurn={(turnId) => void retryRecoveryQueuedTurn(activeThread.id, turnId)}
             onStop={() => void stopRecoveringThread(activeThread)}
+            onSubmit={(message) => queueRecoveryMessage(activeThread.id, message)}
             providerReady={runtimeStatus.provider !== "unconfigured"}
+            queueError={recoveryQueueErrors.get(activeThread.id)}
             reasoningLevels={reasoningLevels}
             thread={activeThread}
           />
-        ) : <AgentThreadView client={client} commands={commands} key={activeThread.id} locale={locale} mentions={mentions} models={models} onChange={changeActiveThread} onEvent={onEvent} onRecoveryNeeded={recoverActiveThread} providerReady={runtimeStatus.provider !== "unconfigured"} reasoningLevels={reasoningLevels} thread={activeThread} />}
+        ) : <AgentThreadView client={client} commands={commands} key={activeThread.id} locale={locale} mailbox={mailbox} mentions={mentions} models={models} onChange={changeActiveThread} onEvent={onEvent} onOpenSubagent={openSubagent} onRecoveryNeeded={recoverActiveThread} providerReady={runtimeStatus.provider !== "unconfigured"} reasoningLevels={reasoningLevels} thread={activeThread} />}
       </section>
       <AgentSettingsDialog extensions={extensions} locale={locale} messages={messages} onLocaleChange={setLocale} onOpenChange={setSettingsOpen} open={settingsOpen} />
     </div>
+  );
+}
+
+function findSubagentSession(
+  events: readonly HandleMessageStreamEvent[],
+  sessionId: string,
+  locale: AgentLocale,
+): { readonly label: string; readonly task?: string } | undefined {
+  const sessions = presentSubagentSessions(events);
+  const index = sessions.findIndex((candidate) => candidate.childSessionId === sessionId);
+  const session = sessions[index];
+  if (!session) return undefined;
+  return {
+    label: session.name && session.name !== "agent"
+      ? session.name
+      : locale === "zh-CN" ? `子代理 ${index + 1}` : `Sub-agent ${index + 1}`,
+    ...(session.task ? { task: session.task } : {}),
+  };
+}
+
+function UnavailableSubagentView({
+  locale,
+  onBack,
+}: {
+  readonly locale: AgentLocale;
+  readonly onBack: () => void;
+}) {
+  const messages = messagesFor(locale);
+  return (
+    <main className="flex min-h-0 flex-1 items-center justify-center bg-background px-6">
+      <div className="max-w-md text-center">
+        <AlertCircleIcon className="mx-auto size-5 text-muted-foreground" />
+        <p className="mt-3 text-sm text-muted-foreground">{messages.subagentUnavailable}</p>
+        <Button className="mt-4" onClick={onBack} size="sm" variant="outline">
+          <ArrowLeftIcon className="size-4" />
+          {messages.backToTask}
+        </Button>
+      </div>
+    </main>
   );
 }
 
@@ -429,24 +735,34 @@ function RecoveryView({
   commands,
   error,
   locale,
+  mailboxEnabled,
   mentions,
   models,
+  onRemoveQueuedTurn,
   onPreferencesChange,
   onRetry,
+  onRetryQueuedTurn,
   onStop,
+  onSubmit,
   providerReady,
+  queueError,
   reasoningLevels,
   thread,
 }: {
   readonly commands: readonly AgentPromptMenuItem[];
   readonly error?: string;
   readonly locale: AgentLocale;
+  readonly mailboxEnabled: boolean;
   readonly mentions: readonly AgentPromptMenuItem[];
   readonly models: readonly AgentModelOption[];
+  readonly onRemoveQueuedTurn: (turnId: string) => void;
   readonly onPreferencesChange: (preferences: AgentThreadPreferences) => void;
   readonly onRetry: () => void;
+  readonly onRetryQueuedTurn: (turnId: string) => void;
   readonly onStop: () => void;
+  readonly onSubmit: (message: PromptInputMessage) => Promise<void>;
   readonly providerReady: boolean;
+  readonly queueError?: string;
   readonly reasoningLevels: readonly string[];
   readonly thread: AgentThread;
 }) {
@@ -484,16 +800,25 @@ function RecoveryView({
           </ConversationContent>
         </Conversation>
         <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
+          {thread.queuedTurns.length > 0 || queueError ? (
+            <FollowUpQueue
+              error={queueError}
+              messages={messages}
+              onRemove={onRemoveQueuedTurn}
+              onRetry={onRetryQueuedTurn}
+              turns={thread.queuedTurns}
+            />
+          ) : null}
           <AgentComposer
             commands={commands}
             disabled={!providerReady}
-            inputDisabled
+            inputDisabled={!mailboxEnabled}
             mentions={mentions}
             messages={messages}
             models={models}
             onPreferencesChange={onPreferencesChange}
             onStop={onStop}
-            onSubmit={ignoreRecoverySubmit}
+            onSubmit={onSubmit}
             preferences={thread.preferences}
             reasoningLevels={reasoningLevels}
             status="streaming"
@@ -507,8 +832,6 @@ function RecoveryView({
 
 const RECOVERY_POLL_INTERVAL_MS = 1_500;
 const RECOVERY_TAIL_LOOKUP_TIMEOUT_MS = 1_500;
-
-async function ignoreRecoverySubmit(_message: PromptInputMessage): Promise<void> {}
 
 function latestTurnId(events: readonly HandleMessageStreamEvent[]): string | undefined {
   const event = [...events].reverse().find((candidate) => candidate.type === "turn.started");
@@ -635,8 +958,38 @@ function withoutMapKey<K, V>(source: Map<K, V>, key: K): Map<K, V> {
 
 function threadNeedsRecovery(thread: AgentThread): boolean {
   if (!thread.session.sessionId) return false;
+  if (thread.queuedTurns.some((turn) =>
+    turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId)
+  )) return true;
   const lastEvent = thread.events.at(-1);
   return !lastEvent || !isRecoveryBoundary(lastEvent);
+}
+
+function createQueuedTurnId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `queued-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function mailboxQueueState(
+  status: import("./contracts.js").AgentMailboxItemStatus,
+): AgentQueuedTurn["state"] | "cancelled" {
+  if (status === "failed") return "delivery-failed";
+  if (status === "submission-ambiguous") return "admission-ambiguous";
+  if (status === "cancelled") return "cancelled";
+  return "queued";
+}
+
+function sameQueuedTurns(
+  left: readonly AgentQueuedTurn[],
+  right: readonly AgentQueuedTurn[],
+): boolean {
+  return left.length === right.length && left.every((turn, index) => {
+    const candidate = right[index];
+    return candidate?.id === turn.id &&
+      candidate.mailboxItemId === turn.mailboxItemId &&
+      candidate.state === turn.state;
+  });
 }
 
 function loadLocale(storageKey: string): AgentLocale {

@@ -283,7 +283,7 @@ test("a slow Provider does not force the live Agent stream into recovery", async
   const composer = page.getByRole("textbox", { name: "Describe a task" });
   await composer.fill("Run a slow task");
   await composer.press("Enter");
-  await expect(composer).toBeDisabled();
+  await expect(composer).toBeEnabled();
   const activity = page.getByRole("status").filter({ hasText: "Starting task" });
   await expect(activity).toBeVisible();
   await expect(activity).toHaveText("Starting task");
@@ -292,6 +292,483 @@ test("a slow Provider does not force the live Agent stream into recovery", async
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
   await expect(page.getByText("Slow task completed.", { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
+});
+
+test("follow-up messages queue during a run and deliver in order at the waiting boundary", async ({ page }) => {
+  const sessionId = "mock-follow-up-session";
+  let continuationRequests = 0;
+  let mailboxBody: Record<string, unknown> | undefined;
+  let mailboxRequests = 0;
+
+  await page.route("**/eve/v1/session", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-follow-up-token-0", sessionId }),
+      contentType: "application/json",
+      headers: { "x-eve-session-id": sessionId },
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
+    continuationRequests += 1;
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-follow-up-token-1", sessionId }),
+      contentType: "application/json",
+      headers: { "x-eve-session-id": sessionId },
+      status: 200,
+    });
+  });
+  await page.route("**/api/standalone/mailbox", async (route) => {
+    mailboxRequests += 1;
+    mailboxBody = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      body: JSON.stringify({
+        item: {
+          clientMessageId: mailboxBody.clientMessageId,
+          itemId: "mail-follow-up",
+          status: "queued",
+        },
+        ok: true,
+      }),
+      contentType: "application/json",
+      status: 202,
+    });
+  });
+  await page.route("**/api/standalone/mailbox/mail-follow-up", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        item: {
+          clientMessageId: mailboxBody?.clientMessageId ?? "unknown-client-message",
+          itemId: "mail-follow-up",
+          status: "accepted",
+        },
+        ok: true,
+      }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    const startIndex = Number(new URL(route.request().url()).searchParams.get("startIndex") ?? "0");
+    if (startIndex === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+      await route.fulfill({
+        body: mockSuccessfulTurn("Start the long task", "First turn completed."),
+        contentType: "application/x-ndjson",
+        status: 200,
+      });
+      return;
+    }
+    const body = mockContinuationTurn("Add the requested footer", "Footer added.");
+    const eventCount = eventsFromNdjson(body).length;
+    await route.fulfill({
+      body,
+      contentType: "application/x-ndjson",
+      headers: { "x-eve-stream-tail-index": String(startIndex + eventCount - 1) },
+      status: 200,
+    });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("Start the long task");
+  await composer.press("Enter");
+  await expect(composer).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
+  await composer.fill("Add the requested footer");
+  await composer.press("Enter");
+
+  await expect(page.getByRole("button", { name: /Queued follow-ups/u })).toBeVisible();
+  await expect(page.getByText("Add the requested footer", { exact: true })).toBeVisible();
+  await expect(page.getByText("Footer added.", { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: /Queued follow-ups/u })).toBeHidden();
+  expect(continuationRequests).toBe(0);
+  expect(mailboxRequests).toBe(1);
+  expect(mailboxBody).toMatchObject({
+    message: "Add the requested footer",
+    sessionId,
+  });
+});
+
+test("cancelling a queued follow-up prevents browser delivery before admission", async ({ page }) => {
+  const sessionId = "mock-cancel-follow-up-session";
+  let cancellationRequests = 0;
+  let continuationRequests = 0;
+  let mailboxEnqueues = 0;
+  let mailboxInspections = 0;
+
+  await page.route("**/eve/v1/session", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-cancel-token-0", sessionId }),
+      contentType: "application/json",
+      headers: { "x-eve-session-id": sessionId },
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
+    continuationRequests += 1;
+    await route.fulfill({ status: 500 });
+  });
+  await page.route("**/api/standalone/mailbox", async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      body: JSON.stringify({
+        item: {
+          clientMessageId: body.clientMessageId,
+          itemId: "mail-cancel-follow-up",
+          status: "queued",
+        },
+        ok: true,
+      }),
+      contentType: "application/json",
+      status: 202,
+    });
+    mailboxEnqueues += 1;
+  });
+  await page.route("**/api/standalone/mailbox/mail-cancel-follow-up", async (route) => {
+    const cancelled = route.request().method() === "DELETE";
+    if (cancelled) cancellationRequests += 1;
+    else mailboxInspections += 1;
+    await route.fulfill({
+      body: JSON.stringify({
+        item: {
+          clientMessageId: "queued-cancel-follow-up",
+          itemId: "mail-cancel-follow-up",
+          status: cancelled ? "cancelled" : "queued",
+        },
+        ok: true,
+      }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    await route.fulfill({
+      body: mockSuccessfulTurn("Start cancellable work", "Cancellable work completed."),
+      contentType: "application/x-ndjson",
+      status: 200,
+    });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("Start cancellable work");
+  await composer.press("Enter");
+  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
+  await composer.fill("Do not deliver this follow-up");
+  await composer.press("Enter");
+  await expect(page.getByText("Do not deliver this follow-up", { exact: true })).toBeVisible();
+  await expect.poll(() => mailboxEnqueues).toBe(1);
+  await expect.poll(() => mailboxInspections).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Remove queued message" }).click();
+  await expect(page.getByRole("button", { name: /Queued follow-ups/u })).toBeHidden();
+  await expect(page.getByText("Cancellable work completed.", { exact: true })).toBeVisible({ timeout: 10_000 });
+  expect(cancellationRequests).toBe(1);
+  expect(continuationRequests).toBe(0);
+});
+
+test("a persisted follow-up survives recovery and dispatches after the durable boundary", async ({ page }) => {
+  const sessionId = "mock-persisted-follow-up-session";
+  const initialTurn = eventsFromNdjson(mockSuccessfulTurn("Start persisted work", "Persisted work completed."));
+  const acceptedEvents = initialTurn.slice(0, 4);
+  let continuationRequests = 0;
+  let mailboxEnqueues = 0;
+
+  setFakeThreadCollection(page, {
+    activeThreadId: "persisted-follow-up-thread",
+    threads: [{
+      createdAt: Date.now(),
+      events: acceptedEvents,
+      id: "persisted-follow-up-thread",
+      preferences: { executionMode: "standard", modelId: "gpt-5.6-sol", reasoning: "medium" },
+      queuedTurns: [{
+        delivery: "server",
+        id: "queued-persisted-footer",
+        mailboxItemId: "mail-persisted-footer",
+        state: "queued",
+        submittedAt: Date.now(),
+        text: "Add the persisted footer",
+      }],
+      session: { sessionId, streamIndex: acceptedEvents.length },
+      status: "streaming",
+      title: "Persisted follow-up",
+      updatedAt: Date.now(),
+    }],
+    version: 2,
+  });
+  await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
+    continuationRequests += 1;
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-persisted-token-2", sessionId }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route("**/api/standalone/mailbox", async (route) => {
+    mailboxEnqueues += 1;
+    await route.fulfill({ status: 500 });
+  });
+  await page.route("**/api/standalone/mailbox/mail-persisted-footer", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        item: {
+          clientMessageId: "queued-persisted-footer",
+          itemId: "mail-persisted-footer",
+          status: "accepted",
+        },
+        ok: true,
+      }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    const url = new URL(route.request().url());
+    const startIndex = Number(url.searchParams.get("startIndex") ?? "0");
+    if (startIndex < initialTurn.length) {
+      await route.fulfill({
+        body: `${initialTurn.slice(startIndex).map((event) => JSON.stringify(event)).join("\n")}\n`,
+        contentType: "application/x-ndjson",
+        headers: { "x-eve-stream-tail-index": String(initialTurn.length - 1) },
+        status: 200,
+      });
+      return;
+    }
+    const body = mockContinuationTurn("Add the persisted footer", "Persisted footer added.");
+    const eventCount = eventsFromNdjson(body).length;
+    await route.fulfill({
+      body,
+      contentType: "application/x-ndjson",
+      headers: { "x-eve-stream-tail-index": String(startIndex + eventCount - 1) },
+      status: 200,
+    });
+  });
+
+  await page.goto("/threads/persisted-follow-up-thread");
+  await expect(page.getByText("Persisted footer added.", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: /Queued follow-ups/u })).toBeHidden();
+  expect(continuationRequests).toBe(0);
+  expect(mailboxEnqueues).toBe(0);
+});
+
+test("two persisted follow-ups remain separate and recover in strict FIFO order", async ({ page }) => {
+  const sessionId = "mock-fifo-follow-up-session";
+  const initialEvents = eventsFromNdjson(mockSuccessfulTurn("Prepare the workspace", "Workspace prepared."));
+  const firstEvents = eventsFromNdjson(mockContinuationTurn("Add the header", "Header added.", 1));
+  const secondEvents = eventsFromNdjson(mockContinuationTurn("Add the footer", "Footer added.", 2));
+  const firstCursor = initialEvents.length;
+  const secondCursor = firstCursor + firstEvents.length;
+  let continuationRequests = 0;
+  const mailboxInspections: string[] = [];
+
+  setFakeThreadCollection(page, {
+    activeThreadId: "fifo-follow-up-thread",
+    threads: [{
+      createdAt: Date.now(),
+      events: initialEvents,
+      id: "fifo-follow-up-thread",
+      preferences: { executionMode: "standard", modelId: "gpt-5.6-sol", reasoning: "medium" },
+      queuedTurns: [
+        {
+          delivery: "server",
+          id: "queued-fifo-header",
+          mailboxItemId: "mail-fifo-header",
+          state: "queued",
+          submittedAt: Date.now(),
+          text: "Add the header",
+        },
+        {
+          delivery: "server",
+          id: "queued-fifo-footer",
+          mailboxItemId: "mail-fifo-footer",
+          state: "queued",
+          submittedAt: Date.now() + 1,
+          text: "Add the footer",
+        },
+      ],
+      session: {
+        continuationToken: "mock-token-1",
+        sessionId,
+        streamIndex: firstCursor,
+      },
+      status: "ready",
+      title: "FIFO follow-ups",
+      updatedAt: Date.now(),
+    }],
+    version: 2,
+  });
+  await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
+    continuationRequests += 1;
+    await route.fulfill({ status: 500 });
+  });
+  for (const [itemId, clientMessageId] of [
+    ["mail-fifo-header", "queued-fifo-header"],
+    ["mail-fifo-footer", "queued-fifo-footer"],
+  ] as const) {
+    await page.route(`**/api/standalone/mailbox/${itemId}`, async (route) => {
+      mailboxInspections.push(itemId);
+      await route.fulfill({
+        body: JSON.stringify({
+          item: { clientMessageId, itemId, status: "committed" },
+          ok: true,
+        }),
+        contentType: "application/json",
+        status: 200,
+      });
+    });
+  }
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    const startIndex = Number(new URL(route.request().url()).searchParams.get("startIndex") ?? "0");
+    const body = startIndex < secondCursor
+      ? `${firstEvents.slice(Math.max(0, startIndex - firstCursor)).map((event) => JSON.stringify(event)).join("\n")}\n`
+      : `${secondEvents.slice(Math.max(0, startIndex - secondCursor)).map((event) => JSON.stringify(event)).join("\n")}\n`;
+    const eventCount = eventsFromNdjson(body).length;
+    await route.fulfill({
+      body,
+      contentType: "application/x-ndjson",
+      headers: { "x-eve-stream-tail-index": String(startIndex + eventCount - 1) },
+      status: 200,
+    });
+  });
+
+  await page.goto("/threads/fifo-follow-up-thread");
+  await expect(page.getByText("Header added.", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Footer added.", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: /Queued follow-ups/u })).toBeHidden();
+
+  const storedMessages = threadEvents(page)
+    .filter((event) => isEventType(event, "message.received"))
+    .map((event) => (event as { data: { message: string } }).data.message);
+  expect(storedMessages).toEqual(["Prepare the workspace", "Add the header", "Add the footer"]);
+  expect(continuationRequests).toBe(0);
+  expect(mailboxInspections).toContain("mail-fifo-header");
+  expect(mailboxInspections).toContain("mail-fifo-footer");
+});
+
+test("a failed queued follow-up remains retryable without duplicating the accepted turn", async ({ page }) => {
+  const sessionId = "mock-retry-follow-up-session";
+  const settledEvents = eventsFromNdjson(mockSuccessfulTurn("Prepare retry", "Ready for follow-up."));
+  let continuationRequests = 0;
+
+  setFakeThreadCollection(page, {
+    activeThreadId: "retry-follow-up-thread",
+    threads: [{
+      createdAt: Date.now(),
+      events: settledEvents,
+      id: "retry-follow-up-thread",
+      preferences: { executionMode: "standard", modelId: "gpt-5.6-sol", reasoning: "medium" },
+      queuedTurns: [{
+        delivery: "server",
+        id: "queued-retry-footer",
+        mailboxItemId: "mail-retry-footer",
+        state: "delivery-failed",
+        submittedAt: Date.now(),
+        text: "Retry the footer",
+      }],
+      session: {
+        continuationToken: "mock-token-1",
+        sessionId,
+        streamIndex: settledEvents.length,
+      },
+      status: "ready",
+      title: "Retry follow-up",
+      updatedAt: Date.now(),
+    }],
+    version: 2,
+  });
+  await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
+    continuationRequests += 1;
+    if (continuationRequests === 1) {
+      await route.abort("connectionfailed");
+      return;
+    }
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-retry-token-2", sessionId }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route("**/api/standalone/mailbox/mail-retry-footer", async (route) => {
+    if (route.request().method() !== "GET") continuationRequests += 1;
+    await route.fulfill({
+      body: JSON.stringify({
+        item: {
+          clientMessageId: "queued-retry-footer",
+          itemId: "mail-retry-footer",
+          status: route.request().method() === "PATCH" ? "queued" : "accepted",
+        },
+        ok: true,
+      }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    const startIndex = Number(new URL(route.request().url()).searchParams.get("startIndex") ?? "0");
+    const body = mockContinuationTurn("Retry the footer", "Retried footer added.");
+    const eventCount = eventsFromNdjson(body).length;
+    await route.fulfill({
+      body,
+      contentType: "application/x-ndjson",
+      headers: { "x-eve-stream-tail-index": String(startIndex + eventCount - 1) },
+      status: 200,
+    });
+  });
+
+  await page.goto("/threads/retry-follow-up-thread");
+  await expect(page.getByText("Delivery failed", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Retry queued message" }).click();
+  await expect(page.getByText("Retried footer added.", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: /Queued follow-ups/u })).toBeHidden();
+  expect(continuationRequests).toBe(1);
+});
+
+test("an ambiguous mailbox admission is visible but never offered as a blind retry", async ({ page }) => {
+  const sessionId = "mock-ambiguous-follow-up-session";
+  const settledEvents = eventsFromNdjson(mockSuccessfulTurn("Prepare ambiguity", "Ready for follow-up."));
+
+  setFakeThreadCollection(page, {
+    activeThreadId: "ambiguous-follow-up-thread",
+    threads: [{
+      createdAt: Date.now(),
+      events: settledEvents,
+      id: "ambiguous-follow-up-thread",
+      preferences: { executionMode: "standard", modelId: "gpt-5.6-sol", reasoning: "medium" },
+      queuedTurns: [{
+        delivery: "server",
+        id: "queued-ambiguous-footer",
+        mailboxItemId: "mail-ambiguous-footer",
+        state: "admission-ambiguous",
+        submittedAt: Date.now(),
+        text: "The possibly admitted footer",
+      }],
+      session: { continuationToken: "mock-ambiguous-token", sessionId, streamIndex: settledEvents.length },
+      status: "ready",
+      title: "Ambiguous follow-up",
+      updatedAt: Date.now(),
+    }],
+    version: 2,
+  });
+  await page.route("**/api/standalone/mailbox/mail-ambiguous-footer", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        item: {
+          clientMessageId: "queued-ambiguous-footer",
+          itemId: "mail-ambiguous-footer",
+          lastError: "The admission response was lost.",
+          status: "submission-ambiguous",
+        },
+        ok: true,
+      }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+
+  await page.goto("/threads/ambiguous-follow-up-thread");
+  await expect(page.getByText("Admission needs review", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry queued message" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove queued message" })).toHaveCount(0);
 });
 
 test("a proxied child approval stays attached to the parent task and resumes it", async ({ page }) => {
@@ -332,6 +809,13 @@ test("a proxied child approval stays attached to the parent task and resumes it"
       status: 200,
     });
   });
+  await page.route("**/eve/v1/session/child-css/stream**", async (route) => {
+    await route.fulfill({
+      body: mockCompletedChildTurn("Build and validate the stylesheet", "Child stylesheet complete."),
+      contentType: "application/x-ndjson",
+      status: 200,
+    });
+  });
 
   await page.goto("/threads/child-approval-thread");
   await expect(page.getByText("Waiting for approval", { exact: true })).toBeVisible();
@@ -347,8 +831,16 @@ test("a proxied child approval stays attached to the parent task and resumes it"
   });
   await expect(page.getByText("The delegated task resumed and completed.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Worked for/ }).click();
-  await page.getByRole("button", { name: "Delegated task", exact: true }).click();
+  await page.getByRole("button", { name: "Sub-agent", exact: true }).click();
   await expect(page.getByText("Sub-agent finished and returned its result to the parent Agent", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Open sub-agents" }).click();
+  await expect(page.getByRole("region", { name: "Done" }).getByText("Sub-agent 1", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /Open sub-agent session/u }).click();
+  await expect(page).toHaveURL(/\/threads\/child-approval-thread\/agents\/child-css$/);
+  await expect(page.getByText("Child stylesheet complete.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to parent task" }).click();
+  await expect(page).toHaveURL(/\/threads\/child-approval-thread$/);
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
 });
 
@@ -557,7 +1049,8 @@ test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
   await composer.press("Enter");
   await expect.poll(() => threadEvents(page).some((event) => isEventType(event, "step.started"))).toBeTruthy();
   await page.reload();
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeDisabled();
+  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText("Reconnecting to the active run...")).toBeHidden();
   await expect(page.getByText("Refresh recovery ready.", { exact: true })).toBeVisible();
@@ -641,6 +1134,15 @@ function mockSuccessfulTurn(message: string, reply: string): string {
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
 
+function mockCompletedChildTurn(message: string, reply: string): string {
+  const events = eventsFromNdjson(mockSuccessfulTurn(message, reply));
+  const at = new Date().toISOString();
+  return `${[
+    ...events.slice(0, -1),
+    { data: { result: reply }, meta: { at }, type: "session.completed" },
+  ].map((event) => JSON.stringify(event)).join("\n")}\n`;
+}
+
 function mockToolTurn(message: string, reply: string): string {
   const base = Date.now();
   const at = (offset: number) => new Date(base + offset).toISOString();
@@ -661,6 +1163,25 @@ function mockToolTurn(message: string, reply: string): string {
     { data: { continuationToken: "mock-tool-token", wait: "next-user-message" }, meta: { at: at(2_300) }, type: "session.waiting" },
   ];
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
+}
+
+function mockContinuationTurn(message: string, reply: string, sequence = 1): string {
+  const at = new Date().toISOString();
+  const turnId = `turn_${sequence}`;
+  const events = [
+    { data: { sequence, turnId }, meta: { at }, type: "turn.started" },
+    { data: { message, parts: [{ text: message, type: "text" }], sequence, turnId }, meta: { at }, type: "message.received" },
+    { data: { sequence, stepIndex: 0, turnId }, meta: { at }, type: "step.started" },
+    { data: { finishReason: "stop", message: reply, sequence, stepIndex: 0, turnId }, meta: { at }, type: "message.completed" },
+    { data: { finishReason: "stop", sequence, stepIndex: 0, turnId, usage: { inputTokens: 2, outputTokens: 2 } }, meta: { at }, type: "step.completed" },
+    { data: { sequence, turnId }, meta: { at }, type: "turn.completed" },
+    { data: { continuationToken: `mock-follow-up-token-${sequence}`, wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+  ];
+  return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
+}
+
+function eventsFromNdjson(payload: string): readonly unknown[] {
+  return payload.trim().split("\n").map((line) => JSON.parse(line) as unknown);
 }
 
 function mockChildApprovalEvents(): readonly unknown[] {

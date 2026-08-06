@@ -1,4 +1,6 @@
 import { eveChannel } from "eve/channels/eve";
+import { POST, type Session } from "eve/channels";
+import type { SessionAuthContext } from "eve/context";
 import {
   type AuthFn,
   localDev,
@@ -23,6 +25,7 @@ import { standaloneCookieAuth } from "../lib/standalone-auth";
 import { withSessionOwnership } from "../lib/session-ownership-auth";
 import { parseAgentRunPolicy } from "../lib/run-policy";
 import { parseRemoteTraceParent } from "../lib/observability";
+import { verifyMailboxDispatchRequest } from "../lib/mailbox-dispatch-auth.ts";
 
 const MODEL_HEADER = "x-agent-model";
 const REASONING_HEADER = "x-agent-reasoning";
@@ -33,6 +36,8 @@ const RUN_POLICY_HEADER = "x-agent-run-policy";
 const RUN_ID_HEADER = "x-agent-run-id";
 const CORRELATION_ID_HEADER = "x-agent-correlation-id";
 const TRACE_PARENT_HEADER = "traceparent";
+const MAILBOX_ROUTE = "/eve/v1/internal/mailbox";
+const MAX_MAILBOX_REQUEST_BYTES = 128 * 1024;
 const sessionOwnershipStore = createPostgresSessionOwnershipStoreFromEnvironment();
 const extensionStore = createPostgresAgentExtensionStoreFromEnvironment();
 
@@ -134,7 +139,7 @@ function parseRunPolicyHeader(value: string | null): AgentRunPolicy {
   }
 }
 
-export default eveChannel({
+const channel = eveChannel({
   auth: [
     // Host-signed tenant identity is the primary production browser path.
     sessionOwnershipStore
@@ -157,3 +162,231 @@ export default eveChannel({
     withAgentPreferences(localDev()),
   ],
 });
+
+const mailboxRoute = POST(MAILBOX_ROUTE, async (request, {
+  getSession,
+  resolveActiveSession,
+  send,
+}) => {
+  const contentLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > MAX_MAILBOX_REQUEST_BYTES) {
+    return mailboxProblem(413, "mailbox_request_too_large", "The mailbox request exceeds 128 KiB.");
+  }
+  let body: string;
+  try {
+    body = await request.text();
+  } catch {
+    return mailboxProblem(400, "mailbox_request_unreadable", "The mailbox request could not be read.");
+  }
+  if (Buffer.byteLength(body) > MAX_MAILBOX_REQUEST_BYTES) {
+    return mailboxProblem(413, "mailbox_request_too_large", "The mailbox request exceeds 128 KiB.");
+  }
+  try {
+    if (!verifyMailboxDispatchRequest(request, body)) {
+      return mailboxProblem(401, "mailbox_auth_invalid", "The mailbox dispatcher signature is invalid.");
+    }
+  } catch {
+    return mailboxProblem(503, "mailbox_auth_unconfigured", "The mailbox dispatcher is not configured.");
+  }
+
+  const input = parseMailboxRequest(body);
+  if (!input) {
+    return mailboxProblem(400, "mailbox_request_invalid", "The mailbox request is invalid.");
+  }
+  let boundary: MailboxBoundary;
+  try {
+    boundary = await inspectMailboxBoundary(getSession(input.sessionId));
+  } catch {
+    return mailboxProblem(404, "mailbox_session_not_found", "The Agent session was not found.");
+  }
+  if (input.action === "inspect") {
+    return Response.json({ ...boundary, ok: true }, { headers: { "cache-control": "no-store" } });
+  }
+  if (boundary.state !== "waiting") {
+    return mailboxProblem(
+      boundary.state === "terminal" ? 410 : 409,
+      boundary.state === "terminal" ? "mailbox_session_terminal" : "mailbox_session_running",
+      boundary.state === "terminal"
+        ? "The Agent session is terminal."
+        : "The Agent session has not reached a waiting boundary.",
+    );
+  }
+  if (boundary.continuationToken !== input.continuationToken) {
+    return mailboxProblem(409, "mailbox_continuation_stale", "The mailbox continuation token is stale.");
+  }
+  const active = await resolveActiveSession({ continuationToken: boundary.continuationToken });
+  if (active?.sessionId !== input.sessionId) {
+    return mailboxProblem(409, "mailbox_session_not_active", "The continuation no longer owns this Agent session.");
+  }
+
+  try {
+    const accepted = await send(
+      input.message,
+      {
+        auth: mailboxSessionAuth(input),
+        continuationToken: boundary.continuationToken,
+      },
+    );
+    if (accepted.id !== input.sessionId) {
+      return mailboxProblem(
+        409,
+        "mailbox_session_identity_changed",
+        "The runtime admitted the message to an unexpected Agent session.",
+      );
+    }
+    return Response.json(
+      { ok: true, sessionId: accepted.id },
+      { headers: { "cache-control": "no-store" }, status: 202 },
+    );
+  } catch {
+    return mailboxProblem(
+      502,
+      "mailbox_admission_unknown",
+      "The runtime could not confirm mailbox admission.",
+    );
+  }
+});
+
+// Keep the canonical Eve channel identity so this internal route resumes the
+// same continuation namespace instead of creating a second transport session.
+export default {
+  ...channel,
+  routes: [...channel.routes, mailboxRoute],
+};
+
+type MailboxBoundary =
+  | { readonly state: "running" }
+  | { readonly continuationToken: string; readonly state: "waiting" }
+  | { readonly state: "terminal" };
+
+type MailboxInspectRequest = {
+  readonly action: "inspect";
+  readonly sessionId: string;
+};
+
+type MailboxDeliverRequest = {
+  readonly action: "deliver";
+  readonly clientMessageId: string;
+  readonly continuationToken: string;
+  readonly executionMode?: AgentRunPolicy["executionMode"];
+  readonly issuer?: string;
+  readonly itemId: string;
+  readonly message: string;
+  readonly modelId?: string;
+  readonly principalId: string;
+  readonly principalType: string;
+  readonly reasoning?: string;
+  readonly sessionId: string;
+  readonly tenantId: string;
+};
+
+function parseMailboxRequest(body: string): MailboxInspectRequest | MailboxDeliverRequest | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(value) || !validText(value.sessionId, 512)) return undefined;
+  if (value.action === "inspect") return { action: "inspect", sessionId: value.sessionId };
+  if (
+    value.action !== "deliver" ||
+    !validText(value.clientMessageId, 200) ||
+    !validText(value.continuationToken, 2_000) ||
+    !validText(value.itemId, 512) ||
+    !validText(value.message, 65_536) ||
+    !validText(value.principalId, 512) ||
+    !validText(value.principalType, 512) ||
+    !validText(value.tenantId, 512) ||
+    value.issuer !== undefined && !validText(value.issuer, 512) ||
+    value.modelId !== undefined && !validText(value.modelId, 200) ||
+    value.reasoning !== undefined && !validText(value.reasoning, 100) ||
+    value.executionMode !== undefined &&
+      value.executionMode !== "automation" &&
+      value.executionMode !== "cautious" &&
+      value.executionMode !== "standard"
+  ) return undefined;
+  return {
+    action: "deliver",
+    clientMessageId: value.clientMessageId,
+    continuationToken: value.continuationToken,
+    ...(value.executionMode ? { executionMode: value.executionMode } : {}),
+    ...(value.issuer ? { issuer: value.issuer } : {}),
+    itemId: value.itemId,
+    message: value.message,
+    ...(value.modelId ? { modelId: value.modelId } : {}),
+    principalId: value.principalId,
+    principalType: value.principalType,
+    ...(value.reasoning ? { reasoning: value.reasoning } : {}),
+    sessionId: value.sessionId,
+    tenantId: value.tenantId,
+  };
+}
+
+async function inspectMailboxBoundary(
+  session: Session,
+): Promise<MailboxBoundary> {
+  const stream = await session.getEventStream({ startIndex: -1 });
+  const reader = stream.getReader();
+  try {
+    const latest = await reader.read();
+    if (latest.done || !latest.value) return { state: "running" };
+    if (latest.value.type === "session.waiting") {
+      return {
+        continuationToken: latest.value.data.continuationToken,
+        state: "waiting",
+      };
+    }
+    if (latest.value.type === "session.completed" || latest.value.type === "session.failed") {
+      return { state: "terminal" };
+    }
+    return { state: "running" };
+  } finally {
+    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+}
+
+function mailboxSessionAuth(input: MailboxDeliverRequest): SessionAuthContext {
+  const config = resolveAgentRuntimeConfig({});
+  const model = input.modelId
+    ? findAgentRuntimeModel(config, input.modelId)
+    : undefined;
+  if (input.modelId && !model) {
+    throw new Error("The mailbox model is not published by this runtime.");
+  }
+  if (model && input.reasoning && !isAgentReasoningLevelForModel(model, input.reasoning)) {
+    throw new Error("The mailbox reasoning level is not supported by this model.");
+  }
+  return {
+    attributes: {
+      actorType: input.principalType === "service" ? "service" : "user",
+      tenantId: input.tenantId,
+      agentMailboxItemId: input.itemId,
+      ...(model ? { agentModelId: model.id } : {}),
+      ...(input.reasoning ? { agentReasoning: input.reasoning } : {}),
+      ...(input.executionMode
+        ? { agentRunPolicy: JSON.stringify({ executionMode: input.executionMode }) }
+        : {}),
+    },
+    authenticator: "agent-mailbox-dispatch",
+    ...(input.issuer ? { issuer: input.issuer } : {}),
+    principalId: input.principalId,
+    principalType: input.principalType,
+  };
+}
+
+function mailboxProblem(status: number, code: string, error: string): Response {
+  return Response.json(
+    { code, error, ok: false },
+    { headers: { "cache-control": "no-store" }, status },
+  );
+}
+
+function validText(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maximum;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

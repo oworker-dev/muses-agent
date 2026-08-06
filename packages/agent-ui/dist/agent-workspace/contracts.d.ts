@@ -14,6 +14,32 @@ export type AgentPendingTurn = {
     readonly submittedAt: number;
     readonly text: string;
 };
+export type AgentQueuedTurn = {
+    readonly delivery?: "browser" | "server";
+    readonly id: string;
+    readonly mailboxItemId?: string;
+    readonly state: "admission-ambiguous" | "delivery-failed" | "queued";
+    readonly submittedAt: number;
+    readonly text: string;
+};
+export type AgentMailboxItemStatus = "accepted" | "cancelled" | "committed" | "delivering" | "failed" | "queued" | "submission-ambiguous";
+export type AgentMailboxReceipt = {
+    readonly clientMessageId: string;
+    readonly itemId: string;
+    readonly lastError?: string;
+    readonly status: AgentMailboxItemStatus;
+};
+export interface AgentWorkspaceMailbox {
+    cancel(itemId: string): Promise<AgentMailboxReceipt>;
+    enqueue(input: {
+        readonly clientMessageId: string;
+        readonly message: string;
+        readonly preferences: AgentThreadPreferences;
+        readonly sessionId: string;
+    }): Promise<AgentMailboxReceipt>;
+    inspect(itemId: string): Promise<AgentMailboxReceipt>;
+    retry(itemId: string): Promise<AgentMailboxReceipt>;
+}
 export type AgentModelOption = {
     readonly contextWindowTokens: number;
     readonly id: string;
@@ -43,6 +69,7 @@ export type AgentThread = {
     readonly id: string;
     readonly pendingTurn?: AgentPendingTurn;
     readonly preferences: AgentThreadPreferences;
+    readonly queuedTurns: readonly AgentQueuedTurn[];
     readonly session: SessionState;
     readonly status: AgentThreadStatus;
     readonly title: string;
@@ -68,10 +95,13 @@ export type AgentWorkspaceConfig = {
     readonly extensions?: readonly AgentExtensionInfo[];
     readonly hostSlots?: AgentWorkspaceHostSlots;
     readonly initialThreadId?: string;
+    readonly initialSubagentSessionId?: string;
+    readonly mailbox?: AgentWorkspaceMailbox;
     readonly models: readonly AgentModelOption[];
     readonly mentions?: readonly AgentPromptMenuItem[];
     readonly onEvent?: (event: HandleMessageStreamEvent) => void;
     readonly onActiveThreadChange?: (threadId: string) => void;
+    readonly onActiveSubagentChange?: (threadId: string, sessionId?: string) => void;
     readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
     readonly onStorageError?: (error: unknown) => void;
     readonly productName: string;

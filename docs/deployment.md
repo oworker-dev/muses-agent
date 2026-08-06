@@ -5,8 +5,8 @@ claim that an unverified deployment is production-ready.
 
 ## Topology
 
-Run Agent Web and Eve Runtime as separate Node.js 24 processes. Use three
-separate state boundaries:
+Run Agent Web, Eve Runtime, and the mailbox worker as separate Node.js 24
+processes. Use three separate state boundaries:
 
 1. Host product data may contain the `open_agent` product schema for thread,
    ownership, AgentRun, extension, and deletion-authorization records.
@@ -15,6 +15,12 @@ separate state boundaries:
    Workflow runtime generations.
 3. Each Muses host deployment keeps its own Workflow World database outside the
    Eve database.
+
+The mailbox worker is part of the Web follow-up durability path. It polls the
+authenticated internal Web dispatcher and must be deployed at least once per
+Agent Web database. Multiple worker replicas are safe: PostgreSQL leases and
+per-session FIFO blockers prevent duplicate delivery. Do not replace it with a
+browser timer or an Eve continuation-token retry loop.
 
 Use a unique `WORKFLOW_POSTGRES_JOB_PREFIX` for every World. The supported Eve
 prefix is `open_agent_`; the Muses host uses `muses_` in its own database.
@@ -62,9 +68,29 @@ WORKFLOW_POSTGRES_URL=postgres://... npx --package=@workflow/world-postgres boot
 AGENT_DATABASE_URL=postgres://... npm run db:migrate
 ```
 
-Build and start Eve before Agent Web. The complete environment example and
-commands are in the root README. Health checks must verify the Eve health route,
-the Agent Web route, PostgreSQL connectivity, and telemetry export.
+Build and start Eve before Agent Web and the mailbox worker. The complete
+environment example and commands are in the root README. Health checks must
+verify the Eve health route, the Agent Web route, PostgreSQL connectivity, the
+worker's authenticated dispatcher response, and telemetry export. Production
+requires independent `AGENT_MAILBOX_WORKER_SECRET` and
+`AGENT_MAILBOX_DISPATCH_SECRET` values, each at least 32 bytes.
+
+Start the worker after Agent Web is healthy:
+
+```bash
+AGENT_WEB_INTERNAL_URL=https://agent.example.com \
+AGENT_MAILBOX_WORKER_SECRET='replace-with-32-byte-secret' \
+AGENT_MAILBOX_DISPATCH_SECRET='replace-with-another-32-byte-secret' \
+  npm run start:mailbox-worker
+```
+
+Inspection and busy-session failures are deferred with bounded backoff. A
+transport failure after admission begins is marked `submission-ambiguous` and
+must never be replayed automatically. The authoritative Eve
+`message.received` hook retries transient product-database failures and can
+promote that row directly to `committed` after a lost HTTP response. If no such
+durable confirmation arrives, the item remains blocked for explicit operator
+resolution; matching message text is not sufficient evidence.
 
 ## User-visible delivery
 
@@ -160,7 +186,7 @@ isolated environment without starting workers against production queues.
 
 Agent Web, Eve, Muses, and the collector must share W3C trace context. Durable
 queue work uses Span Links. Dashboards should cover turn and tool latency,
-Provider status, queue backlog, cancellation, sandbox allocation/reaping,
+Provider status, mailbox and Workflow queue backlog, cancellation, sandbox allocation/reaping,
 token/cache usage, projected cost, and host capability failures.
 
 Keep full prompts and outputs out of spans, logs, and exception stacks. Run the

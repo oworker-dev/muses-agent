@@ -8,7 +8,7 @@ export type AgentDatabaseConfig = {
 
 const DEFAULT_SCHEMA = "open_agent";
 const globalAgentDatabase = globalThis as typeof globalThis & {
-  __musesAgentDatabasePools?: Map<string, Pool>;
+  __openAgentDatabasePools?: Map<string, Pool>;
 };
 
 export function readAgentDatabaseConfig(
@@ -33,7 +33,7 @@ export function readAgentDatabaseConfig(
 
 export function getAgentDatabasePool(config: AgentDatabaseConfig): Pool {
   const key = `${config.connectionString}\u0000${config.maxPoolSize}`;
-  const pools = globalAgentDatabase.__musesAgentDatabasePools ??= new Map();
+  const pools = globalAgentDatabase.__openAgentDatabasePools ??= new Map();
   const existing = pools.get(key);
   if (existing) return existing;
 
@@ -47,9 +47,9 @@ export function getAgentDatabasePool(config: AgentDatabaseConfig): Pool {
 }
 
 export async function closeAgentDatabasePools(): Promise<void> {
-  const pools = globalAgentDatabase.__musesAgentDatabasePools;
+  const pools = globalAgentDatabase.__openAgentDatabasePools;
   if (!pools) return;
-  globalAgentDatabase.__musesAgentDatabasePools = new Map();
+  globalAgentDatabase.__openAgentDatabasePools = new Map();
   await Promise.all([...pools.values()].map((pool) => pool.end()));
 }
 

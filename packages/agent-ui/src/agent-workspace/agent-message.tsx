@@ -11,6 +11,7 @@ import {
   CheckCircleIcon,
   ChevronDownIcon,
   CirclePauseIcon,
+  CircleStopIcon,
   CopyIcon,
   ExternalLinkIcon,
   FileIcon,
@@ -58,6 +59,7 @@ export function AgentMessage({
   isStreaming,
   locale,
   message,
+  onOpenSubagent,
   onInputResponses,
 }: {
   readonly canRespond: boolean;
@@ -66,6 +68,7 @@ export function AgentMessage({
   readonly isStreaming: boolean;
   readonly locale: AgentLocale;
   readonly message: EveMessage;
+  readonly onOpenSubagent?: (sessionId: string) => void;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
 }) {
   const task = presentAgentTurn(message, events);
@@ -93,6 +96,7 @@ export function AgentMessage({
                   key={partKey(part, index)}
                   locale={locale}
                   onInputResponses={onInputResponses}
+                  onOpenSubagent={onOpenSubagent}
                   part={part}
                   showCaret={false}
                 />
@@ -108,6 +112,7 @@ export function AgentMessage({
                     inActiveExecution
                     locale={locale}
                     onInputResponses={onInputResponses}
+                    onOpenSubagent={onOpenSubagent}
                     part={part}
                     showCaret={false}
                   />
@@ -121,6 +126,7 @@ export function AgentMessage({
                 inActiveExecution={false}
                 locale={locale}
                 onInputResponses={onInputResponses}
+                onOpenSubagent={onOpenSubagent}
                 part={task.finalPart}
                 showCaret={isStreaming && task.finalPart.state === "streaming"}
               />
@@ -134,6 +140,7 @@ export function AgentMessage({
             key={partKey(part, index)}
             locale={locale}
             onInputResponses={onInputResponses}
+            onOpenSubagent={onOpenSubagent}
             part={part}
             showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
           />
@@ -151,6 +158,7 @@ function AgentMessagePart({
   events,
   inActiveExecution,
   locale,
+  onOpenSubagent,
   onInputResponses,
   part,
   showCaret,
@@ -159,6 +167,7 @@ function AgentMessagePart({
   readonly events: readonly HandleMessageStreamEvent[];
   readonly inActiveExecution: boolean;
   readonly locale: AgentLocale;
+  readonly onOpenSubagent?: (sessionId: string) => void;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
@@ -199,7 +208,7 @@ function AgentMessagePart({
           />
           <ToolContent>
             {part.toolMetadata?.eve?.kind === "subagent-call" ? (
-              <SubagentProgress events={events} locale={locale} part={part} />
+              <SubagentProgress events={events} locale={locale} onOpenSubagent={onOpenSubagent} part={part} />
             ) : null}
             <ToolInput input={part.input} label={localize(locale, "Parameters", "参数")} />
             <InputRequestActions
@@ -218,10 +227,12 @@ function AgentMessagePart({
 function SubagentProgress({
   events,
   locale,
+  onOpenSubagent,
   part,
 }: {
   readonly events: readonly HandleMessageStreamEvent[];
   readonly locale: AgentLocale;
+  readonly onOpenSubagent?: (sessionId: string) => void;
   readonly part: EveDynamicToolPart;
 }) {
   const presentation = presentSubagentCall(events, part.toolCallId);
@@ -229,8 +240,10 @@ function SubagentProgress({
   const isActive = presentation.status === "running" || presentation.status === "starting";
   const title = presentation.status === "completed"
     ? localize(locale, "Sub-agent finished and returned its result to the parent Agent", "子代理已完成，结果已返回父 Agent")
+    : presentation.status === "cancelled"
+      ? localize(locale, "Sub-agent stopped", "子代理已停止")
     : presentation.status === "failed"
-      ? localize(locale, "The delegated task failed and returned control to the parent Agent", "委派任务失败，控制权已返回父 Agent")
+      ? localize(locale, "Sub-agent failed and returned control to the parent Agent", "子代理执行失败，控制权已返回父 Agent")
       : presentation.status === "running" && elapsedSeconds >= 45
         ? localize(locale, "Sub-agent is still working; the parent Agent will resume automatically", "子代理仍在执行；完成后父 Agent 会自动继续")
         : presentation.status === "running"
@@ -251,6 +264,8 @@ function SubagentProgress({
         <LoaderCircleIcon className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
       ) : presentation.status === "completed" ? (
         <CheckCircleIcon className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-300" />
+      ) : presentation.status === "cancelled" ? (
+        <CircleStopIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       ) : (
         <XCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
       )}
@@ -258,8 +273,25 @@ function SubagentProgress({
         <p className="text-foreground">{title}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
           <NetworkIcon className="mr-1 inline size-3" />
-          {localize(locale, "Workspace changes are shared with this task.", "它对工作区的更改会实时共享给当前任务。")}
+          {presentation.name === "agent"
+            ? localize(locale, "Works in the parent Agent workspace.", "在父 Agent 的工作区中执行。")
+            : localize(locale, "Runs in its own isolated workspace.", "在独立隔离的工作区中执行。")}
         </p>
+        {presentation.childSessionId && onOpenSubagent ? (
+          <Button
+            className="mt-2 h-7 px-2 text-xs"
+            onClick={() => onOpenSubagent(presentation.childSessionId!)}
+            size="sm"
+            variant="outline"
+          >
+            <NetworkIcon className="size-3.5" />
+            {localize(
+              locale,
+              `Open ${presentation.name === "agent" ? "sub-agent" : presentation.name ?? "sub-agent"} session`,
+              `打开${presentation.name && presentation.name !== "agent" ? ` ${presentation.name}` : "子代理"}会话`,
+            )}
+          </Button>
+        ) : null}
       </div>
       {presentation.startedAt ? (
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -623,7 +655,7 @@ function toolStatusLabel(locale: AgentLocale, state: EveDynamicToolPart["state"]
 function toolTitle(locale: AgentLocale, part: EveDynamicToolPart): string {
   const kind = part.toolMetadata?.eve?.kind;
   if (kind === "load-skill") return localize(locale, "Loaded skill", "加载技能");
-  if (kind === "subagent-call") return localize(locale, "Delegated task", "委派子任务");
+  if (kind === "subagent-call") return localize(locale, "Sub-agent", "子代理");
 
   const normalized = part.toolName.toLocaleLowerCase().replaceAll("-", "_");
   if (["bash", "shell", "terminal"].includes(normalized)) return localize(locale, "Terminal command", "终端命令");

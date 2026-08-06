@@ -10,6 +10,7 @@ import {
   isProxiedInputOnlyMessage,
   presentAgentTurn,
   presentSubagentCall,
+  presentSubagentSessions,
 } from "../../packages/agent-ui/src/agent-workspace/turn-presentation.ts";
 import { summarizeUsage } from "../../packages/agent-ui/src/agent-workspace/usage.ts";
 
@@ -112,6 +113,8 @@ test("a proxied child approval keeps its parent task visibly waiting", () => {
 test("subagent lifecycle stays distinct from generic provider waiting", () => {
   const running = childApprovalEvents().slice(0, 3);
   assert.deepEqual(presentSubagentCall(running, "call-agent"), {
+    childSessionId: "child-session",
+    name: "agent",
     startedAt: Date.parse(startedAt),
     status: "running",
   });
@@ -125,11 +128,40 @@ test("subagent lifecycle stays distinct from generic provider waiting", () => {
     }),
   ];
   assert.deepEqual(presentSubagentCall(completed, "call-agent"), {
+    childSessionId: "child-session",
     endedAt: Date.parse(endedAt),
+    name: "agent",
     startedAt: Date.parse(startedAt),
     status: "completed",
   });
   assert.deepEqual(presentSubagentCall([], "call-pending"), { status: "starting" });
+});
+
+test("a cancelled parent turn stops orphaned subagent timers", () => {
+  const running = childApprovalEvents().slice(0, 3);
+  const cancelledAt = "2026-08-06T01:00:12.000Z";
+  const events = [
+    ...running,
+    event("turn.cancelled", cancelledAt, { sequence: 0, turnId: "turn-parent" }),
+    event("session.waiting", cancelledAt, { continuationToken: "continue-parent", wait: "next-user-message" }),
+  ];
+
+  assert.deepEqual(presentSubagentCall(events, "call-agent"), {
+    childSessionId: "child-session",
+    endedAt: Date.parse(cancelledAt),
+    name: "agent",
+    startedAt: Date.parse(startedAt),
+    status: "cancelled",
+  });
+  assert.deepEqual(presentSubagentSessions(events), [{
+    callId: "call-agent",
+    childSessionId: "child-session",
+    endedAt: Date.parse(cancelledAt),
+    name: "agent",
+    startedAt: Date.parse(startedAt),
+    status: "cancelled",
+    task: "Build the stylesheet",
+  }]);
 });
 
 test("the next root turn resolves a proxied child approval", () => {

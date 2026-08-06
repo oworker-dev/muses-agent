@@ -1,7 +1,7 @@
 import { type HandleMessageStreamEvent } from "eve/client";
-import type { AgentModelOption, AgentThread, AgentThreadPreferences, AgentWorkspaceClientConfig } from "./contracts.js";
+import type { AgentModelOption, AgentThread, AgentThreadPreferences, AgentWorkspaceClientConfig, AgentWorkspaceMailbox } from "./contracts.js";
 import { type AgentThreadStorage } from "./thread-storage.js";
-export declare function AgentWorkspace({ client, commands, defaultPreferences, extensions, hostSlots, initialThreadId, models, mentions, onEvent, onDeleteThread, onActiveThreadChange, onStorageError, productName, reasoningLevels, runtimeStatus, storageKey, threadStorage, }: {
+export declare function AgentWorkspace({ client, commands, defaultPreferences, extensions, hostSlots, initialSubagentSessionId, initialThreadId, mailbox, models, mentions, onEvent, onDeleteThread, onActiveSubagentChange, onActiveThreadChange, onStorageError, productName, reasoningLevels, runtimeStatus, storageKey, threadStorage, }: {
     readonly agentName?: string;
     readonly client?: AgentWorkspaceClientConfig;
     readonly commands?: readonly import("./contracts.js").AgentPromptMenuItem[];
@@ -11,11 +11,14 @@ export declare function AgentWorkspace({ client, commands, defaultPreferences, e
         readonly sidebarFooter?: React.ReactNode;
         readonly threadHeaderEnd?: React.ReactNode;
     };
+    readonly initialSubagentSessionId?: string;
     readonly initialThreadId?: string;
+    readonly mailbox?: AgentWorkspaceMailbox;
     readonly models: readonly AgentModelOption[];
     readonly mentions?: readonly import("./contracts.js").AgentPromptMenuItem[];
     readonly onEvent?: (event: HandleMessageStreamEvent) => void;
     readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
+    readonly onActiveSubagentChange?: (threadId: string, sessionId?: string) => void;
     readonly onActiveThreadChange?: (threadId: string) => void;
     readonly onStorageError?: (error: unknown) => void;
     readonly productName?: string;

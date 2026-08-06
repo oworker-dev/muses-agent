@@ -1,7 +1,7 @@
 import type { HandleMessageStreamEvent, SessionState } from "eve/client";
-import type { AgentPendingTurn, AgentThread, AgentThreadPreferences, AgentThreadStatus } from "./contracts.js";
+import type { AgentPendingTurn, AgentQueuedTurn, AgentThread, AgentThreadPreferences, AgentThreadStatus } from "./contracts.js";
 
-export const AGENT_THREAD_STORAGE_VERSION = 1;
+export const AGENT_THREAD_STORAGE_VERSION = 2;
 const EMPTY_SESSION: SessionState = { streamIndex: 0 };
 const FALLBACK_PREFERENCES: AgentThreadPreferences = {
   executionMode: "standard",
@@ -37,6 +37,7 @@ export function createAgentThread(
     events: [],
     id: createId(),
     preferences: { ...preferences },
+    queuedTurns: [],
     session: EMPTY_SESSION,
     status: "ready",
     title,
@@ -61,7 +62,7 @@ export function loadThreadCollection(storageKey: string): AgentThreadCollection 
 export function parseThreadCollection(value: unknown): AgentThreadCollection {
   if (
     !isRecord(value) ||
-    value.version !== AGENT_THREAD_STORAGE_VERSION ||
+    (value.version !== 1 && value.version !== AGENT_THREAD_STORAGE_VERSION) ||
     !Array.isArray(value.threads)
   ) {
     return { threads: [], version: AGENT_THREAD_STORAGE_VERSION };
@@ -117,6 +118,12 @@ function parseThread(value: unknown): AgentThread | undefined {
   const session = isRecord(value.session) ? value.session : {};
   const status = isThreadStatus(value.status) ? value.status : "ready";
   const pendingTurn = parsePendingTurn(value.pendingTurn);
+  const queuedTurns = Array.isArray(value.queuedTurns)
+    ? value.queuedTurns
+        .map(parseQueuedTurn)
+        .filter((turn): turn is AgentQueuedTurn => turn !== undefined)
+        .slice(0, 5)
+    : [];
   const rawEvents = Array.isArray(value.events)
     ? (value.events as readonly HandleMessageStreamEvent[])
     : [];
@@ -137,6 +144,7 @@ function parseThread(value: unknown): AgentThread | undefined {
       modelId: nonEmptyString(preferences.modelId) ?? FALLBACK_PREFERENCES.modelId,
       reasoning: nonEmptyString(preferences.reasoning) ?? FALLBACK_PREFERENCES.reasoning,
     },
+    queuedTurns,
     session: {
       continuationToken:
         typeof session.continuationToken === "string" ? session.continuationToken : undefined,
@@ -146,6 +154,30 @@ function parseThread(value: unknown): AgentThread | undefined {
     status,
     title: value.title,
     updatedAt,
+  };
+}
+
+function parseQueuedTurn(value: unknown): AgentQueuedTurn | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.id !== "string" || !value.id ||
+    typeof value.text !== "string" || !value.text.trim() ||
+    typeof value.submittedAt !== "number" || !Number.isFinite(value.submittedAt) ||
+    (value.state !== "queued" && value.state !== "delivery-failed" && value.state !== "admission-ambiguous")
+  ) {
+    return undefined;
+  }
+  return {
+    ...(value.delivery === "server" || value.delivery === "browser"
+      ? { delivery: value.delivery }
+      : {}),
+    id: value.id,
+    ...(typeof value.mailboxItemId === "string" && value.mailboxItemId
+      ? { mailboxItemId: value.mailboxItemId }
+      : {}),
+    state: value.state,
+    submittedAt: value.submittedAt,
+    text: value.text,
   };
 }
 

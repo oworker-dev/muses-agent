@@ -4,6 +4,7 @@ declare const translations: {
         readonly addFiles: "Add files";
         readonly agentWorking: "Agent is working";
         readonly attachment: "Attachment";
+        readonly backToTask: "Back to parent task";
         readonly cancel: "Stop";
         readonly cacheReadTokens: "Cache read";
         readonly cacheWriteTokens: "Cache write";
@@ -35,6 +36,14 @@ declare const translations: {
         readonly providerUnconfigured: "No LLM Provider is configured. Add a valid capability-scoped credential before starting Agent turns.";
         readonly providerTakingLonger: "The model Provider is taking longer than usual";
         readonly providerStillWaiting: "Still waiting. The run remains active and transient failures retry automatically.";
+        readonly queuedFollowUps: "Queued follow-ups";
+        readonly queueDeliveryFailed: "Delivery failed";
+        readonly queueAdmissionAmbiguous: "Admission needs review";
+        readonly queueAttachmentsUnsupported: "Attachments can be sent after the current turn finishes.";
+        readonly queueFollowUp: "Queue follow-up";
+        readonly queueFull: "Up to five follow-up messages can wait for the current turn.";
+        readonly removeQueuedMessage: "Remove queued message";
+        readonly retryQueuedMessage: "Retry queued message";
         readonly openNavigation: "Open navigation";
         readonly outputTokens: "Output";
         readonly reasoning: "Reasoning";
@@ -59,6 +68,8 @@ declare const translations: {
         readonly step: "step";
         readonly steps: "steps";
         readonly storageUnavailable: "Changes are not being saved. Reload to restore the latest server state.";
+        readonly subagentSession: "Sub-agent session";
+        readonly subagentUnavailable: "This sub-agent session does not belong to the current task or is no longer available.";
         readonly skillsAndCommands: "Skills and commands";
         readonly suggestionImplement: "Help me plan and implement a small feature.";
         readonly suggestionInspect: "Inspect this workspace and summarize what matters.";
@@ -84,6 +95,7 @@ declare const translations: {
         readonly addFiles: "添加文件";
         readonly agentWorking: "Agent 正在执行";
         readonly attachment: "附件";
+        readonly backToTask: "返回父任务";
         readonly cancel: "停止";
         readonly cacheReadTokens: "缓存读取";
         readonly cacheWriteTokens: "缓存写入";
@@ -115,6 +127,14 @@ declare const translations: {
         readonly providerUnconfigured: "尚未配置 LLM Provider。请先添加有效的能力范围凭证，再启动 Agent 任务。";
         readonly providerTakingLonger: "模型 Provider 的响应时间比平常更长";
         readonly providerStillWaiting: "仍在等待。任务保持运行，短暂故障会自动重试。";
+        readonly queuedFollowUps: "待发送的后续消息";
+        readonly queueDeliveryFailed: "投递失败";
+        readonly queueAdmissionAmbiguous: "接纳状态待确认";
+        readonly queueAttachmentsUnsupported: "附件需要等当前轮次结束后发送。";
+        readonly queueFollowUp: "发送后续消息";
+        readonly queueFull: "当前轮次最多可以等待五条后续消息。";
+        readonly removeQueuedMessage: "移除待发送消息";
+        readonly retryQueuedMessage: "重试待发送消息";
         readonly openNavigation: "打开导航栏";
         readonly outputTokens: "输出";
         readonly reasoning: "思考强度";
@@ -139,6 +159,8 @@ declare const translations: {
         readonly step: "步";
         readonly steps: "步";
         readonly storageUnavailable: "当前更改未能保存，请重新加载以恢复服务器上的最新状态。";
+        readonly subagentSession: "子代理会话";
+        readonly subagentUnavailable: "此子代理会话不属于当前任务或已不可用。";
         readonly skillsAndCommands: "技能与命令";
         readonly suggestionImplement: "帮我规划并实现一个小功能。";
         readonly suggestionInspect: "检查当前工作区并总结重要信息。";

@@ -1,10 +1,11 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, ArrowDownIcon, HammerIcon, SearchIcon, ShieldCheckIcon, SparklesIcon } from "lucide-react";
+import { AlertCircleIcon, ArrowDownIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Conversation, ConversationContent, ConversationScrollButton, } from "../ai-elements/conversation.js";
 import { PromptInputProvider } from "../ai-elements/prompt-input.js";
+import { Queue, QueueItem, QueueItemAction, QueueItemActions, QueueItemContent, QueueItemIndicator, QueueList, QueueSection, QueueSectionContent, QueueSectionLabel, QueueSectionTrigger, } from "../ai-elements/queue.js";
 import { Button } from "../ui/button.js";
 import { cn } from "../utils.js";
 import { AgentActivity } from "./agent-activity.js";
@@ -15,7 +16,7 @@ import { messagesFor } from "./i18n.js";
 import { appendThreadEvent, titleFromPrompt } from "./thread-storage.js";
 import { hasUnresolvedInputRequests, isProxiedInputOnlyMessage, } from "./turn-presentation.js";
 import { summarizeUsage } from "./usage.js";
-export function AgentThreadView({ client, commands, locale, mentions, models, onChange, onEvent, onRecoveryNeeded, providerReady, reasoningLevels, thread, }) {
+export function AgentThreadView({ client, commands, locale, mailbox, mentions, models, onChange, onEvent, onOpenSubagent, onRecoveryNeeded, providerReady, reasoningLevels, thread, }) {
     const preferencesRef = useRef(thread.preferences);
     const cancellationRef = useRef({ requested: false });
     const recoveryRequestedRef = useRef(false);
@@ -24,13 +25,25 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
     const compactedEventsRef = useRef(thread.events);
     const processedEventCountRef = useRef(thread.events.length);
     const durableProbeInFlightRef = useRef(false);
+    const queuedTurnsRef = useRef(thread.queuedTurns);
+    const pendingTurnRef = useRef(thread.pendingTurn);
+    const dispatchingQueuedTurnIdRef = useRef(undefined);
+    const mailboxEnqueueIdsRef = useRef(new Set());
+    const turnAdmissionBusyRef = useRef(false);
     const [cancellationState, setCancellationState] = useState("idle");
     const [cancellationError, setCancellationError] = useState();
+    const [queueError, setQueueError] = useState();
     const [turnError, setTurnError] = useState(() => latestTurnFailure(thread.events));
     const messages = messagesFor(locale);
     useEffect(() => {
         preferencesRef.current = thread.preferences;
     }, [thread.preferences]);
+    useEffect(() => {
+        queuedTurnsRef.current = thread.queuedTurns;
+    }, [thread.queuedTurns]);
+    useEffect(() => {
+        pendingTurnRef.current = thread.pendingTurn;
+    }, [thread.pendingTurn]);
     const [session] = useState(() => createAgentSession(client, () => preferencesRef.current, thread.session));
     const cancelTurn = useCallback((turnId) => {
         const cancellation = cancellationRef.current;
@@ -51,7 +64,29 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
             cancelTurn(event.data.turnId);
         }
         if (event.type === "message.received") {
-            onChange({ pendingTurn: undefined });
+            const dispatchedId = dispatchingQueuedTurnIdRef.current;
+            if (dispatchedId) {
+                const queuedTurns = queuedTurnsRef.current.filter((turn) => turn.id !== dispatchedId);
+                queuedTurnsRef.current = queuedTurns;
+                dispatchingQueuedTurnIdRef.current = undefined;
+                pendingTurnRef.current = undefined;
+                onChange({ pendingTurn: undefined, queuedTurns });
+            }
+            else if (pendingTurnRef.current) {
+                pendingTurnRef.current = undefined;
+                onChange({ pendingTurn: undefined });
+            }
+            else {
+                const serverTurn = queuedTurnsRef.current.find((turn) => turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId));
+                if (serverTurn) {
+                    const queuedTurns = queuedTurnsRef.current.filter((turn) => turn.id !== serverTurn.id);
+                    queuedTurnsRef.current = queuedTurns;
+                    onChange({ pendingTurn: undefined, queuedTurns });
+                }
+                else {
+                    onChange({ pendingTurn: undefined });
+                }
+            }
         }
         if (event.type === "turn.failed" || event.type === "session.failed") {
             setTurnError(event.data.message);
@@ -72,6 +107,9 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
     const stopAgent = agent.stop;
     const isBusy = agent.status === "submitted" || agent.status === "streaming";
     const awaitingInput = hasUnresolvedInputRequests(agent.events);
+    useEffect(() => {
+        turnAdmissionBusyRef.current = isBusy;
+    }, [isBusy]);
     const requestRecovery = useCallback(() => {
         if (recoveryRequestedRef.current)
             return;
@@ -147,9 +185,17 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
     const usage = summarizeUsage(agent.events);
     useEffect(() => {
         if (agent.status === "error" &&
-            !agent.session.sessionId &&
             thread.pendingTurn?.state === "submitting") {
-            onChange({ pendingTurn: { ...thread.pendingTurn, state: "delivery-failed" } });
+            const dispatchedId = dispatchingQueuedTurnIdRef.current;
+            if (dispatchedId) {
+                const queuedTurns = queuedTurnsRef.current.map((turn) => turn.id === dispatchedId ? { ...turn, state: "delivery-failed" } : turn);
+                queuedTurnsRef.current = queuedTurns;
+                dispatchingQueuedTurnIdRef.current = undefined;
+                onChange({ pendingTurn: undefined, queuedTurns });
+            }
+            else if (!agent.session.sessionId) {
+                onChange({ pendingTurn: { ...thread.pendingTurn, state: "delivery-failed" } });
+            }
         }
     }, [agent.session.sessionId, agent.status, onChange, thread.pendingTurn]);
     const prepareTurn = () => {
@@ -158,6 +204,38 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
         setCancellationError(undefined);
         setCancellationState("idle");
         setTurnError(undefined);
+    };
+    const updateQueuedTurns = (queuedTurns) => {
+        queuedTurnsRef.current = queuedTurns;
+        onChange({ queuedTurns, updatedAt: Date.now() });
+    };
+    const markQueuedTurnForRetry = (turnId) => {
+        setQueueError(undefined);
+        const turn = queuedTurnsRef.current.find((candidate) => candidate.id === turnId);
+        if (!turn)
+            return;
+        if (turn.delivery === "server" && turn.mailboxItemId && mailbox) {
+            void mailbox.retry(turn.mailboxItemId)
+                .then(() => updateQueuedTurns(queuedTurnsRef.current.map((candidate) => candidate.id === turnId ? { ...candidate, state: "queued" } : candidate)))
+                .catch((error) => setQueueError(error instanceof Error ? error.message : messages.queueDeliveryFailed));
+            return;
+        }
+        updateQueuedTurns(queuedTurnsRef.current.map((candidate) => candidate.id === turnId ? { ...candidate, state: "queued" } : candidate));
+    };
+    const removeQueuedTurn = (turnId) => {
+        if (dispatchingQueuedTurnIdRef.current === turnId)
+            return;
+        setQueueError(undefined);
+        const turn = queuedTurnsRef.current.find((candidate) => candidate.id === turnId);
+        if (!turn)
+            return;
+        if (turn.delivery === "server" && turn.mailboxItemId && mailbox) {
+            void mailbox.cancel(turn.mailboxItemId)
+                .then(() => updateQueuedTurns(queuedTurnsRef.current.filter((candidate) => candidate.id !== turnId)))
+                .catch((error) => setQueueError(error instanceof Error ? error.message : messages.queueDeliveryFailed));
+            return;
+        }
+        updateQueuedTurns(queuedTurnsRef.current.filter((candidate) => candidate.id !== turnId));
     };
     const requestCancellation = () => {
         if (!isBusy || cancellationState !== "idle")
@@ -169,18 +247,43 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
     };
     const submit = async (message) => {
         const text = message.text.trim();
-        if ((text.length === 0 && message.files.length === 0) || isBusy || awaitingInput || !providerReady)
+        if ((text.length === 0 && message.files.length === 0) || awaitingInput || !providerReady)
             return;
+        if (isBusy || turnAdmissionBusyRef.current) {
+            if (message.files.length > 0) {
+                setQueueError(messages.queueAttachmentsUnsupported);
+                return;
+            }
+            if (queuedTurnsRef.current.length >= MAX_QUEUED_FOLLOW_UPS) {
+                setQueueError(messages.queueFull);
+                return;
+            }
+            if (text.length > 0) {
+                setQueueError(undefined);
+                updateQueuedTurns([
+                    ...queuedTurnsRef.current,
+                    {
+                        ...(mailbox ? { delivery: "server" } : {}),
+                        id: createPendingTurnId(),
+                        state: "queued",
+                        submittedAt: Date.now(),
+                        text,
+                    },
+                ]);
+            }
+            return;
+        }
+        turnAdmissionBusyRef.current = true;
         prepareTurn();
         if (text.length > 0) {
-            onChange({
-                pendingTurn: {
-                    id: createPendingTurnId(),
-                    state: "submitting",
-                    submittedAt: Date.now(),
-                    text,
-                },
-            });
+            const pendingTurn = {
+                id: createPendingTurnId(),
+                state: "submitting",
+                submittedAt: Date.now(),
+                text,
+            };
+            pendingTurnRef.current = pendingTurn;
+            onChange({ pendingTurn });
         }
         if (text.length > 0 && agent.data.messages.length === 0) {
             onChange({ title: titleFromPrompt(text) });
@@ -197,6 +300,109 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
         }
         await agent.send({ message: parts });
     };
+    useEffect(() => {
+        if (!mailbox || !agent.session.sessionId)
+            return;
+        const next = queuedTurnsRef.current.find((turn) => turn.delivery === "server" &&
+            turn.state === "queued" &&
+            !turn.mailboxItemId &&
+            !mailboxEnqueueIdsRef.current.has(turn.id));
+        if (!next)
+            return;
+        mailboxEnqueueIdsRef.current.add(next.id);
+        void mailbox.enqueue({
+            clientMessageId: next.id,
+            message: next.text,
+            preferences: preferencesRef.current,
+            sessionId: agent.session.sessionId,
+        }).then((receipt) => {
+            const state = mailboxTurnState(receipt.status);
+            if (state === "cancelled") {
+                updateQueuedTurns(queuedTurnsRef.current.filter((turn) => turn.id !== next.id));
+                return;
+            }
+            updateQueuedTurns(queuedTurnsRef.current.map((turn) => turn.id === next.id
+                ? { ...turn, mailboxItemId: receipt.itemId, state }
+                : turn));
+        }).catch((error) => {
+            setQueueError(error instanceof Error ? error.message : messages.queueDeliveryFailed);
+            updateQueuedTurns(queuedTurnsRef.current.map((turn) => turn.id === next.id ? { ...turn, state: "delivery-failed" } : turn));
+        }).finally(() => {
+            mailboxEnqueueIdsRef.current.delete(next.id);
+        });
+    }, [agent.session.sessionId, mailbox, messages.queueDeliveryFailed, thread.queuedTurns]);
+    useEffect(() => {
+        if (!mailbox)
+            return;
+        const tracked = queuedTurnsRef.current.filter((turn) => turn.delivery === "server" && turn.mailboxItemId && turn.state === "queued");
+        if (tracked.length === 0)
+            return;
+        let disposed = false;
+        const poll = async () => {
+            const updates = new Map();
+            await Promise.all(tracked.map(async (turn) => {
+                try {
+                    const receipt = await mailbox.inspect(turn.mailboxItemId);
+                    const state = mailboxTurnState(receipt.status);
+                    updates.set(turn.id, state === "cancelled" ? "remove" : state);
+                }
+                catch {
+                }
+            }));
+            if (disposed || updates.size === 0)
+                return;
+            updateQueuedTurns(queuedTurnsRef.current.flatMap((turn) => {
+                const state = updates.get(turn.id);
+                if (state === "remove")
+                    return [];
+                return state ? [{ ...turn, state }] : [turn];
+            }));
+        };
+        const timer = window.setInterval(() => void poll(), MAILBOX_STATUS_POLL_MS);
+        void poll();
+        return () => {
+            disposed = true;
+            window.clearInterval(timer);
+        };
+    }, [mailbox, thread.queuedTurns]);
+    useEffect(() => {
+        if (!mailbox || isBusy || awaitingInput || recoveryRequestedRef.current ||
+            !queuedTurnsRef.current.some((turn) => turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId)))
+            return;
+        requestRecovery();
+    }, [awaitingInput, isBusy, mailbox, requestRecovery, thread.queuedTurns]);
+    useEffect(() => {
+        if (isBusy || awaitingInput || !providerReady ||
+            dispatchingQueuedTurnIdRef.current ||
+            !agent.session.continuationToken)
+            return;
+        const next = queuedTurnsRef.current.find((turn) => turn.state === "queued" && turn.delivery !== "server");
+        if (!next)
+            return;
+        dispatchingQueuedTurnIdRef.current = next.id;
+        turnAdmissionBusyRef.current = true;
+        prepareTurn();
+        onChange({
+            pendingTurn: {
+                id: next.id,
+                state: "submitting",
+                submittedAt: next.submittedAt,
+                text: next.text,
+            },
+        });
+        pendingTurnRef.current = {
+            id: next.id,
+            state: "submitting",
+            submittedAt: next.submittedAt,
+            text: next.text,
+        };
+        void agent.send({ message: next.text }).catch(() => {
+            const queuedTurns = queuedTurnsRef.current.map((turn) => turn.id === next.id ? { ...turn, state: "delivery-failed" } : turn);
+            queuedTurnsRef.current = queuedTurns;
+            dispatchingQueuedTurnIdRef.current = undefined;
+            onChange({ pendingTurn: undefined, queuedTurns });
+        });
+    }, [agent, agent.session.continuationToken, awaitingInput, isBusy, onChange, providerReady, thread.queuedTurns]);
     const respond = (inputResponses) => {
         prepareTurn();
         return agent.send({ inputResponses });
@@ -206,10 +412,13 @@ export function AgentThreadView({ client, commands, locale, mentions, models, on
     const isEmpty = visibleMessages.length === 0 && !showPendingTurn && !errorMessage;
     const activeTaskIsVisible = (isBusy || awaitingInput) && visibleMessages.some((message) => message.role === "assistant" &&
         message.parts.some((part) => part.type === "dynamic-tool"));
-    return (_jsx(PromptInputProvider, { children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [isEmpty ? (_jsx(EmptyThread, { disabled: !providerReady, messages: messages, onPrompt: (prompt) => void submit({ files: [], text: prompt }) })) : (_jsxs(Conversation, { className: "min-h-0 flex-1", children: [_jsxs(ConversationContent, { className: "mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10", children: [visibleMessages.map((message, index) => (_jsx(AgentMessage, { canRespond: !isBusy, events: agent.events, fallbackStartedAt: thread.pendingTurn?.submittedAt, isStreaming: agent.status === "streaming" && index === visibleMessages.length - 1, locale: locale, message: message, onInputResponses: respond }, message.id))), showPendingTurn && thread.pendingTurn ? (_jsx(PendingUserTurn, { text: thread.pendingTurn.text })) : null, isBusy ? (_jsx(AgentActivity, { events: agent.events, messages: messages, quietUntilSlow: activeTaskIsVisible })) : null, errorMessage ? (_jsx(TurnError, { message: errorMessage, preserved: Boolean(thread.pendingTurn), messages: messages })) : null] }), _jsx(ConversationScrollButton, { children: _jsx(ArrowDownIcon, { className: "size-4" }) })] })), _jsxs("div", { className: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6", children: [awaitingInput ? (_jsx("p", { className: "mb-2 text-center text-sm text-amber-700 dark:text-amber-300", role: "status", children: messages.waitingForApproval })) : null, _jsx(AgentComposer, { commands: commands, disabled: !providerReady || awaitingInput, inputDisabled: isBusy || awaitingInput, mentions: mentions, messages: messages, models: models, onPreferencesChange: (preferences) => onChange({ preferences }), onStop: requestCancellation, onSubmit: submit, preferences: thread.preferences, reasoningLevels: reasoningLevels, status: isBusy && cancellationState !== "idle" ? "submitted" : errorMessage ? "error" : agent.status, usage: usage })] })] }) }));
+    return (_jsx(PromptInputProvider, { children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [isEmpty ? (_jsx(EmptyThread, { disabled: !providerReady, messages: messages, onPrompt: (prompt) => void submit({ files: [], text: prompt }) })) : (_jsxs(Conversation, { className: "min-h-0 flex-1", children: [_jsxs(ConversationContent, { className: "mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10", children: [visibleMessages.map((message, index) => (_jsx(AgentMessage, { canRespond: !isBusy, events: agent.events, fallbackStartedAt: thread.pendingTurn?.submittedAt, isStreaming: agent.status === "streaming" && index === visibleMessages.length - 1, locale: locale, message: message, onInputResponses: respond, onOpenSubagent: onOpenSubagent }, message.id))), showPendingTurn && thread.pendingTurn ? (_jsx(PendingUserTurn, { text: thread.pendingTurn.text })) : null, isBusy ? (_jsx(AgentActivity, { events: agent.events, messages: messages, quietUntilSlow: activeTaskIsVisible })) : null, errorMessage ? (_jsx(TurnError, { message: errorMessage, preserved: Boolean(thread.pendingTurn), messages: messages })) : null] }), _jsx(ConversationScrollButton, { children: _jsx(ArrowDownIcon, { className: "size-4" }) })] })), _jsxs("div", { className: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6", children: [awaitingInput ? (_jsx("p", { className: "mb-2 text-center text-sm text-amber-700 dark:text-amber-300", role: "status", children: messages.waitingForApproval })) : null, thread.queuedTurns.length > 0 || queueError ? (_jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: removeQueuedTurn, onRetry: markQueuedTurnForRetry, turns: thread.queuedTurns })) : null, _jsx(AgentComposer, { commands: commands, disabled: !providerReady || awaitingInput, inputDisabled: awaitingInput, mentions: mentions, messages: messages, models: models, onPreferencesChange: (preferences) => onChange({ preferences }), onStop: requestCancellation, onSubmit: submit, preferences: thread.preferences, reasoningLevels: reasoningLevels, status: isBusy && cancellationState !== "idle" ? "submitted" : errorMessage ? "error" : agent.status, usage: usage })] })] }) }));
 }
 function PendingUserTurn({ text }) {
     return (_jsx("div", { className: "ml-auto max-w-[85%] rounded-lg bg-muted px-4 py-3 text-[15px] leading-6 text-foreground", children: _jsx("p", { className: "whitespace-pre-wrap break-words", children: text }) }));
+}
+export function FollowUpQueue({ error, messages, onRemove, onRetry, turns, }) {
+    return (_jsxs(Queue, { className: "mb-2 rounded-md shadow-none", children: [_jsxs(QueueSection, { defaultOpen: true, children: [_jsx(QueueSectionTrigger, { children: _jsx(QueueSectionLabel, { count: turns.length, icon: _jsx(Clock3Icon, { className: "size-4" }), label: messages.queuedFollowUps }) }), _jsx(QueueSectionContent, { children: _jsx(QueueList, { children: turns.map((turn) => (_jsxs(QueueItem, { className: "flex-row items-center", children: [_jsx(QueueItemIndicator, { className: turn.state === "delivery-failed" ? "border-destructive bg-destructive/10" : undefined }), _jsx(QueueItemContent, { children: turn.text }), turn.state === "delivery-failed" ? (_jsx("span", { className: "shrink-0 text-xs text-destructive", children: messages.queueDeliveryFailed })) : turn.state === "admission-ambiguous" ? (_jsx("span", { className: "shrink-0 text-xs text-amber-700 dark:text-amber-300", children: messages.queueAdmissionAmbiguous })) : null, _jsxs(QueueItemActions, { children: [turn.state === "delivery-failed" ? (_jsx(QueueItemAction, { "aria-label": messages.retryQueuedMessage, onClick: () => onRetry(turn.id), children: _jsx(RotateCcwIcon, { className: "size-3.5" }) })) : null, turn.state !== "admission-ambiguous" ? (_jsx(QueueItemAction, { "aria-label": messages.removeQueuedMessage, onClick: () => onRemove(turn.id), children: _jsx(XIcon, { className: "size-3.5" }) })) : null] })] }, turn.id))) }) })] }), error ? _jsx("p", { className: "px-2 text-xs text-destructive", role: "alert", children: error }) : null] }));
 }
 function hasProjectedUserText(messages, text) {
     return messages.some((message) => message.role === "user" && message.parts.some((part) => part.type === "text" && part.text === text));
@@ -225,6 +434,17 @@ function isSessionBoundary(event) {
 const DURABLE_PROGRESS_PROBE_DELAY_MS = 15_000;
 const DURABLE_PROGRESS_PROBE_INTERVAL_MS = 10_000;
 const DURABLE_PROGRESS_PROBE_TIMEOUT_MS = 2_500;
+const MAX_QUEUED_FOLLOW_UPS = 5;
+const MAILBOX_STATUS_POLL_MS = 1_500;
+function mailboxTurnState(status) {
+    if (status === "failed")
+        return "delivery-failed";
+    if (status === "submission-ambiguous")
+        return "admission-ambiguous";
+    if (status === "cancelled")
+        return "cancelled";
+    return "queued";
+}
 async function hasDurableProgressAfter(session, startIndex) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), DURABLE_PROGRESS_PROBE_TIMEOUT_MS);

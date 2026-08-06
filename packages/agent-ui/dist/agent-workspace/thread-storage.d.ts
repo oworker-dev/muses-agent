@@ -1,6 +1,6 @@
 import type { HandleMessageStreamEvent } from "eve/client";
 import type { AgentThread, AgentThreadPreferences } from "./contracts.js";
-export declare const AGENT_THREAD_STORAGE_VERSION = 1;
+export declare const AGENT_THREAD_STORAGE_VERSION = 2;
 export type AgentThreadCollection = {
     readonly activeThreadId?: string;
     readonly threads: readonly AgentThread[];

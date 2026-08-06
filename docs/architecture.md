@@ -77,6 +77,40 @@ contract. The bundled PostgreSQL adapter scopes every collection by verified
 blocks further writes and displays a reload action instead of silently merging
 or overwriting another client's state.
 
+### Follow-up mailbox
+
+Eve's `continuationToken` is a resume handle, not a durable FIFO. The Web client
+therefore uses an application-owned `agent_mailbox_items` table when a host
+provides `AgentWorkspaceMailbox`. A follow-up is accepted by the Web API with a
+stable `clientMessageId`, then a separate mailbox worker leases and delivers it
+only after the Eve session reports `session.waiting`.
+
+The mailbox is strictly ordered per session. A later item cannot be leased while
+an earlier item is queued, delivering, accepted, failed, or
+`submission-ambiguous`; only `committed` or `cancelled` predecessors unblock the
+next item. The five-item limit counts every non-terminal item, including failed
+items that still require an explicit retry or cancellation. Leases make worker
+crashes recoverable before admission begins. Once admission begins, a lost
+response is recorded as `submission-ambiguous` and is never blindly replayed.
+
+The internal Eve route authenticates the worker request with a separate HMAC
+secret. The mailbox item id is carried in the internal session auth context. Eve
+records `message.received` durably before running `agent/hooks/mailbox-commit.ts`,
+which marks the item `committed`; the dispatcher tolerates this hook winning the
+race with its HTTP response. The hook retries transient product-database
+failures with bounded exponential backoff. Because the durable event is the
+authoritative admission proof, its commit may promote a previously
+`submission-ambiguous` row to `committed`; it never replays the message. A
+persistent database failure still fails closed and leaves the item blocking
+FIFO instead of guessing. The hook is bookkeeping for delivery certainty, not a
+replacement for Eve's model loop.
+
+The browser removes one queued item only when the corresponding future
+`message.received` arrives. Refresh, a closed tab, or a second browser observes
+the same server queue and cannot submit another Eve continuation directly. Hosts
+without a mailbox may use the SDK's browser fallback, but that path is a
+best-effort compatibility mode and is not durable.
+
 ## Headless AgentRun contract
 
 The public host boundary has two independent projections:
@@ -429,11 +463,28 @@ boundary from hiding a blocked child.
 
 Delegated work is projected from Eve's native `subagent.called`,
 `subagent.completed`, and correlated `action.result` events. The parent task
-shows starting, running, failed, and returned-result states with elapsed time,
-and explains that the child shares the current sandbox workspace. It does not
+shows starting, running, stopped, failed, and returned-result states with
+elapsed time. Parent cancellation and terminal sessions explicitly close an
+otherwise orphaned child timer. Eve's built-in `agent` copy shares the root
+sandbox; declared specialists have their own sandbox boundary. The UI does not
 invent child reasoning or tool progress: those details belong to the child
-session stream identified by `childSessionId`. This makes a quiet parent stream
-understandable without pretending that unavailable child events were observed.
+session stream identified by `childSessionId`. Active/Done navigation opens that
+independent durable stream, reconnects by cursor, and exposes guarded child
+cancellation. This makes a quiet parent stream understandable without
+pretending that unavailable child events were observed.
+
+### Supervisor boundary
+
+Eve 0.27.8 owns parent waiting, recursive cancellation, child task results, and
+durable child sessions. Its public client exposes send, stream, cancel, and
+reset. It does not currently expose the Codex App Server equivalents of
+`turn/steer` or `thread/inject_items`, detached/no-wait child execution,
+arbitrary parent-to-child follow-up injection, or a public close/archive
+lifecycle. Those are supervisor protocol capabilities, not presentation
+controls. Open Agent keeps Eve's native loop intact and must not simulate them
+with browser state. A future implementation requires either an upstream Eve
+contract or a separately versioned durable supervisor service with ownership,
+idempotency, ordering, cancellation, and recovery semantics.
 
 Browser recovery is evidence-driven. A live stream with no new events may mean
 either a slow Provider or a stale transport, so the client periodically probes
@@ -441,6 +492,13 @@ the durable stream tail without changing the visible run state. It enters the
 bounded catch-up path only when the probe finds missing events. Provider retry
 remains owned by Eve; UI elapsed-time messages describe waiting and durability
 without claiming an unobserved retry attempt.
+
+Recovery also polls the server mailbox while following durable stream boundaries.
+It keeps waiting across successive `session.waiting` events until the queued
+server items are consumed, while definitive delivery failures remain retryable
+and ambiguous admissions remain visible for operator resolution. The current
+contract intentionally delivers at the next Eve boundary; it does not replace
+Eve's native loop with same-turn steering or conversation branching.
 
 ## Release gates
 

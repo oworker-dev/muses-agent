@@ -15,7 +15,10 @@ product-owner decisions; do not infer them from this automation.
 
 ## Release Procedure
 
-1. Run `npm run verify:ci` under Node.js 24.
+1. Run `npm run verify:ci` under Node.js 24. Include the mailbox unit and
+   browser gates for strict FIFO, persisted recovery, failed-delivery retry,
+   cancellation, ambiguous-admission commit reconciliation, orphaned sub-agent
+   terminal states, and child-session navigation/recovery.
 2. Review dependency changes, generated declarations, package contents, and the
    secret scan. Confirm no `.env`, credentials, test databases, traces, or user
    artifacts are tracked.
@@ -31,6 +34,13 @@ product-owner decisions; do not infer them from this automation.
 7. Verify the release assets, image digest, SBOM, and attestations, then update
    deployment and host references in a separate reviewed commit. Do not point a
    host at an artifact or mutable image tag before the release exists.
+
+The deployment manifest must include the mailbox worker alongside Agent Web and
+Eve. Release smoke checks must prove that a follow-up submitted while a turn is
+running survives a page close, is delivered only at `session.waiting`, produces
+one durable `message.received`, and does not call the browser's Eve continuation
+route. A successful Web build without the worker is incomplete for hosts that
+enable follow-ups.
 
 The workflow does not publish to npm. Removing `private: true`, selecting a
 license, setting npm provenance, and defining stable support/migration policy

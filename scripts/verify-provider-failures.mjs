@@ -1,8 +1,13 @@
 import { spawn } from "node:child_process";
+import { copyFile, cp, mkdtemp, rm, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolve } from "node:path";
 import { Client } from "eve/client";
 
+const projectRoot = process.cwd();
+const isolatedAppRoot = await createIsolatedAppRoot(projectRoot);
 const providerPort = await freePort();
 const evePort = await freePort();
 const providerUrl = `http://127.0.0.1:${providerPort}`;
@@ -35,7 +40,7 @@ try {
     OPENAI_API_KEY: "mock-provider-key",
     OPENAI_BASE_URL: `${providerUrl}/v1`,
     WORKFLOW_TARGET_WORLD: "",
-  }));
+  }, isolatedAppRoot));
   await waitFor(`${eveUrl}/eve/v1/health`, 60_000);
 
   const rateLimit = await completedTurn(eveUrl,
@@ -111,6 +116,7 @@ try {
   throw error;
 } finally {
   await Promise.all(children.map(stopChild));
+  await rm(isolatedAppRoot, { force: true, recursive: true });
 }
 
 function createSession(host) {
@@ -156,13 +162,28 @@ function completedMessageText(events) {
     .at(-1)?.data.message;
 }
 
-function spawnLogged(name, command, args, environment) {
-  const child = spawn(command, args, { env: environment, stdio: ["ignore", "pipe", "pipe"] });
+function spawnLogged(name, command, args, environment, cwd = projectRoot) {
+  const child = spawn(command, args, { cwd, env: environment, stdio: ["ignore", "pipe", "pipe"] });
   childLogs.set(name, "");
   const record = (chunk) => childLogs.set(name, `${childLogs.get(name)}${chunk}`.slice(-50_000));
   child.stdout.on("data", record);
   child.stderr.on("data", record);
   return child;
+}
+
+async function createIsolatedAppRoot(sourceRoot) {
+  const target = await mkdtemp(join(tmpdir(), "open-agent-provider-failures-"));
+  for (const directory of ["agent", "contracts", "evals", "lib", "packages", "server"]) {
+    await cp(resolve(sourceRoot, directory), join(target, directory), {
+      dereference: true,
+      recursive: true,
+    });
+  }
+  await symlink(resolve(sourceRoot, "node_modules"), join(target, "node_modules"), "dir");
+  for (const file of ["instrumentation.ts", "package.json", "tsconfig.json"]) {
+    await copyFile(resolve(sourceRoot, file), join(target, file));
+  }
+  return target;
 }
 
 async function stopChild(child) {

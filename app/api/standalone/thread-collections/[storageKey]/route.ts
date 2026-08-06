@@ -20,7 +20,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     authenticated.identity.principalId,
     storageKey,
   );
-  const collection = record?.collection ?? { threads: [], version: 1 };
+  const collection = record?.collection ?? { threads: [], version: 2 };
   const revision = record?.revision ?? 0;
   return Response.json(
     { collection, revision },
@@ -57,7 +57,7 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
   }
   const collection = parseStrictThreadCollection(input.collection);
   if (!collection) {
-    return problem(400, "invalid_collection", "The thread collection does not match version 1.", authenticated.setCookie);
+    return problem(400, "invalid_collection", "The thread collection does not match a supported storage version.", authenticated.setCookie);
   }
 
   const { storageKey } = await context.params;
@@ -84,7 +84,11 @@ export async function PUT(request: Request, context: RouteContext): Promise<Resp
 }
 
 function parseStrictThreadCollection(value: unknown): AgentThreadCollection | undefined {
-  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.threads)) return undefined;
+  if (
+    !isRecord(value) ||
+    value.version !== 1 && value.version !== 2 ||
+    !Array.isArray(value.threads)
+  ) return undefined;
   const parsed = parseThreadCollection(value);
   return parsed.threads.length === value.threads.length ? parsed : undefined;
 }

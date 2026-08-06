@@ -18,6 +18,11 @@ The project has a working Eve runtime and a reusable AI Elements Web workspace:
 - immediate optimistic sending, visible thread selection, inline rename, and searchable model selection;
 - Context usage disclosure plus host-injected `/` Skill/command and `@` context discovery;
 - cancellation, failed-turn continuation, and hard-refresh recovery;
+- a server-owned follow-up mailbox with strict per-session FIFO, leases, and
+  ambiguous-admission protection;
+- inspectable sub-agent sessions with Active/Done navigation, independent
+  durable stream recovery, elapsed time, terminal-state repair, and explicit
+  cancellation;
 - per-durable-session Eve sandbox behavior;
 - PostgreSQL-backed session ownership and injectable account thread storage;
 - Host JWT enforcement across create, continue, stream, cancel, and reset routes.
@@ -67,6 +72,27 @@ npm run dev
 
 The Next.js app and Eve development runtime are mounted on one origin by
 `withEve()`. The default Web URL is `http://127.0.0.1:3000`.
+
+When follow-up queuing is enabled, start the mailbox worker in a third process:
+
+```bash
+AGENT_WEB_INTERNAL_URL=http://127.0.0.1:3000 \
+AGENT_MAILBOX_WORKER_SECRET='local-worker-secret-at-least-32-bytes' \
+AGENT_MAILBOX_DISPATCH_SECRET='local-dispatch-secret-at-least-32-bytes' \
+  npm run start:mailbox-worker
+```
+
+The worker is application infrastructure, not part of Eve's model loop. Eve
+does not provide a durable FIFO for concurrent messages; the worker waits for
+`session.waiting` and dispatches one persisted item at a time. The browser
+fallback remains available for hosts that do not provide a mailbox, but it is
+not durable across a closed tab or process restart.
+
+The mailbox commit hook retries transient product-database failures before it
+fails the turn. A durable `message.received` is authoritative even when the
+dispatcher HTTP response was lost: it may atomically promote a
+`submission-ambiguous` item to `committed`, unblocking strict FIFO without
+replaying the message.
 
 For a remote development preview, bind Next to all interfaces and pass the
 current hostname or IP through `AGENT_DEV_ALLOWED_ORIGINS`. Keep that value in
@@ -441,6 +467,15 @@ overrides only the `bash` approval policy. `AGENT_BASH_APPROVAL_MODE=risky`
 parks destructive, publishing, infrastructure-mutating, and external write
 commands for durable user approval. Unattended service/runtime principals are
 denied instead of approving themselves. Production rejects `never`.
+
+Each Eve sub-agent has an independent durable session and stream. The Web UI
+can inspect, reconnect to, and cancel that session. Eve's built-in `agent`
+copy shares the root sandbox; a declared specialist uses its own sandbox unless
+configured otherwise. Eve 0.27.8 does not expose Codex-style active-turn
+steering, detached/no-wait children, arbitrary parent-to-child injection, or a
+public close lifecycle. Open Agent does not replace Eve's loop or display fake
+controls for those operations; matching that supervisor contract requires a
+future Eve capability or a separately specified durable supervisor service.
 
 Run the deterministic Harness suite against a real Docker sandbox:
 

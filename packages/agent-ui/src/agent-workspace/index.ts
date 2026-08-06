@@ -1,5 +1,10 @@
 export { AgentWorkspace } from "./agent-workspace.js";
 export {
+  AgentMailboxHttpError,
+  createHttpAgentMailbox,
+  type HttpAgentMailboxOptions,
+} from "./http-agent-mailbox.js";
+export {
   AgentThreadStorageConflictError,
   AgentThreadStorageHttpError,
   createHttpAgentThreadStorage,
@@ -11,6 +16,7 @@ export type {
   AgentExtensionInfo,
   AgentThread,
   AgentPendingTurn,
+  AgentQueuedTurn,
   AgentThreadPatch,
   AgentThreadPreferences,
   AgentModelOption,
@@ -19,6 +25,9 @@ export type {
   AgentWorkspaceClientConfig,
   AgentWorkspaceConfig,
   AgentWorkspaceHostSlots,
+  AgentWorkspaceMailbox,
+  AgentMailboxItemStatus,
+  AgentMailboxReceipt,
 } from "./contracts.js";
 export {
   filterPromptMenuItems,

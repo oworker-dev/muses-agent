@@ -61,3 +61,27 @@ test("preserves non-delta ordering barriers while compacting adjacent cumulative
     "message.appended",
   ]);
 });
+
+test("hydrates queued follow-ups from the v2 collection without accepting malformed entries", () => {
+  const collection = parseThreadCollection({
+    threads: [{
+      createdAt: 1,
+      events: [],
+      id: "thread-queued",
+      preferences: { modelId: "model", reasoning: "medium" },
+      queuedTurns: [
+        { id: "queued-1", state: "queued", submittedAt: 2, text: "Continue" },
+        { id: "invalid", state: "delivering", submittedAt: 3, text: "Do not send" },
+      ],
+      session: { streamIndex: 0 },
+      status: "ready",
+      title: "Queued",
+      updatedAt: 1,
+    }],
+    version: 2,
+  });
+
+  assert.deepEqual(collection.threads[0]?.queuedTurns, [
+    { id: "queued-1", state: "queued", submittedAt: 2, text: "Continue" },
+  ]);
+});

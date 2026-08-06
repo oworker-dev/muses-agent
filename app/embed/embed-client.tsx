@@ -4,6 +4,7 @@ import type { HandleMessageStreamEvent, PrepareSend } from "eve/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentWorkspace,
+  createHttpAgentMailbox,
   createHttpAgentThreadStorage,
   type AgentThread,
   type AgentRuntimeStatus,
@@ -105,6 +106,11 @@ export function AgentEmbed({ allowedOrigins, runtimeStatus }: { readonly allowed
     getAccessToken: () => accessTokenRef.current,
   }) : undefined, [configuration]);
 
+  const mailbox = useMemo(() => configuration ? createHttpAgentMailbox({
+    endpoint: `${configuration.serviceUrl.replace(/\/$/, "")}/api/agent/mailbox`,
+    getAccessToken: () => accessTokenRef.current,
+  }) : undefined, [configuration]);
+
   const onEvent = useCallback((event: HandleMessageStreamEvent) => {
     const projected = projectEmbedEvent(event);
     if (projected) post(projected);
@@ -154,6 +160,7 @@ export function AgentEmbed({ allowedOrigins, runtimeStatus }: { readonly allowed
       extensions={ui.extensions}
       key={`${configuration.storageKey}:${configuration.profile.id}@${configuration.profile.version}`}
       models={ui.models}
+      mailbox={mailbox}
       mentions={AGENT_UI_MENTIONS}
       onEvent={onEvent}
       onDeleteThread={onDeleteThread}

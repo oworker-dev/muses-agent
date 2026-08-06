@@ -1,25 +1,27 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { ClientError, defaultMessageReducer } from "eve/client";
-import { AlertCircleIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
+import { AlertCircleIcon, ArrowLeftIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
 import { Conversation, ConversationContent } from "../ai-elements/conversation.js";
 import { PromptInputProvider } from "../ai-elements/prompt-input.js";
 import { createAgentSession } from "./agent-client.js";
 import { AgentActivity } from "./agent-activity.js";
+import { AgentChildSessionView } from "./agent-child-session.js";
 import { AgentComposer } from "./agent-composer.js";
 import { AgentMessage } from "./agent-message.js";
 import { AgentSettingsDialog } from "./agent-settings-dialog.js";
 import { AgentSidebar } from "./agent-sidebar.js";
-import { AgentThreadView } from "./agent-thread.js";
+import { AgentSubagentMenu } from "./agent-subagent-menu.js";
+import { AgentThreadView, FollowUpQueue } from "./agent-thread.js";
 import { messagesFor, resolveBrowserLocale } from "./i18n.js";
 import { AGENT_THREAD_STORAGE_VERSION, browserThreadStorage, appendThreadEvent, compactThreadEvents, createAgentThread, } from "./thread-storage.js";
-import { hasUnresolvedInputRequests, isProxiedInputOnlyMessage, } from "./turn-presentation.js";
+import { hasUnresolvedInputRequests, isProxiedInputOnlyMessage, presentSubagentSessions, } from "./turn-presentation.js";
 import { summarizeUsage } from "./usage.js";
 const DEFAULT_STORAGE_KEY = "open-agent:threads:v1";
 const STORAGE_SAVE_DELAY_MS = 250;
-export function AgentWorkspace({ client, commands = [], defaultPreferences, extensions = [], hostSlots, initialThreadId, models, mentions = [], onEvent, onDeleteThread, onActiveThreadChange, onStorageError, productName = "Agent", reasoningLevels, runtimeStatus = { provider: "ready" }, storageKey = DEFAULT_STORAGE_KEY, threadStorage = browserThreadStorage, }) {
+export function AgentWorkspace({ client, commands = [], defaultPreferences, extensions = [], hostSlots, initialSubagentSessionId, initialThreadId, mailbox, models, mentions = [], onEvent, onDeleteThread, onActiveSubagentChange, onActiveThreadChange, onStorageError, productName = "Agent", reasoningLevels, runtimeStatus = { provider: "ready" }, storageKey = DEFAULT_STORAGE_KEY, threadStorage = browserThreadStorage, }) {
     validateWorkspaceCatalog(models, reasoningLevels, defaultPreferences);
     const catalogSignature = JSON.stringify({ models, reasoningLevels });
     const stableDefaults = useMemo(() => ({
@@ -28,10 +30,13 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
         executionMode: defaultPreferences.executionMode ?? "standard",
     }), [defaultPreferences.executionMode, defaultPreferences.modelId, defaultPreferences.reasoning]);
     const [threads, setThreads] = useState([]);
+    const threadsRef = useRef([]);
     const [activeThreadId, setActiveThreadId] = useState();
+    const [activeSubagentSessionId, setActiveSubagentSessionId] = useState();
     const [isHydrated, setIsHydrated] = useState(false);
     const [recoveringIds, setRecoveringIds] = useState(new Set());
     const [recoveryErrors, setRecoveryErrors] = useState(new Map());
+    const [recoveryQueueErrors, setRecoveryQueueErrors] = useState(new Map());
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [deletionIssue, setDeletionIssue] = useState(false);
@@ -45,6 +50,9 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
     const pendingCollection = useRef(undefined);
     const storageSaveBlocked = useRef(false);
     const messages = messagesFor(locale);
+    useEffect(() => {
+        threadsRef.current = threads;
+    }, [threads]);
     useEffect(() => {
         let cancelled = false;
         const restoredLocale = loadLocale(storageKey);
@@ -67,6 +75,7 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
                 : restoredThreads[0]?.id);
             setThreads(restoredThreads);
             setActiveThreadId(restoredActive);
+            setActiveSubagentSessionId(requestedActive ? initialSubagentSessionId : undefined);
             setLocale(restoredLocale);
             setSidebarOpen(window.matchMedia("(min-width: 1024px)").matches);
             setIsHydrated(true);
@@ -84,6 +93,7 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
             const fallback = createAgentThread(Date.now(), messagesFor(restoredLocale).newTask, stableDefaults);
             setThreads([fallback]);
             setActiveThreadId(fallback.id);
+            setActiveSubagentSessionId(undefined);
             setLocale(restoredLocale);
             setSidebarOpen(window.matchMedia("(min-width: 1024px)").matches);
             setIsHydrated(true);
@@ -91,11 +101,16 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
         return () => {
             cancelled = true;
         };
-    }, [catalogSignature, initialThreadId, onStorageError, stableDefaults, storageKey, threadStorage]);
+    }, [catalogSignature, initialSubagentSessionId, initialThreadId, onStorageError, stableDefaults, storageKey, threadStorage]);
     useEffect(() => {
-        if (isHydrated && activeThreadId)
-            onActiveThreadChange?.(activeThreadId);
-    }, [activeThreadId, isHydrated, onActiveThreadChange]);
+        if (!isHydrated || !activeThreadId)
+            return;
+        if (activeSubagentSessionId) {
+            onActiveSubagentChange?.(activeThreadId, activeSubagentSessionId);
+            return;
+        }
+        onActiveThreadChange?.(activeThreadId);
+    }, [activeSubagentSessionId, activeThreadId, isHydrated, onActiveSubagentChange, onActiveThreadChange]);
     useEffect(() => {
         if (!isHydrated)
             return;
@@ -132,12 +147,34 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
         }, STORAGE_SAVE_DELAY_MS);
     }, [activeThreadId, isHydrated, onStorageError, storageKey, threadStorage, threads]);
     const updateThread = useCallback((threadId, patch) => {
-        setThreads((current) => current.map((thread) => thread.id === threadId ? { ...thread, ...patch, updatedAt: patch.updatedAt ?? Date.now() } : thread));
+        setThreads((current) => {
+            const next = current.map((thread) => thread.id === threadId
+                ? { ...thread, ...patch, updatedAt: patch.updatedAt ?? Date.now() }
+                : thread);
+            threadsRef.current = next;
+            return next;
+        });
+    }, []);
+    const replaceQueuedTurn = useCallback((threadId, turnId, replacement) => {
+        setThreads((current) => {
+            const next = current.map((thread) => thread.id !== threadId
+                ? thread
+                : {
+                    ...thread,
+                    queuedTurns: replacement
+                        ? thread.queuedTurns.map((turn) => turn.id === turnId ? replacement : turn)
+                        : thread.queuedTurns.filter((turn) => turn.id !== turnId),
+                    updatedAt: Date.now(),
+                });
+            threadsRef.current = next;
+            return next;
+        });
     }, []);
     const createThread = useCallback(() => {
         const thread = createAgentThread(Date.now(), messages.newTask, stableDefaults);
         setThreads((current) => [thread, ...current]);
         setActiveThreadId(thread.id);
+        setActiveSubagentSessionId(undefined);
         if (!window.matchMedia("(min-width: 1024px)").matches)
             setSidebarOpen(false);
     }, [messages.newTask, stableDefaults]);
@@ -164,20 +201,25 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
         recoveryStarted.current.delete(threadId);
         setRecoveringIds((current) => withoutSetValue(current, threadId));
         setRecoveryErrors((current) => withoutMapKey(current, threadId));
+        setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
         setThreads((current) => {
             const next = current.filter((thread) => thread.id !== threadId);
             if (next.length === 0) {
                 const replacement = createAgentThread(Date.now(), messages.newTask, stableDefaults);
                 setActiveThreadId(replacement.id);
+                setActiveSubagentSessionId(undefined);
                 return [replacement];
             }
-            if (threadId === activeThreadId)
+            if (threadId === activeThreadId) {
                 setActiveThreadId(next[0]?.id);
+                setActiveSubagentSessionId(undefined);
+            }
             return next;
         });
     }, [activeThreadId, deletingThreadIds, messages.newTask, onDeleteThread, onStorageError, stableDefaults, threads]);
     const selectThread = useCallback((threadId) => {
         setActiveThreadId(threadId);
+        setActiveSubagentSessionId(undefined);
         if (!window.matchMedia("(min-width: 1024px)").matches)
             setSidebarOpen(false);
         const selected = threads.find((thread) => thread.id === threadId);
@@ -196,10 +238,115 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
         setRecoveringIds((current) => new Set(current).add(threadId));
     }, []);
     const activeThread = threads.find((thread) => thread.id === activeThreadId) ?? threads[0];
+    const activeSubagent = activeThread && activeSubagentSessionId
+        ? findSubagentSession(activeThread.events, activeSubagentSessionId, locale)
+        : undefined;
+    const openSubagent = useCallback((sessionId) => {
+        if (!activeThread || !findSubagentSession(activeThread.events, sessionId, locale))
+            return;
+        setActiveSubagentSessionId(sessionId);
+    }, [activeThread, locale]);
+    const closeSubagent = useCallback(() => setActiveSubagentSessionId(undefined), []);
     const changeActiveThread = useCallback((patch) => {
         if (activeThreadId)
             updateThread(activeThreadId, patch);
     }, [activeThreadId, updateThread]);
+    const queueRecoveryMessage = useCallback(async (threadId, message) => {
+        const text = message.text.trim();
+        const thread = threadsRef.current.find((candidate) => candidate.id === threadId);
+        if (!mailbox || !thread?.session.sessionId || !text)
+            return;
+        if (message.files.length > 0) {
+            setRecoveryQueueErrors((current) => new Map(current).set(threadId, messages.queueAttachmentsUnsupported));
+            return;
+        }
+        if (thread.queuedTurns.length >= 5) {
+            setRecoveryQueueErrors((current) => new Map(current).set(threadId, messages.queueFull));
+            return;
+        }
+        const queuedTurn = {
+            delivery: "server",
+            id: createQueuedTurnId(),
+            state: "queued",
+            submittedAt: Date.now(),
+            text,
+        };
+        setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
+        updateThread(threadId, { queuedTurns: [...thread.queuedTurns, queuedTurn] });
+        try {
+            const receipt = await mailbox.enqueue({
+                clientMessageId: queuedTurn.id,
+                message: queuedTurn.text,
+                preferences: thread.preferences,
+                sessionId: thread.session.sessionId,
+            });
+            const state = mailboxQueueState(receipt.status);
+            if (state === "cancelled") {
+                replaceQueuedTurn(threadId, queuedTurn.id);
+                return;
+            }
+            replaceQueuedTurn(threadId, queuedTurn.id, {
+                ...queuedTurn,
+                mailboxItemId: receipt.itemId,
+                state,
+            });
+        }
+        catch (error) {
+            replaceQueuedTurn(threadId, queuedTurn.id, {
+                ...queuedTurn,
+                state: "delivery-failed",
+            });
+            setRecoveryQueueErrors((current) => new Map(current).set(threadId, error instanceof Error ? error.message : messages.queueDeliveryFailed));
+        }
+    }, [mailbox, messages.queueAttachmentsUnsupported, messages.queueDeliveryFailed, messages.queueFull, replaceQueuedTurn, updateThread]);
+    const removeRecoveryQueuedTurn = useCallback(async (threadId, turnId) => {
+        const turn = threadsRef.current
+            .find((thread) => thread.id === threadId)
+            ?.queuedTurns.find((candidate) => candidate.id === turnId);
+        if (!turn)
+            return;
+        setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
+        try {
+            if (mailbox && turn.mailboxItemId)
+                await mailbox.cancel(turn.mailboxItemId);
+            replaceQueuedTurn(threadId, turnId);
+        }
+        catch (error) {
+            setRecoveryQueueErrors((current) => new Map(current).set(threadId, error instanceof Error ? error.message : messages.queueDeliveryFailed));
+        }
+    }, [mailbox, messages.queueDeliveryFailed, replaceQueuedTurn]);
+    const retryRecoveryQueuedTurn = useCallback(async (threadId, turnId) => {
+        const thread = threadsRef.current.find((candidate) => candidate.id === threadId);
+        const turn = thread?.queuedTurns.find((candidate) => candidate.id === turnId);
+        if (!mailbox || !thread?.session.sessionId || !turn || turn.state !== "delivery-failed")
+            return;
+        setRecoveryQueueErrors((current) => withoutMapKey(current, threadId));
+        replaceQueuedTurn(threadId, turnId, { ...turn, state: "queued" });
+        try {
+            const receipt = turn.mailboxItemId
+                ? await mailbox.retry(turn.mailboxItemId)
+                : await mailbox.enqueue({
+                    clientMessageId: turn.id,
+                    message: turn.text,
+                    preferences: thread.preferences,
+                    sessionId: thread.session.sessionId,
+                });
+            const state = mailboxQueueState(receipt.status);
+            if (state === "cancelled") {
+                replaceQueuedTurn(threadId, turnId);
+                return;
+            }
+            replaceQueuedTurn(threadId, turnId, {
+                ...turn,
+                mailboxItemId: receipt.itemId,
+                state,
+            });
+        }
+        catch (error) {
+            replaceQueuedTurn(threadId, turnId, { ...turn, state: "delivery-failed" });
+            setRecoveryQueueErrors((current) => new Map(current).set(threadId, error instanceof Error ? error.message : messages.queueDeliveryFailed));
+        }
+    }, [mailbox, messages.queueDeliveryFailed, replaceQueuedTurn]);
     const recoverActiveThread = useCallback(() => {
         if (activeThreadId)
             requestThreadRecovery(activeThreadId);
@@ -216,21 +363,82 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
         let cursor = recoveredCursor;
         let events = [...thread.events];
         let checkedTailBoundary = false;
+        let pendingTurn = thread.pendingTurn;
+        let queuedTurns = thread.queuedTurns;
         let recoveredContinuationToken = thread.session.continuationToken;
         let settled = false;
+        const refreshMailboxQueue = async () => {
+            queuedTurns = threadsRef.current.find((candidate) => candidate.id === thread.id)?.queuedTurns ?? queuedTurns;
+            if (!mailbox)
+                return;
+            const updates = new Map();
+            await Promise.all(queuedTurns.map(async (turn) => {
+                if (turn.delivery !== "server" || !turn.mailboxItemId)
+                    return;
+                try {
+                    const receipt = await mailbox.inspect(turn.mailboxItemId);
+                    const state = mailboxQueueState(receipt.status);
+                    updates.set(turn.id, state === "cancelled" ? "remove" : state);
+                }
+                catch {
+                }
+            }));
+            if (updates.size === 0)
+                return;
+            const next = queuedTurns.flatMap((turn) => {
+                const state = updates.get(turn.id);
+                if (state === "remove")
+                    return [];
+                return state ? [{ ...turn, state }] : [turn];
+            });
+            if (sameQueuedTurns(queuedTurns, next))
+                return;
+            queuedTurns = next;
+            updateThread(thread.id, { queuedTurns });
+        };
+        const hasPendingServerQueue = () => queuedTurns.some((turn) => turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId));
+        const currentBoundarySettles = () => {
+            const last = events.at(-1);
+            if (!last || !isRecoveryBoundary(last))
+                return false;
+            return last.type !== "session.waiting" || !hasPendingServerQueue();
+        };
         try {
             while (!settled && !controller.signal.aborted) {
                 try {
+                    await refreshMailboxQueue();
+                    if (currentBoundarySettles()) {
+                        settled = true;
+                        break;
+                    }
                     let consumed = 0;
                     for await (const event of session.stream({ follow: false, signal: controller.signal, startIndex: cursor })) {
                         events = [...appendThreadEvent(events, event)];
                         cursor += 1;
                         consumed += 1;
+                        onEvent?.(event);
                         if (event.type === "session.waiting")
                             recoveredContinuationToken = event.data.continuationToken;
-                        updateThread(thread.id, { events: [...events], session: { ...session.state, streamIndex: cursor }, status: statusFromEvents(events) });
+                        if (event.type === "message.received") {
+                            const wasPendingTurn = Boolean(pendingTurn);
+                            pendingTurn = undefined;
+                            if (!wasPendingTurn) {
+                                const nextServerTurn = queuedTurns.find((turn) => turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId));
+                                if (nextServerTurn) {
+                                    queuedTurns = queuedTurns.filter((turn) => turn.id !== nextServerTurn.id);
+                                }
+                            }
+                        }
+                        updateThread(thread.id, {
+                            events: [...events],
+                            pendingTurn,
+                            queuedTurns,
+                            session: { ...session.state, streamIndex: cursor },
+                            status: statusFromEvents(events),
+                        });
                         if (isRecoveryBoundary(event)) {
-                            settled = true;
+                            await refreshMailboxQueue();
+                            settled = event.type !== "session.waiting" || !hasPendingServerQueue();
                             break;
                         }
                     }
@@ -242,14 +450,20 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
                             recoveredContinuationToken = missingBoundary.type === "session.waiting"
                                 ? missingBoundary.data.continuationToken
                                 : session.state.continuationToken;
+                            await refreshMailboxQueue();
                             updateThread(thread.id, {
                                 events: [...events],
+                                pendingTurn,
+                                queuedTurns,
                                 session: { ...session.state, continuationToken: recoveredContinuationToken, streamIndex: cursor },
                                 status: statusFromEvents(events),
                             });
-                            settled = true;
+                            settled = missingBoundary.type !== "session.waiting" || !hasPendingServerQueue();
                         }
                     }
+                    await refreshMailboxQueue();
+                    if (!settled && currentBoundarySettles())
+                        settled = true;
                     setRecoveryErrors((current) => withoutMapKey(current, thread.id));
                 }
                 catch (error) {
@@ -267,6 +481,8 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
                 throw new Error("The active Agent stream ended before reaching a durable boundary.");
             updateThread(thread.id, {
                 events: compactThreadEvents(events),
+                pendingTurn,
+                queuedTurns,
                 session: { ...session.state, continuationToken: recoveredContinuationToken ?? session.state.continuationToken, streamIndex: cursor },
                 status: statusFromEvents(events),
             });
@@ -287,7 +503,7 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
                 return next;
             });
         }
-    }, [client, messages.recoveryFailed, updateThread]);
+    }, [client, mailbox, messages.recoveryFailed, onEvent, updateThread]);
     useEffect(() => () => {
         for (const controller of recoveryControllers.current.values())
             controller.abort();
@@ -322,18 +538,34 @@ export function AgentWorkspace({ client, commands = [], defaultPreferences, exte
     }, [client, messages.recoveryFailed]);
     if (!isHydrated || !activeThread)
         return _jsx("div", { className: "flex h-dvh items-center justify-center bg-background text-muted-foreground", children: messages.loading });
-    return (_jsxs("div", { className: "open-agent-ui flex h-dvh overflow-hidden bg-background text-foreground", children: [_jsx(AgentSidebar, { activeThreadId: activeThread.id, brand: productName, deletingThreadIds: deletingThreadIds, hostFooter: hostSlots?.sidebarFooter, locale: locale, messages: messages, onClose: () => setSidebarOpen(false), onDelete: deleteThread, onNew: createThread, onRename: renameThread, onSelect: selectThread, onSettings: () => setSettingsOpen(true), open: sidebarOpen, threads: threads }), _jsxs("section", { className: "flex min-w-0 flex-1 flex-col bg-card", children: [_jsxs("header", { className: "flex h-13 shrink-0 items-center justify-between border-b border-border/70 px-3 sm:px-4", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-2", children: [_jsx(Button, { "aria-label": messages.openNavigation, className: "lg:hidden", onClick: () => setSidebarOpen(true), size: "icon-sm", variant: "ghost", children: _jsx(MenuIcon, { className: "size-4" }) }), _jsx(Button, { "aria-label": messages.toggleNavigation, className: "hidden lg:inline-flex", onClick: () => setSidebarOpen((open) => !open), size: "icon-sm", variant: "ghost", children: sidebarOpen ? _jsx(PanelLeftCloseIcon, { className: "size-4" }) : _jsx(PanelLeftIcon, { className: "size-4" }) }), _jsx("h2", { className: "truncate font-medium text-[15px]", children: activeThread.title })] }), _jsx("div", { className: "flex items-center gap-1", children: hostSlots?.threadHeaderEnd })] }), storageIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.storageUnavailable }), _jsxs(Button, { onClick: () => window.location.reload(), size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.reload] })] })) : null, deletionIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.deleteUnavailable }), _jsx(Button, { onClick: () => setDeletionIssue(false), size: "sm", variant: "outline", children: messages.dismiss })] })) : null, runtimeStatus.provider !== "ready" ? (_jsxs("div", { className: "flex shrink-0 items-start gap-3 border-b border-amber-500/30 bg-amber-500/8 px-4 py-2.5 text-sm", role: "status", children: [_jsx(ServerOffIcon, { className: "mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: runtimeStatus.provider === "mock" ? messages.mockProvider : messages.providerUnconfigured })] })) : null, activeIsRecovering ? (_jsx(RecoveryView, { commands: commands, error: recoveryErrors.get(activeThread.id), locale: locale, mentions: mentions, models: models, onPreferencesChange: (preferences) => updateThread(activeThread.id, { preferences }), onRetry: () => setRecoveringIds((current) => new Set(current).add(activeThread.id)), onStop: () => void stopRecoveringThread(activeThread), providerReady: runtimeStatus.provider !== "unconfigured", reasoningLevels: reasoningLevels, thread: activeThread })) : _jsx(AgentThreadView, { client: client, commands: commands, locale: locale, mentions: mentions, models: models, onChange: changeActiveThread, onEvent: onEvent, onRecoveryNeeded: recoverActiveThread, providerReady: runtimeStatus.provider !== "unconfigured", reasoningLevels: reasoningLevels, thread: activeThread }, activeThread.id)] }), _jsx(AgentSettingsDialog, { extensions: extensions, locale: locale, messages: messages, onLocaleChange: setLocale, onOpenChange: setSettingsOpen, open: settingsOpen })] }));
+    return (_jsxs("div", { className: "open-agent-ui flex h-dvh overflow-hidden bg-background text-foreground", children: [_jsx(AgentSidebar, { activeThreadId: activeThread.id, brand: productName, deletingThreadIds: deletingThreadIds, hostFooter: hostSlots?.sidebarFooter, locale: locale, messages: messages, onClose: () => setSidebarOpen(false), onDelete: deleteThread, onNew: createThread, onRename: renameThread, onSelect: selectThread, onSettings: () => setSettingsOpen(true), open: sidebarOpen, threads: threads }), _jsxs("section", { className: "flex min-w-0 flex-1 flex-col bg-card", children: [_jsxs("header", { className: "flex h-13 shrink-0 items-center justify-between border-b border-border/70 px-3 sm:px-4", children: [_jsxs("div", { className: "flex min-w-0 items-center gap-2", children: [_jsx(Button, { "aria-label": messages.openNavigation, className: "lg:hidden", onClick: () => setSidebarOpen(true), size: "icon-sm", variant: "ghost", children: _jsx(MenuIcon, { className: "size-4" }) }), _jsx(Button, { "aria-label": messages.toggleNavigation, className: "hidden lg:inline-flex", onClick: () => setSidebarOpen((open) => !open), size: "icon-sm", variant: "ghost", children: sidebarOpen ? _jsx(PanelLeftCloseIcon, { className: "size-4" }) : _jsx(PanelLeftIcon, { className: "size-4" }) }), activeSubagentSessionId ? (_jsx(Button, { "aria-label": messages.backToTask, onClick: closeSubagent, size: "icon-sm", variant: "ghost", children: _jsx(ArrowLeftIcon, { className: "size-4" }) })) : null, _jsx("h2", { className: "truncate font-medium text-[15px]", children: activeSubagentSessionId ? activeSubagent?.label ?? messages.subagentSession : activeThread.title })] }), _jsxs("div", { className: "flex items-center gap-1", children: [_jsx(AgentSubagentMenu, { activeSessionId: activeSubagentSessionId, events: activeThread.events, locale: locale, onOpen: openSubagent }), hostSlots?.threadHeaderEnd] })] }), storageIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.storageUnavailable }), _jsxs(Button, { onClick: () => window.location.reload(), size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.reload] })] })) : null, deletionIssue ? (_jsxs("div", { className: "flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm", role: "alert", children: [_jsx(AlertCircleIcon, { className: "size-4 shrink-0 text-destructive" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: messages.deleteUnavailable }), _jsx(Button, { onClick: () => setDeletionIssue(false), size: "sm", variant: "outline", children: messages.dismiss })] })) : null, runtimeStatus.provider !== "ready" ? (_jsxs("div", { className: "flex shrink-0 items-start gap-3 border-b border-amber-500/30 bg-amber-500/8 px-4 py-2.5 text-sm", role: "status", children: [_jsx(ServerOffIcon, { className: "mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" }), _jsx("p", { className: "min-w-0 flex-1 text-foreground", children: runtimeStatus.provider === "mock" ? messages.mockProvider : messages.providerUnconfigured })] })) : null, activeSubagentSessionId ? (activeSubagent ? (_jsx(AgentChildSessionView, { client: client, locale: locale, preferences: activeThread.preferences, sessionId: activeSubagentSessionId })) : (_jsx(UnavailableSubagentView, { locale: locale, onBack: closeSubagent }))) : activeIsRecovering ? (_jsx(RecoveryView, { commands: commands, error: recoveryErrors.get(activeThread.id), locale: locale, mailboxEnabled: Boolean(mailbox), mentions: mentions, models: models, onRemoveQueuedTurn: (turnId) => void removeRecoveryQueuedTurn(activeThread.id, turnId), onPreferencesChange: (preferences) => updateThread(activeThread.id, { preferences }), onRetry: () => setRecoveringIds((current) => new Set(current).add(activeThread.id)), onRetryQueuedTurn: (turnId) => void retryRecoveryQueuedTurn(activeThread.id, turnId), onStop: () => void stopRecoveringThread(activeThread), onSubmit: (message) => queueRecoveryMessage(activeThread.id, message), providerReady: runtimeStatus.provider !== "unconfigured", queueError: recoveryQueueErrors.get(activeThread.id), reasoningLevels: reasoningLevels, thread: activeThread })) : _jsx(AgentThreadView, { client: client, commands: commands, locale: locale, mailbox: mailbox, mentions: mentions, models: models, onChange: changeActiveThread, onEvent: onEvent, onOpenSubagent: openSubagent, onRecoveryNeeded: recoverActiveThread, providerReady: runtimeStatus.provider !== "unconfigured", reasoningLevels: reasoningLevels, thread: activeThread }, activeThread.id)] }), _jsx(AgentSettingsDialog, { extensions: extensions, locale: locale, messages: messages, onLocaleChange: setLocale, onOpenChange: setSettingsOpen, open: settingsOpen })] }));
 }
-function RecoveryView({ commands, error, locale, mentions, models, onPreferencesChange, onRetry, onStop, providerReady, reasoningLevels, thread, }) {
+function findSubagentSession(events, sessionId, locale) {
+    const sessions = presentSubagentSessions(events);
+    const index = sessions.findIndex((candidate) => candidate.childSessionId === sessionId);
+    const session = sessions[index];
+    if (!session)
+        return undefined;
+    return {
+        label: session.name && session.name !== "agent"
+            ? session.name
+            : locale === "zh-CN" ? `子代理 ${index + 1}` : `Sub-agent ${index + 1}`,
+        ...(session.task ? { task: session.task } : {}),
+    };
+}
+function UnavailableSubagentView({ locale, onBack, }) {
+    const messages = messagesFor(locale);
+    return (_jsx("main", { className: "flex min-h-0 flex-1 items-center justify-center bg-background px-6", children: _jsxs("div", { className: "max-w-md text-center", children: [_jsx(AlertCircleIcon, { className: "mx-auto size-5 text-muted-foreground" }), _jsx("p", { className: "mt-3 text-sm text-muted-foreground", children: messages.subagentUnavailable }), _jsxs(Button, { className: "mt-4", onClick: onBack, size: "sm", variant: "outline", children: [_jsx(ArrowLeftIcon, { className: "size-4" }), messages.backToTask] })] }) }));
+}
+function RecoveryView({ commands, error, locale, mailboxEnabled, mentions, models, onRemoveQueuedTurn, onPreferencesChange, onRetry, onRetryQueuedTurn, onStop, onSubmit, providerReady, queueError, reasoningLevels, thread, }) {
     const reducer = useMemo(() => defaultMessageReducer(), []);
     const data = useMemo(() => thread.events.reduce((current, event) => reducer.reduce(current, event), reducer.initial()), [reducer, thread.events]);
     const visibleMessages = data.messages.filter((message) => !isProxiedInputOnlyMessage(message, thread.events));
     const messages = messagesFor(locale);
-    return (_jsx(PromptInputProvider, { children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx(Conversation, { className: "min-h-0 flex-1", children: _jsxs(ConversationContent, { className: "mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10", children: [visibleMessages.map((message) => _jsx(AgentMessage, { canRespond: false, events: thread.events, fallbackStartedAt: thread.pendingTurn?.submittedAt, isStreaming: true, locale: locale, message: message, onInputResponses: () => undefined }, message.id)), error ? (_jsxs("div", { className: "flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm", children: [_jsx(AlertCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "font-medium", children: messages.recoveryFailed }), _jsx("p", { className: "mt-0.5 break-words text-muted-foreground", children: error })] }), _jsxs(Button, { onClick: onRetry, size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.retry] })] })) : (_jsx(AgentActivity, { events: thread.events, messages: messages, mode: "recovery" }))] }) }), _jsx("div", { className: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6", children: _jsx(AgentComposer, { commands: commands, disabled: !providerReady, inputDisabled: true, mentions: mentions, messages: messages, models: models, onPreferencesChange: onPreferencesChange, onStop: onStop, onSubmit: ignoreRecoverySubmit, preferences: thread.preferences, reasoningLevels: reasoningLevels, status: "streaming", usage: summarizeUsage(thread.events) }) })] }) }));
+    return (_jsx(PromptInputProvider, { children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx(Conversation, { className: "min-h-0 flex-1", children: _jsxs(ConversationContent, { className: "mx-auto w-full max-w-3xl gap-7 px-4 py-8 sm:px-6 lg:py-10", children: [visibleMessages.map((message) => _jsx(AgentMessage, { canRespond: false, events: thread.events, fallbackStartedAt: thread.pendingTurn?.submittedAt, isStreaming: true, locale: locale, message: message, onInputResponses: () => undefined }, message.id)), error ? (_jsxs("div", { className: "flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm", children: [_jsx(AlertCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "font-medium", children: messages.recoveryFailed }), _jsx("p", { className: "mt-0.5 break-words text-muted-foreground", children: error })] }), _jsxs(Button, { onClick: onRetry, size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.retry] })] })) : (_jsx(AgentActivity, { events: thread.events, messages: messages, mode: "recovery" }))] }) }), _jsxs("div", { className: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6", children: [thread.queuedTurns.length > 0 || queueError ? (_jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: onRemoveQueuedTurn, onRetry: onRetryQueuedTurn, turns: thread.queuedTurns })) : null, _jsx(AgentComposer, { commands: commands, disabled: !providerReady, inputDisabled: !mailboxEnabled, mentions: mentions, messages: messages, models: models, onPreferencesChange: onPreferencesChange, onStop: onStop, onSubmit: onSubmit, preferences: thread.preferences, reasoningLevels: reasoningLevels, status: "streaming", usage: summarizeUsage(thread.events) })] })] }) }));
 }
 const RECOVERY_POLL_INTERVAL_MS = 1_500;
 const RECOVERY_TAIL_LOOKUP_TIMEOUT_MS = 1_500;
-async function ignoreRecoverySubmit(_message) { }
 function latestTurnId(events) {
     const event = [...events].reverse().find((candidate) => candidate.type === "turn.started");
     return event?.type === "turn.started" ? event.data.turnId : undefined;
@@ -448,8 +680,32 @@ function withoutMapKey(source, key) {
 function threadNeedsRecovery(thread) {
     if (!thread.session.sessionId)
         return false;
+    if (thread.queuedTurns.some((turn) => turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId)))
+        return true;
     const lastEvent = thread.events.at(-1);
     return !lastEvent || !isRecoveryBoundary(lastEvent);
+}
+function createQueuedTurnId() {
+    return typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `queued-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+function mailboxQueueState(status) {
+    if (status === "failed")
+        return "delivery-failed";
+    if (status === "submission-ambiguous")
+        return "admission-ambiguous";
+    if (status === "cancelled")
+        return "cancelled";
+    return "queued";
+}
+function sameQueuedTurns(left, right) {
+    return left.length === right.length && left.every((turn, index) => {
+        const candidate = right[index];
+        return candidate?.id === turn.id &&
+            candidate.mailboxItemId === turn.mailboxItemId &&
+            candidate.state === turn.state;
+    });
 }
 function loadLocale(storageKey) {
     const stored = window.localStorage.getItem(`${storageKey}:locale`);

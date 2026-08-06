@@ -9,6 +9,7 @@ import {
   FileIcon,
   PlusIcon,
   ShieldCheckIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -103,6 +104,7 @@ export function AgentComposer({
 }) {
   const attachments = usePromptInputAttachments();
   const executionMode = preferences.executionMode ?? "standard";
+  const isRunning = status === "streaming" || status === "submitted";
 
   return (
     <PromptInput
@@ -123,15 +125,17 @@ export function AgentComposer({
       <ComposerTextarea commands={commands} disabled={disabled || inputDisabled} mentions={mentions} messages={messages} />
       <PromptInputFooter className="min-h-10 gap-1.5 px-2.5 pb-2.5">
         <PromptInputTools className="min-w-0 flex-1 gap-0.5">
-          <PromptInputActionMenu>
-            <PromptInputActionMenuTrigger aria-label={messages.addFiles} tooltip={messages.addFiles}>
-              <PlusIcon className="size-4" />
-            </PromptInputActionMenuTrigger>
-            <PromptInputActionMenuContent align="start" side="top">
-              <PromptInputActionAddAttachments label={messages.addFiles} />
-              <PromptInputActionAddScreenshot label={messages.takeScreenshot} />
-            </PromptInputActionMenuContent>
-          </PromptInputActionMenu>
+          {!isRunning ? (
+            <PromptInputActionMenu>
+              <PromptInputActionMenuTrigger aria-label={messages.addFiles} tooltip={messages.addFiles}>
+                <PlusIcon className="size-4" />
+              </PromptInputActionMenuTrigger>
+              <PromptInputActionMenuContent align="start" side="top">
+                <PromptInputActionAddAttachments label={messages.addFiles} />
+                <PromptInputActionAddScreenshot label={messages.takeScreenshot} />
+              </PromptInputActionMenuContent>
+            </PromptInputActionMenu>
+          ) : null}
           <ExecutionModeSelect
             label={messages.executionMode}
             onChange={(nextMode) => onPreferencesChange({ ...preferences, executionMode: nextMode })}
@@ -153,13 +157,34 @@ export function AgentComposer({
             value={preferences.reasoning}
           />
           <ContextUsage messages={messages} models={models} modelId={preferences.modelId} usage={usage} />
-          <PromptInputSubmit
-            aria-label={status === "ready" || status === "error" ? messages.send : messages.cancel}
-            className="static size-8"
-            disabled={disabled}
-            onStop={onStop}
-            status={status}
-          />
+          {isRunning ? (
+            <>
+              <PromptInputSubmit
+                aria-label={messages.queueFollowUp}
+                className="static size-8"
+                disabled={disabled || inputDisabled}
+                status="ready"
+              />
+              <Button
+                aria-label={messages.cancel}
+                className="size-8"
+                onClick={onStop}
+                size="icon-sm"
+                type="button"
+                variant="outline"
+              >
+                <SquareIcon className="size-3.5 fill-current" />
+              </Button>
+            </>
+          ) : (
+            <PromptInputSubmit
+              aria-label={messages.send}
+              className="static size-8"
+              disabled={disabled}
+              onStop={onStop}
+              status={status}
+            />
+          )}
         </div>
       </PromptInputFooter>
     </PromptInput>

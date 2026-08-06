@@ -1,6 +1,6 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { CheckIcon, CheckCircleIcon, ChevronDownIcon, CirclePauseIcon, CopyIcon, ExternalLinkIcon, FileIcon, ImageIcon, KeyRoundIcon, LoaderCircleIcon, NetworkIcon, XCircleIcon, } from "lucide-react";
+import { CheckIcon, CheckCircleIcon, ChevronDownIcon, CirclePauseIcon, CircleStopIcon, CopyIcon, ExternalLinkIcon, FileIcon, ImageIcon, KeyRoundIcon, LoaderCircleIcon, NetworkIcon, XCircleIcon, } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Message, MessageAction, MessageActions, MessageContent, MessageResponse } from "../ai-elements/message.js";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "../ai-elements/reasoning.js";
@@ -10,13 +10,13 @@ import { Button } from "../ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 import { cn } from "../utils.js";
 import { presentAgentTurn, presentSubagentCall, } from "./turn-presentation.js";
-export function AgentMessage({ canRespond, events, fallbackStartedAt, isStreaming, locale, message, onInputResponses, }) {
+export function AgentMessage({ canRespond, events, fallbackStartedAt, isStreaming, locale, message, onOpenSubagent, onInputResponses, }) {
     const task = presentAgentTurn(message, events);
     const lastTextIndex = message.parts.reduce((last, part, index) => (part.type === "text" ? index : last), -1);
     const responseText = task?.finalPart?.text ?? (task ? undefined : lastText(message.parts));
-    return (_jsxs(Message, { "data-optimistic": message.metadata?.optimistic ? "true" : undefined, from: message.role, children: [_jsx(MessageContent, { children: task ? (_jsxs(_Fragment, { children: [_jsxs(ExecutionGroup, { fallbackStartedAt: fallbackStartedAt, locale: locale, task: task, children: [task.processParts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: task.status === "running" || task.status === "waiting", locale: locale, onInputResponses: onInputResponses, part: part, showCaret: false }, partKey(part, index)))), task.proxiedInputParts.map((part) => (_jsxs("div", { className: "space-y-2", children: [_jsx("p", { className: "text-xs font-medium text-amber-700 dark:text-amber-300", children: localize(locale, "A delegated task needs your approval", "子代理任务需要你的批准") }), _jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: true, locale: locale, onInputResponses: onInputResponses, part: part, showCaret: false })] }, `proxied-input:${part.toolCallId}`)))] }), task.finalPart ? (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, part: task.finalPart, showCaret: isStreaming && task.finalPart.state === "streaming" })) : null] })) : message.parts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, part: part, showCaret: isStreaming && message.role === "assistant" && index === lastTextIndex }, partKey(part, index)))) }), message.role === "assistant" && responseText && !isStreaming ? (_jsx(CopyResponseAction, { locale: locale, text: responseText })) : null] }));
+    return (_jsxs(Message, { "data-optimistic": message.metadata?.optimistic ? "true" : undefined, from: message.role, children: [_jsx(MessageContent, { children: task ? (_jsxs(_Fragment, { children: [_jsxs(ExecutionGroup, { fallbackStartedAt: fallbackStartedAt, locale: locale, task: task, children: [task.processParts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: task.status === "running" || task.status === "waiting", locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false }, partKey(part, index)))), task.proxiedInputParts.map((part) => (_jsxs("div", { className: "space-y-2", children: [_jsx("p", { className: "text-xs font-medium text-amber-700 dark:text-amber-300", children: localize(locale, "A delegated task needs your approval", "子代理任务需要你的批准") }), _jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: true, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false })] }, `proxied-input:${part.toolCallId}`)))] }), task.finalPart ? (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: task.finalPart, showCaret: isStreaming && task.finalPart.state === "streaming" })) : null] })) : message.parts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: isStreaming && message.role === "assistant" && index === lastTextIndex }, partKey(part, index)))) }), message.role === "assistant" && responseText && !isStreaming ? (_jsx(CopyResponseAction, { locale: locale, text: responseText })) : null] }));
 }
-function AgentMessagePart({ canRespond, events, inActiveExecution, locale, onInputResponses, part, showCaret, }) {
+function AgentMessagePart({ canRespond, events, inActiveExecution, locale, onOpenSubagent, onInputResponses, part, showCaret, }) {
     switch (part.type) {
         case "step-start":
             return null;
@@ -29,25 +29,29 @@ function AgentMessagePart({ canRespond, events, inActiveExecution, locale, onInp
         case "authorization":
             return _jsx(AuthorizationPrompt, { locale: locale, part: part });
         case "dynamic-tool":
-            return (_jsxs(Tool, { className: "mb-0", defaultOpen: (inActiveExecution && part.state !== "output-available") || part.state === "approval-requested" || part.state === "approval-responded", children: [_jsx(ToolHeader, { showStatus: part.state !== "output-available", state: part.state, statusLabel: toolStatusLabel(locale, part.state), title: toolTitle(locale, part), toolName: part.toolName, type: "dynamic-tool" }), _jsxs(ToolContent, { children: [part.toolMetadata?.eve?.kind === "subagent-call" ? (_jsx(SubagentProgress, { events: events, locale: locale, part: part })) : null, _jsx(ToolInput, { input: part.input, label: localize(locale, "Parameters", "参数") }), _jsx(InputRequestActions, { canRespond: canRespond, locale: locale, part: part, onInputResponses: onInputResponses }), _jsx(ToolOutput, { errorLabel: localize(locale, "Error", "错误"), errorText: part.errorText, output: part.output, resultLabel: localize(locale, "Result", "结果") })] })] }));
+            return (_jsxs(Tool, { className: "mb-0", defaultOpen: (inActiveExecution && part.state !== "output-available") || part.state === "approval-requested" || part.state === "approval-responded", children: [_jsx(ToolHeader, { showStatus: part.state !== "output-available", state: part.state, statusLabel: toolStatusLabel(locale, part.state), title: toolTitle(locale, part), toolName: part.toolName, type: "dynamic-tool" }), _jsxs(ToolContent, { children: [part.toolMetadata?.eve?.kind === "subagent-call" ? (_jsx(SubagentProgress, { events: events, locale: locale, onOpenSubagent: onOpenSubagent, part: part })) : null, _jsx(ToolInput, { input: part.input, label: localize(locale, "Parameters", "参数") }), _jsx(InputRequestActions, { canRespond: canRespond, locale: locale, part: part, onInputResponses: onInputResponses }), _jsx(ToolOutput, { errorLabel: localize(locale, "Error", "错误"), errorText: part.errorText, output: part.output, resultLabel: localize(locale, "Result", "结果") })] })] }));
     }
 }
-function SubagentProgress({ events, locale, part, }) {
+function SubagentProgress({ events, locale, onOpenSubagent, part, }) {
     const presentation = presentSubagentCall(events, part.toolCallId);
     const elapsedSeconds = useElapsedSeconds(presentation.startedAt, presentation.endedAt);
     const isActive = presentation.status === "running" || presentation.status === "starting";
     const title = presentation.status === "completed"
         ? localize(locale, "Sub-agent finished and returned its result to the parent Agent", "子代理已完成，结果已返回父 Agent")
-        : presentation.status === "failed"
-            ? localize(locale, "The delegated task failed and returned control to the parent Agent", "委派任务失败，控制权已返回父 Agent")
-            : presentation.status === "running" && elapsedSeconds >= 45
-                ? localize(locale, "Sub-agent is still working; the parent Agent will resume automatically", "子代理仍在执行；完成后父 Agent 会自动继续")
-                : presentation.status === "running"
-                    ? localize(locale, "Sub-agent is working independently", "子代理正在独立执行")
-                    : localize(locale, "Starting the delegated task", "正在启动委派任务");
+        : presentation.status === "cancelled"
+            ? localize(locale, "Sub-agent stopped", "子代理已停止")
+            : presentation.status === "failed"
+                ? localize(locale, "Sub-agent failed and returned control to the parent Agent", "子代理执行失败，控制权已返回父 Agent")
+                : presentation.status === "running" && elapsedSeconds >= 45
+                    ? localize(locale, "Sub-agent is still working; the parent Agent will resume automatically", "子代理仍在执行；完成后父 Agent 会自动继续")
+                    : presentation.status === "running"
+                        ? localize(locale, "Sub-agent is working independently", "子代理正在独立执行")
+                        : localize(locale, "Starting the delegated task", "正在启动委派任务");
     return (_jsxs("div", { className: cn("flex items-start gap-3 rounded-md border px-3 py-2.5 text-sm", presentation.status === "failed"
             ? "border-destructive/30 bg-destructive/5"
-            : "border-border bg-muted/30"), role: isActive ? "status" : undefined, children: [isActive ? (_jsx(LoaderCircleIcon, { className: "mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" })) : presentation.status === "completed" ? (_jsx(CheckCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-300" })) : (_jsx(XCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" })), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "text-foreground", children: title }), _jsxs("p", { className: "mt-0.5 text-xs text-muted-foreground", children: [_jsx(NetworkIcon, { className: "mr-1 inline size-3" }), localize(locale, "Workspace changes are shared with this task.", "它对工作区的更改会实时共享给当前任务。")] })] }), presentation.startedAt ? (_jsx("span", { className: "shrink-0 text-xs tabular-nums text-muted-foreground", children: formatDuration(elapsedSeconds) })) : null] }));
+            : "border-border bg-muted/30"), role: isActive ? "status" : undefined, children: [isActive ? (_jsx(LoaderCircleIcon, { className: "mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" })) : presentation.status === "completed" ? (_jsx(CheckCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-300" })) : presentation.status === "cancelled" ? (_jsx(CircleStopIcon, { className: "mt-0.5 size-4 shrink-0 text-muted-foreground" })) : (_jsx(XCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" })), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "text-foreground", children: title }), _jsxs("p", { className: "mt-0.5 text-xs text-muted-foreground", children: [_jsx(NetworkIcon, { className: "mr-1 inline size-3" }), presentation.name === "agent"
+                                ? localize(locale, "Works in the parent Agent workspace.", "在父 Agent 的工作区中执行。")
+                                : localize(locale, "Runs in its own isolated workspace.", "在独立隔离的工作区中执行。")] }), presentation.childSessionId && onOpenSubagent ? (_jsxs(Button, { className: "mt-2 h-7 px-2 text-xs", onClick: () => onOpenSubagent(presentation.childSessionId), size: "sm", variant: "outline", children: [_jsx(NetworkIcon, { className: "size-3.5" }), localize(locale, `Open ${presentation.name === "agent" ? "sub-agent" : presentation.name ?? "sub-agent"} session`, `打开${presentation.name && presentation.name !== "agent" ? ` ${presentation.name}` : "子代理"}会话`)] })) : null] }), presentation.startedAt ? (_jsx("span", { className: "shrink-0 text-xs tabular-nums text-muted-foreground", children: formatDuration(elapsedSeconds) })) : null] }));
 }
 function ExecutionGroup({ children, fallbackStartedAt, locale, task, }) {
     const isActive = task.status === "running" || task.status === "waiting";
@@ -245,7 +249,7 @@ function toolTitle(locale, part) {
     if (kind === "load-skill")
         return localize(locale, "Loaded skill", "加载技能");
     if (kind === "subagent-call")
-        return localize(locale, "Delegated task", "委派子任务");
+        return localize(locale, "Sub-agent", "子代理");
     const normalized = part.toolName.toLocaleLowerCase().replaceAll("-", "_");
     if (["bash", "shell", "terminal"].includes(normalized))
         return localize(locale, "Terminal command", "终端命令");

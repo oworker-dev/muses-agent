@@ -142,5 +142,6 @@ test("does not automatically replay after a tool boundary", async () => {
   const errorPart = await reader.read();
   assert.equal(errorPart.done, false);
   assert(errorPart.value.error instanceof ProviderStreamInterruptedError);
-  assert.equal(errorPart.value.error.isRetryable, undefined);
+  assert.equal(errorPart.value.error.isRetryable, false);
+  assert.equal(errorPart.value.error.statusCode, 422);
 });
