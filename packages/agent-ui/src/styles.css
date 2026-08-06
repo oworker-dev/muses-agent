@@ -1,5 +1,7 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-shimmer";
+@import "@assistant-ui/react-markdown/styles/dot.css";
 
 @custom-variant dark (&:is(.dark *));
 @source "./**/*.{ts,tsx}";
@@ -38,12 +40,35 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  @keyframes collapsible-down {
+  from {
+    height: 0;
+    }
+  to {
+    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  }
+  @keyframes collapsible-up {
+  from {
+    height: var(--radix-collapsible-content-height, var(--collapsible-panel-height, auto));
+    }
+  to {
+    height: 0;
+    }
+  }
 }
 
 .open-agent-ui {
   background: var(--background, oklch(1 0 0));
   color: var(--foreground, oklch(0.16 0 0));
   font-family: var(--agent-ui-font-sans, ui-sans-serif, system-ui, sans-serif);
+}
+
+.open-agent-ui .aui-md-pre > .aui-md-inline-code {
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
 }
 
 :root {
@@ -67,3 +92,7 @@
   --sidebar-border: hsl(240 3.7% 15.9%);
   --sidebar-ring: hsl(217.2 91.2% 59.8%);
 }
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));

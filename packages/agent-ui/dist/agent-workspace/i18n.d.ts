@@ -71,6 +71,7 @@ declare const translations: {
         readonly step: "step";
         readonly steps: "steps";
         readonly storageUnavailable: "Changes are not being saved. Reload to restore the latest server state.";
+        readonly stopping: "Stopping";
         readonly subagentSession: "Sub-agent session";
         readonly subagentUnavailable: "This sub-agent session does not belong to the current task or is no longer available.";
         readonly skillsAndCommands: "Skills and commands";
@@ -178,6 +179,7 @@ declare const translations: {
         readonly step: "步";
         readonly steps: "步";
         readonly storageUnavailable: "当前更改未能保存，请重新加载以恢复服务器上的最新状态。";
+        readonly stopping: "正在停止";
         readonly subagentSession: "子代理会话";
         readonly subagentUnavailable: "此子代理会话不属于当前任务或已不可用。";
         readonly skillsAndCommands: "技能与命令";

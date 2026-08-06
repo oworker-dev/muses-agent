@@ -1,5 +1,7 @@
 "use client";
 
+import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
+import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react";
 import { ClientError, defaultMessageReducer, type HandleMessageStreamEvent } from "eve/client";
 import { AlertCircleIcon, ArrowLeftIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,13 +9,13 @@ import { Button } from "../ui/button.js";
 import { createAgentSession } from "./agent-client.js";
 import { AgentActivity } from "./agent-activity.js";
 import { AgentChildSessionView } from "./agent-child-session.js";
-import { AgentComposer, type PromptInputMessage } from "./agent-composer.js";
 import { AgentMessage } from "./agent-message.js";
 import { AgentSettingsDialog } from "./agent-settings-dialog.js";
 import { AgentSidebar } from "./agent-sidebar.js";
 import { AgentSubagentMenu } from "./agent-subagent-menu.js";
 import { AgentThreadView, FollowUpQueue } from "./agent-thread.js";
-import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentThreadPreferences, AgentWorkspaceClientConfig, AgentWorkspaceMailbox } from "./contracts.js";
+import { AssistantComposer } from "./assistant-thread-surface.js";
+import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentThreadPreferences, AgentWorkspaceClientConfig, AgentWorkspaceMailbox, PromptInputMessage } from "./contracts.js";
 import { messagesFor, resolveBrowserLocale, type AgentLocale } from "./i18n.js";
 import {
   AGENT_THREAD_STORAGE_VERSION,
@@ -770,6 +772,18 @@ function RecoveryView({
     !isProxiedInputOnlyMessage(message, thread.events),
   );
   const messages = messagesFor(locale);
+  const assistantMessages = convertEveMessages(
+    { ...data, messages: visibleMessages },
+    { isRunning: true },
+  );
+  const runtime = useExternalStoreRuntime({
+    isRunning: true,
+    messages: assistantMessages,
+    onCancel: async () => onStop(),
+    onNew: async (message: AppendMessage) => {
+      await onSubmit(promptFromAppendMessage(message));
+    },
+  });
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -794,24 +808,42 @@ function RecoveryView({
               turns={thread.queuedTurns}
             />
           ) : null}
-          <AgentComposer
-            commands={commands}
-            disabled={!providerReady}
-            inputDisabled={!mailboxEnabled}
-            mentions={mentions}
-            messages={messages}
-            models={models}
-            onPreferencesChange={onPreferencesChange}
-            onStop={onStop}
-            onSubmit={onSubmit}
-            preferences={thread.preferences}
-            reasoningLevels={reasoningLevels}
-            status="streaming"
-            usage={summarizeUsage(thread.events)}
-          />
+          <AssistantRuntimeProvider runtime={runtime}>
+            <AssistantComposer
+              cancellationState="idle"
+              commands={commands}
+              inputDisabled={!mailboxEnabled || !providerReady}
+              locale={locale}
+              mentions={mentions}
+              messages={messages}
+              models={models}
+              onPreferencesChange={onPreferencesChange}
+              preferences={thread.preferences}
+              reasoningLevels={reasoningLevels}
+              usage={summarizeUsage(thread.events)}
+            />
+          </AssistantRuntimeProvider>
       </div>
     </main>
   );
+}
+
+function promptFromAppendMessage(message: AppendMessage): PromptInputMessage {
+  const content = getEveMessageContent(message);
+  if (typeof content === "string") return { files: [], text: content };
+  return {
+    files: content
+      .filter((part): part is Extract<typeof part, { type: "file" }> => part.type === "file")
+      .map((part) => ({
+        filename: part.filename,
+        mediaType: part.mediaType,
+        url: typeof part.data === "string" ? part.data : String(part.data),
+      })),
+    text: content
+      .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
+      .map((part) => part.text)
+      .join("\n"),
+  };
 }
 
 const RECOVERY_POLL_INTERVAL_MS = 1_500;

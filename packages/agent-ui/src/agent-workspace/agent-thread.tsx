@@ -4,7 +4,7 @@ import type { UserContent } from "ai";
 import type { HandleMessageStreamEvent } from "eve/client";
 import { useEveAgent, type EveMessage } from "eve/react";
 import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
-import { AssistantRuntimeProvider, useExternalStoreRuntime, type AppendMessage, type ExternalThreadQueueAdapter } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, unstable_defaultDirectiveFormatter, useExternalStoreRuntime, type AppendMessage, type ExternalThreadQueueAdapter } from "@assistant-ui/react";
 import { AlertCircleIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
@@ -13,7 +13,7 @@ import { cn } from "../utils.js";
 import { createAgentSession } from "./agent-client.js";
 import type { AgentInputResponse } from "./agent-message.js";
 import { AssistantThreadSurface } from "./assistant-thread-surface.js";
-import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig, AgentWorkspaceMailbox } from "./contracts.js";
+import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig, AgentWorkspaceMailbox, PromptInputMessage } from "./contracts.js";
 import { messagesFor, type AgentLocale, type AgentMessages } from "./i18n.js";
 import { appendThreadEvent, titleFromPrompt } from "./thread-storage.js";
 import {
@@ -143,6 +143,13 @@ export function AgentThreadView({
       }
       if (event.type === "turn.completed" || event.type === "turn.cancelled") {
         setTurnError(undefined);
+      }
+      if (
+        event.type === "session.waiting" &&
+        (cancellationRef.current.requested || cancellationRef.current.sentTurnId)
+      ) {
+        cancellationRef.current = { requested: false };
+        setCancellationState("idle");
       }
       onEvent?.(event);
     },
@@ -324,8 +331,8 @@ export function AgentThreadView({
     if (cancellationRef.current.turnId) cancelTurn(cancellationRef.current.turnId);
   };
 
-  const submit = async (message: import("./agent-composer.js").PromptInputMessage) => {
-    const text = message.text.trim();
+  const submit = async (message: PromptInputMessage) => {
+    const text = expandPromptDirectives(message.text, commands, mentions).trim();
     if ((text.length === 0 && message.files.length === 0) || awaitingInput || !providerReady) return;
     if (isBusy || turnAdmissionBusyRef.current) {
       if (message.files.length > 0) {
@@ -431,11 +438,6 @@ export function AgentThreadView({
     },
     onNew: async (message: AppendMessage) => {
       await submit(promptFromAssistantMessage(getEveMessageContent(message)));
-    },
-    onReload: async () => {
-      const lastUser = [...agent.data.messages].reverse().find((message) => message.role === "user");
-      const text = lastUser?.parts.find((part) => part.type === "text")?.text;
-      if (text) await submit({ files: [], text });
     },
     onRespondToToolApproval: async (response) => {
       prepareTurn();
@@ -577,6 +579,7 @@ export function AgentThreadView({
     <AssistantRuntimeProvider runtime={assistantRuntime}>
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <AssistantThreadSurface
+          cancellationState={cancellationState}
           commands={commands}
           events={agent.events}
           eveMessages={visibleMessages}
@@ -600,6 +603,23 @@ export function AgentThreadView({
       </main>
     </AssistantRuntimeProvider>
   );
+}
+
+function expandPromptDirectives(
+  value: string,
+  commands: readonly AgentPromptMenuItem[],
+  mentions: readonly AgentPromptMenuItem[],
+): string {
+  const segments = unstable_defaultDirectiveFormatter.parse(value);
+  if (segments.every((segment) => segment.kind === "text")) return value;
+  const catalogs = new Map<string, string>([
+    ...commands.map((item) => [`command:${item.value}`, item.value] as const),
+    ...mentions.map((item) => [`context:${item.value}`, item.value] as const),
+  ]);
+  return segments.map((segment) => {
+    if (segment.kind === "text") return segment.text;
+    return catalogs.get(`${segment.type}:${segment.id}`) ?? segment.label;
+  }).join("");
 }
 
 export function FollowUpQueue({
@@ -655,7 +675,7 @@ function createPendingTurnId(): string {
     : `pending-${Date.now()}`;
 }
 
-function promptFromAssistantMessage(content: NonNullable<import("eve/client").SendTurnPayload["message"]>): import("./agent-composer.js").PromptInputMessage {
+function promptFromAssistantMessage(content: NonNullable<import("eve/client").SendTurnPayload["message"]>): PromptInputMessage {
   if (typeof content === "string") return { files: [], text: content };
   const text = content.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text").map((part) => part.text).join("\n");
   const files = content.filter((part): part is Extract<typeof part, { type: "file" }> => part.type === "file").map((part) => ({ filename: part.filename, mediaType: part.mediaType, url: typeof part.data === "string" ? part.data : String(part.data) }));

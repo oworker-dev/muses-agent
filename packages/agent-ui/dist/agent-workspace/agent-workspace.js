@@ -1,5 +1,7 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
+import { AssistantRuntimeProvider, useExternalStoreRuntime } from "@assistant-ui/react";
 import { ClientError, defaultMessageReducer } from "eve/client";
 import { AlertCircleIcon, ArrowLeftIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,12 +9,12 @@ import { Button } from "../ui/button.js";
 import { createAgentSession } from "./agent-client.js";
 import { AgentActivity } from "./agent-activity.js";
 import { AgentChildSessionView } from "./agent-child-session.js";
-import { AgentComposer } from "./agent-composer.js";
 import { AgentMessage } from "./agent-message.js";
 import { AgentSettingsDialog } from "./agent-settings-dialog.js";
 import { AgentSidebar } from "./agent-sidebar.js";
 import { AgentSubagentMenu } from "./agent-subagent-menu.js";
 import { AgentThreadView, FollowUpQueue } from "./agent-thread.js";
+import { AssistantComposer } from "./assistant-thread-surface.js";
 import { messagesFor, resolveBrowserLocale } from "./i18n.js";
 import { AGENT_THREAD_STORAGE_VERSION, browserThreadStorage, appendThreadEvent, compactThreadEvents, createAgentThread, } from "./thread-storage.js";
 import { hasUnresolvedInputRequests, isProxiedInputOnlyMessage, presentSubagentSessions, } from "./turn-presentation.js";
@@ -560,7 +562,34 @@ function RecoveryView({ commands, error, locale, mailboxEnabled, mentions, model
     const data = useMemo(() => thread.events.reduce((current, event) => reducer.reduce(current, event), reducer.initial()), [reducer, thread.events]);
     const visibleMessages = data.messages.filter((message) => !isProxiedInputOnlyMessage(message, thread.events));
     const messages = messagesFor(locale);
-    return (_jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx("div", { className: "min-h-0 flex-1 overflow-y-auto", children: _jsxs("div", { className: "mx-auto flex w-full max-w-3xl flex-col gap-7 px-4 py-8 sm:px-6 lg:py-10", children: [visibleMessages.map((message) => _jsx(AgentMessage, { canRespond: false, events: thread.events, fallbackStartedAt: thread.pendingTurn?.submittedAt, isStreaming: true, locale: locale, message: message, onInputResponses: () => undefined }, message.id)), error ? (_jsxs("div", { className: "flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm", children: [_jsx(AlertCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "font-medium", children: messages.recoveryFailed }), _jsx("p", { className: "mt-0.5 break-words text-muted-foreground", children: error })] }), _jsxs(Button, { onClick: onRetry, size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.retry] })] })) : _jsx(AgentActivity, { events: thread.events, messages: messages, mode: "recovery" })] }) }), _jsxs("div", { className: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6", children: [thread.queuedTurns.length > 0 || queueError ? (_jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: onRemoveQueuedTurn, onRetry: onRetryQueuedTurn, turns: thread.queuedTurns })) : null, _jsx(AgentComposer, { commands: commands, disabled: !providerReady, inputDisabled: !mailboxEnabled, mentions: mentions, messages: messages, models: models, onPreferencesChange: onPreferencesChange, onStop: onStop, onSubmit: onSubmit, preferences: thread.preferences, reasoningLevels: reasoningLevels, status: "streaming", usage: summarizeUsage(thread.events) })] })] }));
+    const assistantMessages = convertEveMessages({ ...data, messages: visibleMessages }, { isRunning: true });
+    const runtime = useExternalStoreRuntime({
+        isRunning: true,
+        messages: assistantMessages,
+        onCancel: async () => onStop(),
+        onNew: async (message) => {
+            await onSubmit(promptFromAppendMessage(message));
+        },
+    });
+    return (_jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx("div", { className: "min-h-0 flex-1 overflow-y-auto", children: _jsxs("div", { className: "mx-auto flex w-full max-w-3xl flex-col gap-7 px-4 py-8 sm:px-6 lg:py-10", children: [visibleMessages.map((message) => _jsx(AgentMessage, { canRespond: false, events: thread.events, fallbackStartedAt: thread.pendingTurn?.submittedAt, isStreaming: true, locale: locale, message: message, onInputResponses: () => undefined }, message.id)), error ? (_jsxs("div", { className: "flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm", children: [_jsx(AlertCircleIcon, { className: "mt-0.5 size-4 shrink-0 text-destructive" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsx("p", { className: "font-medium", children: messages.recoveryFailed }), _jsx("p", { className: "mt-0.5 break-words text-muted-foreground", children: error })] }), _jsxs(Button, { onClick: onRetry, size: "sm", variant: "outline", children: [_jsx(RotateCcwIcon, { className: "size-4" }), messages.retry] })] })) : _jsx(AgentActivity, { events: thread.events, messages: messages, mode: "recovery" })] }) }), _jsxs("div", { className: "mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6", children: [thread.queuedTurns.length > 0 || queueError ? (_jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: onRemoveQueuedTurn, onRetry: onRetryQueuedTurn, turns: thread.queuedTurns })) : null, _jsx(AssistantRuntimeProvider, { runtime: runtime, children: _jsx(AssistantComposer, { cancellationState: "idle", commands: commands, inputDisabled: !mailboxEnabled || !providerReady, locale: locale, mentions: mentions, messages: messages, models: models, onPreferencesChange: onPreferencesChange, preferences: thread.preferences, reasoningLevels: reasoningLevels, usage: summarizeUsage(thread.events) }) })] })] }));
+}
+function promptFromAppendMessage(message) {
+    const content = getEveMessageContent(message);
+    if (typeof content === "string")
+        return { files: [], text: content };
+    return {
+        files: content
+            .filter((part) => part.type === "file")
+            .map((part) => ({
+            filename: part.filename,
+            mediaType: part.mediaType,
+            url: typeof part.data === "string" ? part.data : String(part.data),
+        })),
+        text: content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("\n"),
+    };
 }
 const RECOVERY_POLL_INTERVAL_MS = 1_500;
 const RECOVERY_TAIL_LOOKUP_TIMEOUT_MS = 1_500;

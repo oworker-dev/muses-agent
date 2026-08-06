@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  AssistantRuntimeProvider,
+  ThreadListItemPrimitive,
+  ThreadListPrimitive,
+  useAuiState,
+  useExternalStoreRuntime,
+  type ThreadMessage,
+} from "@assistant-ui/react";
 import { LoaderCircleIcon, MoreHorizontalIcon, PencilIcon, SearchIcon, Settings2Icon, SparklesIcon, SquarePenIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "../ui/button.js";
@@ -54,9 +62,28 @@ export function AgentSidebar({
     if (normalizedQuery.length === 0) return threads;
     return threads.filter((thread) => thread.title.toLocaleLowerCase(locale).includes(normalizedQuery));
   }, [locale, query, threads]);
+  const listRuntime = useExternalStoreRuntime<ThreadMessage>({
+    adapters: {
+      threadList: {
+        onDelete: async (threadId) => onDelete(threadId),
+        onRename: async (threadId, title) => onRename(threadId, title),
+        onSwitchToNewThread: async () => onNew(),
+        onSwitchToThread: async (threadId) => onSelect(threadId),
+        threadId: activeThreadId,
+        threads: threads.map((thread) => ({
+          custom: { agentStatus: thread.status },
+          id: thread.id,
+          title: thread.title,
+          status: "regular" as const,
+        })),
+      },
+    },
+    messages: [],
+    onNew: async () => undefined,
+  });
 
   return (
-    <>
+    <AssistantRuntimeProvider runtime={listRuntime}>
       <div className={cn("fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] lg:hidden", open ? "block" : "hidden")} onClick={onClose} />
       <aside aria-label={messages.threads} className={cn("fixed inset-y-0 left-0 z-40 w-[252px] shrink-0 overflow-hidden border-r bg-sidebar text-sidebar-foreground shadow-xl transition-[transform,width] duration-200 lg:static lg:z-auto lg:shadow-none", open ? "translate-x-0 lg:w-[252px]" : "-translate-x-full lg:w-0 lg:border-r-0")}>
         <div className="flex h-full min-w-[252px] flex-col">
@@ -84,9 +111,70 @@ export function AgentSidebar({
             <p className="px-2 pb-1.5 text-xs font-medium text-muted-foreground">{messages.threads}</p>
             {threads.length === 0 ? <p className="px-2 text-muted-foreground text-sm">{messages.noThreads}</p> : null}
             {threads.length > 0 && filteredThreads.length === 0 ? <p className="px-2 text-muted-foreground text-sm">{messages.noSearchResults}</p> : null}
-            <div className="space-y-0.5">
-              {filteredThreads.map((thread) => (
-                <div className={cn("group flex items-center gap-0.5 rounded-md", thread.id === activeThreadId && "bg-sidebar-accent text-sidebar-accent-foreground")} key={thread.id}>
+            <SidebarThreadItems
+              activeThreadId={activeThreadId}
+              deletingThreadIds={deletingThreadIds}
+              editingThreadId={editingThreadId}
+              editingTitle={editingTitle}
+              messages={messages}
+              onDelete={onDelete}
+              onRename={onRename}
+              setEditingThreadId={setEditingThreadId}
+              setEditingTitle={setEditingTitle}
+              threads={filteredThreads}
+            />
+          </div>
+          <div className="border-t border-sidebar-border p-2">
+            {hostFooter}
+            <Button className="h-9 w-full justify-start gap-2 px-2 text-muted-foreground" onClick={onSettings} variant="ghost"><Settings2Icon className="size-4" />{messages.settings}</Button>
+          </div>
+        </div>
+      </aside>
+    </AssistantRuntimeProvider>
+  );
+}
+
+function SidebarThreadItems({
+  activeThreadId,
+  deletingThreadIds,
+  editingThreadId,
+  editingTitle,
+  messages,
+  onDelete,
+  onRename,
+  setEditingThreadId,
+  setEditingTitle,
+  threads,
+}: {
+  readonly activeThreadId?: string;
+  readonly deletingThreadIds: ReadonlySet<string>;
+  readonly editingThreadId?: string;
+  readonly editingTitle: string;
+  readonly messages: AgentMessages;
+  readonly onDelete: (threadId: string) => void;
+  readonly onRename: (threadId: string, title: string) => void;
+  readonly setEditingThreadId: (threadId: string | undefined) => void;
+  readonly setEditingTitle: (title: string) => void;
+  readonly threads: readonly AgentThread[];
+}) {
+  const runtimeThreadIds = useAuiState((state) => state.threads.threadIds);
+  const threadsById = useMemo(() => new Map(threads.map((thread) => [thread.id, thread])), [threads]);
+
+  return (
+    <ThreadListPrimitive.Root className="space-y-0.5">
+      {runtimeThreadIds.map((threadId, index) => {
+        const thread = threadsById.get(threadId);
+        if (!thread) return null;
+        return (
+          <ThreadListPrimitive.ItemByIndex
+            components={{
+              ThreadListItem: () => (
+                <ThreadListItemPrimitive.Root
+                  className={cn(
+                    "group relative flex min-h-9 items-center gap-0.5 rounded-md transition-colors hover:bg-sidebar-accent",
+                    thread.id === activeThreadId && "bg-background text-foreground shadow-[inset_3px_0_0_var(--color-foreground)] hover:bg-background",
+                  )}
+                >
                   {editingThreadId === thread.id ? (
                     <Input
                       aria-label={messages.renameThread}
@@ -106,25 +194,23 @@ export function AgentSidebar({
                       }}
                       value={editingTitle}
                     />
-                  ) : <button
+                  ) : <ThreadListItemPrimitive.Trigger
                     aria-current={thread.id === activeThreadId ? "page" : undefined}
-                    className={cn("h-9 min-w-0 flex-1 rounded-md px-2 text-left text-sm transition-colors hover:bg-sidebar-accent", thread.id === activeThreadId && "font-medium text-foreground")}
-                    onClick={() => onSelect(thread.id)}
+                    className={cn("h-9 min-w-0 flex-1 rounded-md px-2.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/50", thread.id === activeThreadId && "font-medium text-foreground")}
                     onDoubleClick={() => {
                       setEditingThreadId(thread.id);
                       setEditingTitle(thread.title);
                     }}
-                    type="button"
                   >
                     <span className="flex items-center gap-2">
                       <span className={cn("size-1.5 shrink-0 rounded-full", thread.status === "error" ? "bg-destructive" : thread.status === "waiting" ? "bg-amber-500" : thread.status === "streaming" || thread.status === "submitted" ? "bg-emerald-500" : "bg-transparent")} />
                       <span className="truncate">{thread.title}</span>
                     </span>
-                  </button>}
+                  </ThreadListItemPrimitive.Trigger>}
                   {editingThreadId !== thread.id ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button aria-label={messages.threadActions} className="mr-1 opacity-70 group-hover:opacity-100 sm:opacity-0" disabled={deletingThreadIds.has(thread.id)} size="icon-sm" variant="ghost">
+                        <Button aria-label={messages.threadActions} className="mr-1 opacity-70 hover:bg-transparent group-hover:opacity-100 sm:opacity-0" disabled={deletingThreadIds.has(thread.id)} size="icon-sm" variant="ghost">
                           {deletingThreadIds.has(thread.id) ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <MoreHorizontalIcon className="size-4" />}
                         </Button>
                       </DropdownMenuTrigger>
@@ -137,16 +223,14 @@ export function AgentSidebar({
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="border-t border-sidebar-border p-2">
-            {hostFooter}
-            <Button className="h-9 w-full justify-start gap-2 px-2 text-muted-foreground" onClick={onSettings} variant="ghost"><Settings2Icon className="size-4" />{messages.settings}</Button>
-          </div>
-        </div>
-      </aside>
-    </>
+                </ThreadListItemPrimitive.Root>
+              ),
+            }}
+            index={index}
+            key={thread.id}
+          />
+        );
+      })}
+    </ThreadListPrimitive.Root>
   );
 }

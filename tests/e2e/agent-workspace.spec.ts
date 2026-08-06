@@ -59,13 +59,15 @@ test("wide workspace supports navigation, search, settings, and multiple threads
   await expect(page.getByRole("textbox", { name: "描述一个任务" })).toBeVisible();
 
   const composer = page.getByRole("textbox", { name: "描述一个任务" });
-  await composer.fill("/");
+  await composer.click();
+  await composer.press("/");
   await expect(page.getByText("技能与命令", { exact: true })).toHaveCount(0);
-  await expect(composer).toHaveValue("/");
-  await composer.fill("@");
+  await expect(composer).toHaveText("/");
+  await composer.fill("");
+  await composer.press("@");
   await expect(page.getByText("工作区上下文")).toBeVisible();
   await composer.press("Tab");
-  await expect(composer).toHaveValue("@workspace ");
+  await expect(page.locator('[data-directive-id="@workspace"]')).toBeVisible();
 
   await page.screenshot({ fullPage: true, path: "/tmp/open-agent-wide.png" });
 });
@@ -90,7 +92,7 @@ test("composer clears immediately while a turn is still being accepted", async (
   const composer = page.getByRole("textbox", { name: "Describe a task" });
   await composer.fill("A delayed request");
   await composer.press("Enter");
-  await expect(composer).toHaveValue("", { timeout: 300 });
+  await expect(composer).toHaveText("", { timeout: 300 });
   await expect(page.getByRole("log").getByText("A delayed request", { exact: true })).toBeVisible({ timeout: 300 });
   await expect(page.getByText("Accepted.", { exact: true })).toBeVisible({ timeout: 5_000 });
 });
@@ -116,12 +118,18 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
   await page.setViewportSize({ height: 844, width: 390 });
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Model" }).click();
+  await page.getByRole("combobox", { name: "Model" }).click();
   const modelDialog = page.getByRole("dialog");
   await expect(modelDialog).toBeVisible();
+  const effortGroup = page.getByRole("radiogroup", { name: "Reasoning" });
+  await expect(effortGroup).toBeVisible();
+  await expect(effortGroup.getByText("X high", { exact: true })).toBeVisible();
   const dialogBox = await modelDialog.boundingBox();
+  const effortBox = await effortGroup.boundingBox();
   expect(dialogBox?.x).toBeGreaterThanOrEqual(0);
   expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  expect(effortBox?.x).toBeGreaterThanOrEqual(dialogBox?.x ?? 0);
+  expect((effortBox?.x ?? 0) + (effortBox?.width ?? 0)).toBeLessThanOrEqual((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0));
   await page.keyboard.press("Escape");
 
   const composer = page.getByRole("textbox", { name: "Describe a task" });
@@ -133,7 +141,8 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
   const sendBox = await sendButton.boundingBox();
   expect(sendBox).not.toBeNull();
   expect((sendBox?.x ?? 0) + (sendBox?.width ?? 0)).toBeLessThanOrEqual(390);
-  await composer.fill("@");
+  await composer.click();
+  await composer.press("@");
   await expect(page.getByText("Workspace context")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ fullPage: true, path: "/tmp/open-agent-mobile.png" });
@@ -188,7 +197,45 @@ test("tool work collapses into one timed execution cycle and keeps the final del
 
   await execution.click();
   await expect(page.getByText("Inspecting the workspace.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /1 tool call/u }).click();
   await expect(page.getByRole("button", { name: /Terminal command/u })).toBeVisible();
+  await expect(page.getByText(/exitCode/u)).toHaveCount(0);
+  await expect(page.locator('[data-slot="tool-group-root"][data-variant="ghost"]')).toBeVisible();
+});
+
+test("assistant content keeps markdown, reasoning state, and action affordances", async ({ page }) => {
+  const sessionId = "mock-rich-message-session";
+  await page.route("**/eve/v1/session", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ continuationToken: "mock-rich-token", sessionId }),
+      contentType: "application/json",
+      headers: { "x-eve-session-id": sessionId },
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    await route.fulfill({
+      body: mockReasoningMarkdownTurn(),
+      contentType: "application/x-ndjson",
+      status: 200,
+    });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("Explain the result");
+  await composer.press("Enter");
+
+  await expect(page.getByRole("heading", { name: "Result", exact: true, level: 2 })).toBeVisible();
+  await expect(page.locator(".aui-md-ul")).toHaveCSS("list-style-type", "disc");
+  await expect(page.locator(".aui-md-pre")).toContainText("const ready = true;");
+  await expect(page.getByRole("button", { name: /Reasoning complete/u })).toBeVisible();
+  await expect(page.getByText("Reasoning", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Regenerate" })).toHaveCount(0);
+
+  const userMessage = page.getByRole("log").getByText("Explain the result", { exact: true });
+  await userMessage.hover();
+  await expect(page.getByRole("button", { name: "Edit message" })).toBeVisible();
 });
 
 test("file patch tools render with the assistant-ui diff viewer", async ({ page }) => {
@@ -226,6 +273,7 @@ test("file patch tools render with the assistant-ui diff viewer", async ({ page 
   await composer.fill("Update the application");
   await composer.press("Enter");
   await page.getByRole("button", { name: /Worked for/u }).click();
+  await page.getByRole("button", { name: /1 tool call/u }).click();
   await page.getByRole("button", { name: "Edited files" }).click();
 
   const diffViewer = page.locator('[data-tool-view="diff"] [data-slot="diff-viewer"]');
@@ -248,7 +296,7 @@ test("a live autonomous website task survives refresh and publishes a usable pre
   const composer = page.getByRole("textbox", { name: "Describe a task" });
   await composer.fill(prompt);
   await composer.press("Enter");
-  await expect(composer).toHaveValue("", { timeout: 1_000 });
+  await expect(composer).toHaveText("", { timeout: 1_000 });
   await expect(page.getByText(prompt, { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/threads\/[0-9a-f-]+$/u);
   const threadUrl = page.url();
@@ -423,8 +471,9 @@ test("follow-up messages queue during a run and deliver in order at the waiting 
   await composer.fill("Start the long task");
   await composer.press("Enter");
   await expect(composer).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await composer.fill("Add the requested footer");
+  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
   await composer.press("Enter");
 
   await expect(page.getByRole("button", { name: /Queued follow-ups/u })).toBeVisible();
@@ -504,10 +553,11 @@ test("cancelling a queued follow-up prevents browser delivery before admission",
   const composer = page.getByRole("textbox", { name: "Describe a task" });
   await composer.fill("Start cancellable work");
   await composer.press("Enter");
-  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   await composer.fill("Do not deliver this follow-up");
+  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
   await composer.press("Enter");
-  await expect(composer).toHaveValue("");
+  await expect(composer).toHaveText("");
   await expect(page.getByText("Do not deliver this follow-up", { exact: true })).toBeVisible();
   await expect.poll(() => mailboxEnqueues).toBe(1);
   await expect.poll(() => mailboxInspections).toBeGreaterThan(0);
@@ -882,7 +932,8 @@ test("a proxied child approval stays attached to the parent task and resumes it"
   });
   await expect(page.getByText("The delegated task resumed and completed.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Worked for/ }).click();
-  await page.getByRole("button", { name: "Sub-agent", exact: true }).click();
+  await page.getByRole("button", { name: /1 tool call/u }).click();
+  await page.getByRole("button", { name: /Sub-agent/u }).click();
   await expect(page.getByText("Sub-agent finished and returned its result to the parent Agent", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open sub-agents" }).click();
   await expect(page.getByRole("region", { name: "Done" }).getByText("Sub-agent 1", { exact: true })).toBeVisible();
@@ -1105,7 +1156,7 @@ test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
   await expect.poll(() => threadEvents(page).some((event) => isEventType(event, "step.started"))).toBeTruthy();
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "Queue follow-up" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   releaseRecovery?.();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText("Reconnecting to the active run...")).toBeHidden();
@@ -1128,6 +1179,7 @@ test("stop cancels server work and returns the thread to an interactive state", 
     });
   });
   await page.route(`**/eve/v1/session/${sessionId}/cancel`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
     finishCancellation?.();
     await route.fulfill({
       body: JSON.stringify({ ok: true, sessionId, status: "accepted" }),
@@ -1170,6 +1222,8 @@ test("stop cancels server work and returns the thread to an interactive state", 
   await expect(stop).toBeVisible();
   await stop.click();
 
+  await expect(page.getByRole("button", { name: "Stopping" })).toBeVisible({ timeout: 300 });
+
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
 });
@@ -1204,7 +1258,7 @@ function mockToolTurn(
   reply: string,
   tool: { readonly input: unknown; readonly output: unknown; readonly toolName: string } = {
     input: { command: "find . -maxdepth 2 -type f" },
-    output: "./index.html",
+    output: { exitCode: 0, stderr: "", stdout: "./index.html", truncated: false },
     toolName: "bash",
   },
 ): string {
@@ -1225,6 +1279,25 @@ function mockToolTurn(
     { data: { finishReason: "stop", sequence: 0, stepIndex: 1, turnId, usage: { inputTokens: 10_600, outputTokens: 200 } }, meta: { at: at(2_100) }, type: "step.completed" },
     { data: { sequence: 0, turnId }, meta: { at: at(2_200) }, type: "turn.completed" },
     { data: { continuationToken: "mock-tool-token", wait: "next-user-message" }, meta: { at: at(2_300) }, type: "session.waiting" },
+  ];
+  return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
+}
+
+function mockReasoningMarkdownTurn(): string {
+  const base = Date.now();
+  const at = (offset: number) => new Date(base + offset).toISOString();
+  const turnId = "turn_rich";
+  const events = [
+    { data: { runtime: { agentId: "open-agent", agentName: "open-agent", eveVersion: "test", modelId: "mock/model" } }, meta: { at: at(0) }, type: "session.started" },
+    { data: { sequence: 0, turnId }, meta: { at: at(100) }, type: "turn.started" },
+    { data: { message: "Explain the result", parts: [{ text: "Explain the result", type: "text" }], sequence: 0, turnId }, meta: { at: at(200) }, type: "message.received" },
+    { data: { sequence: 0, stepIndex: 0, turnId }, meta: { at: at(300) }, type: "step.started" },
+    { data: { reasoningDelta: "Check", reasoningSoFar: "Check the result.", sequence: 0, stepIndex: 0, turnId }, meta: { at: at(400) }, type: "reasoning.appended" },
+    { data: { reasoning: "Check the result.", sequence: 0, stepIndex: 0, turnId }, meta: { at: at(1_700) }, type: "reasoning.completed" },
+    { data: { finishReason: "stop", message: "## Result\n\n- Markdown is active.\n- Code blocks are styled.\n\n```ts\nconst ready = true;\n```", sequence: 0, stepIndex: 0, turnId }, meta: { at: at(1_800) }, type: "message.completed" },
+    { data: { finishReason: "stop", sequence: 0, stepIndex: 0, turnId, usage: { inputTokens: 128, outputTokens: 64 } }, meta: { at: at(1_900) }, type: "step.completed" },
+    { data: { sequence: 0, turnId }, meta: { at: at(2_000) }, type: "turn.completed" },
+    { data: { continuationToken: "mock-rich-token", wait: "next-user-message" }, meta: { at: at(2_100) }, type: "session.waiting" },
   ];
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }

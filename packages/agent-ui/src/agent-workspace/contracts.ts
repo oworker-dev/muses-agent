@@ -74,7 +74,20 @@ export type AgentPromptMenuItem = {
   readonly id: string;
   readonly keywords?: readonly string[];
   readonly label: string;
+  readonly translations?: Partial<Record<"en" | "zh-CN", {
+    readonly description?: string;
+    readonly label?: string;
+  }>>;
   readonly value: string;
+};
+
+export type PromptInputMessage = {
+  readonly files: readonly {
+    readonly filename?: string;
+    readonly mediaType: string;
+    readonly url: string;
+  }[];
+  readonly text: string;
 };
 
 export type AgentExtensionInfo = {

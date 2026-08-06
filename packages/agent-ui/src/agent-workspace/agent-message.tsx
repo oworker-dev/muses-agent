@@ -7,6 +7,7 @@ import type {
   EveMessagePart,
 } from "eve/react";
 import {
+  BracesIcon,
   CheckIcon,
   CheckCircleIcon,
   ChevronDownIcon,
@@ -19,13 +20,33 @@ import {
   KeyRoundIcon,
   LoaderCircleIcon,
   NetworkIcon,
+  SearchIcon,
+  TerminalIcon,
+  FileSearchIcon,
+  ListChecksIcon,
   XCircleIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { HandleMessageStreamEvent } from "eve/client";
+import { StaticMarkdownText } from "../assistant-ui/markdown-text.js";
+import {
+  ReasoningContent,
+  ReasoningRoot,
+  ReasoningText,
+  ReasoningTrigger,
+} from "../assistant-ui/reasoning.js";
+import {
+  ToolFallbackContent,
+  ToolFallbackRoot,
+} from "../assistant-ui/tool-fallback.js";
+import {
+  ToolGroupContent,
+  ToolGroupRoot,
+  ToolGroupTrigger,
+} from "../assistant-ui/tool-group.js";
+import { DiffViewer } from "../assistant-ui/diff-viewer.js";
 import { Button } from "../ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
-import { DiffViewer } from "../ui/diff-viewer.js";
 import { cn } from "../utils.js";
 import type { AgentLocale } from "./i18n.js";
 import {
@@ -39,12 +60,8 @@ function Message({ children, from, ...props }: { readonly children: React.ReactN
   return <article className={cn("group flex w-full flex-col", from === "user" ? "items-end" : "items-start")} {...props}>{children}</article>;
 }
 
-function MessageContent({ children }: { readonly children: React.ReactNode }) {
-  return <div className="min-w-0 max-w-full">{children}</div>;
-}
-
-function MessageResponse({ children, isAnimating }: { readonly children: React.ReactNode; readonly isAnimating?: boolean; readonly caret?: string }) {
-  return <p className="whitespace-pre-wrap break-words">{children}{isAnimating ? <span className="ml-1 inline-block animate-pulse text-muted-foreground">▍</span> : null}</p>;
+function MessageContent({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) {
+  return <div className={cn("min-w-0 max-w-full", className)}>{children}</div>;
 }
 
 function MessageActions({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) {
@@ -53,42 +70,6 @@ function MessageActions({ children, className }: { readonly children: React.Reac
 
 function MessageAction({ children, label, onClick, tooltip }: { readonly children: React.ReactNode; readonly label: string; readonly onClick: () => void; readonly tooltip?: string }) {
   return <Button aria-label={label} className="size-7" onClick={onClick} size="icon-sm" title={tooltip} variant="ghost">{children}</Button>;
-}
-
-function Reasoning({ children, defaultOpen, isStreaming }: { readonly children: React.ReactNode; readonly defaultOpen?: boolean; readonly isStreaming?: boolean }) {
-  return <details className="my-2 rounded-lg bg-muted/40 px-3 py-2 text-sm text-muted-foreground" open={defaultOpen || isStreaming}><summary className="cursor-pointer select-none font-medium">{isStreaming ? "Thinking…" : "Reasoning"}</summary>{children}</details>;
-}
-
-function ReasoningTrigger({ getThinkingMessage }: { readonly getThinkingMessage: (streaming: boolean, duration?: number) => React.ReactNode }) {
-  return <span className="sr-only">{getThinkingMessage(false)}</span>;
-}
-
-function ReasoningContent({ children }: { readonly children: React.ReactNode }) {
-  return <div className="mt-2 whitespace-pre-wrap break-words">{children}</div>;
-}
-
-function Shimmer({ children }: { readonly children: React.ReactNode; readonly duration?: number }) {
-  return <span className="animate-pulse">{children}</span>;
-}
-
-function Tool({ children, defaultOpen, className }: { readonly children: React.ReactNode; readonly defaultOpen?: boolean; readonly className?: string }) {
-  return <Collapsible className={cn("my-2 border-b border-border/60 py-2", className)} defaultOpen={defaultOpen}>{children}</Collapsible>;
-}
-
-function ToolHeader({ title, statusLabel }: { readonly title: string; readonly statusLabel: string; readonly [key: string]: unknown }) {
-  return <CollapsibleTrigger asChild><button aria-label={title} className="flex w-full cursor-pointer items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground" type="button"><span className="font-medium text-foreground">{title}</span><span className="text-xs">{statusLabel}</span><ChevronDownIcon className="ml-auto size-3.5 transition-transform group-data-[state=open]:rotate-180" /></button></CollapsibleTrigger>;
-}
-
-function ToolContent({ children }: { readonly children: React.ReactNode }) {
-  return <CollapsibleContent><div className="mt-2 space-y-2">{children}</div></CollapsibleContent>;
-}
-
-function ToolInput({ input, label }: { readonly input: unknown; readonly label: string }) {
-  return <details className="text-xs"><summary className="cursor-pointer text-muted-foreground">{label}</summary><pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2">{safeStringify(input)}</pre></details>;
-}
-
-function ToolOutput({ output, resultLabel, errorLabel, errorText }: { readonly output: unknown; readonly resultLabel: string; readonly errorLabel: string; readonly errorText?: string }) {
-  return <div className="text-xs"><span className={errorText ? "text-destructive" : "text-muted-foreground"}>{errorText ? errorLabel : resultLabel}</span><pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2">{errorText ?? safeStringify(output)}</pre></div>;
 }
 
 function safeStringify(value: unknown): string {
@@ -137,23 +118,20 @@ export function AgentMessage({
       data-optimistic={message.metadata?.optimistic ? "true" : undefined}
       from={message.role}
     >
-      <MessageContent>
+      <MessageContent className={message.role === "assistant" ? "w-full" : undefined}>
         {task ? (
           <>
             <ExecutionGroup fallbackStartedAt={fallbackStartedAt} locale={locale} task={task}>
-              {task.processParts.map((part, index) => (
-                <AgentMessagePart
-                  canRespond={canRespond}
-                  events={events}
-                  inActiveExecution={task.status === "running" || task.status === "waiting"}
-                  key={partKey(part, index)}
-                  locale={locale}
-                  onInputResponses={onInputResponses}
-                  onOpenSubagent={onOpenSubagent}
-                  part={part}
-                  showCaret={false}
-                />
-              ))}
+              <ProcessParts
+                canRespond={canRespond}
+                events={events}
+                inActiveExecution={task.status === "running" || task.status === "waiting"}
+                locale={locale}
+                onInputResponses={onInputResponses}
+                onOpenSubagent={onOpenSubagent}
+                parts={task.processParts}
+                turnId={message.metadata?.turnId}
+              />
               {task.proxiedInputParts.map((part) => (
                 <div className="space-y-2" key={`proxied-input:${part.toolCallId}`}>
                   <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
@@ -168,6 +146,7 @@ export function AgentMessage({
                     onOpenSubagent={onOpenSubagent}
                     part={part}
                     showCaret={false}
+                    turnId={message.metadata?.turnId}
                   />
                 </div>
               ))}
@@ -182,6 +161,7 @@ export function AgentMessage({
                 onOpenSubagent={onOpenSubagent}
                 part={task.finalPart}
                 showCaret={isStreaming && task.finalPart.state === "streaming"}
+                turnId={message.metadata?.turnId}
               />
             ) : null}
           </>
@@ -196,6 +176,7 @@ export function AgentMessage({
             onOpenSubagent={onOpenSubagent}
             part={part}
             showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
+            turnId={message.metadata?.turnId}
           />
         ))}
       </MessageContent>
@@ -215,6 +196,7 @@ function AgentMessagePart({
   onInputResponses,
   part,
   showCaret,
+  turnId,
 }: {
   readonly canRespond: boolean;
   readonly events: readonly HandleMessageStreamEvent[];
@@ -224,69 +206,466 @@ function AgentMessagePart({
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
+  readonly turnId?: string;
 }) {
   switch (part.type) {
     case "step-start":
       return null;
     case "text":
       return (
-        <MessageResponse caret="block" isAnimating={showCaret}>
-          {part.text}
-        </MessageResponse>
+        <div className="relative break-words">
+          <StaticMarkdownText text={part.text} />
+          {showCaret ? <span className="ml-1 inline-block animate-pulse text-muted-foreground">|</span> : null}
+        </div>
       );
-    case "reasoning":
-      return (
-        <Reasoning defaultOpen={part.state === "streaming"} isStreaming={part.state === "streaming"}>
-          <ReasoningTrigger getThinkingMessage={(streaming, duration) => reasoningLabel(locale, streaming, duration)} />
-          <ReasoningContent>{part.text}</ReasoningContent>
-        </Reasoning>
-      );
+    case "reasoning": {
+      return <ReasoningPart events={events} locale={locale} part={part} turnId={turnId} />;
+    }
     case "file":
       return <AttachmentPart locale={locale} part={part} />;
     case "authorization":
       return <AuthorizationPrompt locale={locale} part={part} />;
     case "dynamic-tool": {
-      const patch = toolPatch(part);
-      return (
-        <Tool
-          className="mb-0"
-          defaultOpen={(inActiveExecution && part.state !== "output-available") || part.state === "approval-requested" || part.state === "approval-responded"}
-        >
-          <ToolHeader
-            showStatus={part.state !== "output-available"}
-            state={part.state}
-            statusLabel={toolStatusLabel(locale, part.state)}
-            title={toolTitle(locale, part)}
-            toolName={part.toolName}
-            type="dynamic-tool"
-          />
-          <ToolContent>
-            {patch ? (
-              <div className="max-h-[28rem] overflow-auto" data-tool-view="diff">
-                <DiffViewer patch={patch} showIcon size="sm" variant="muted" />
-              </div>
-            ) : (
-              <>
-                {part.toolMetadata?.eve?.kind === "subagent-call" ? (
-                  <SubagentProgress events={events} locale={locale} onOpenSubagent={onOpenSubagent} part={part} />
-                ) : null}
-                <ToolInput input={part.input} label={localize(locale, "Parameters", "参数")} />
-              </>
-            )}
-            <InputRequestActions
-              canRespond={canRespond}
-              locale={locale}
-              part={part}
-              onInputResponses={onInputResponses}
-            />
-            {patch && !part.errorText ? null : (
-              <ToolOutput errorLabel={localize(locale, "Error", "错误")} errorText={part.errorText} output={part.output} resultLabel={localize(locale, "Result", "结果")} />
-            )}
-          </ToolContent>
-        </Tool>
-      );
+      return <ToolPart canRespond={canRespond} events={events} inActiveExecution={inActiveExecution} locale={locale} onInputResponses={onInputResponses} onOpenSubagent={onOpenSubagent} part={part} />;
     }
   }
+}
+
+function ProcessParts({
+  canRespond,
+  events,
+  inActiveExecution,
+  locale,
+  onInputResponses,
+  onOpenSubagent,
+  parts,
+  turnId,
+}: {
+  readonly canRespond: boolean;
+  readonly events: readonly HandleMessageStreamEvent[];
+  readonly inActiveExecution: boolean;
+  readonly locale: AgentLocale;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly onOpenSubagent?: (sessionId: string) => void;
+  readonly parts: readonly EveMessagePart[];
+  readonly turnId?: string;
+}) {
+  const rendered: React.ReactNode[] = [];
+
+  for (let index = 0; index < parts.length;) {
+    const part = parts[index]!;
+    if (part.type !== "dynamic-tool") {
+      rendered.push(
+        <AgentMessagePart
+          canRespond={canRespond}
+          events={events}
+          inActiveExecution={inActiveExecution}
+          key={partKey(part, index)}
+          locale={locale}
+          onInputResponses={onInputResponses}
+          onOpenSubagent={onOpenSubagent}
+          part={part}
+          showCaret={false}
+          turnId={turnId}
+        />,
+      );
+      index += 1;
+      continue;
+    }
+
+    const toolParts: EveDynamicToolPart[] = [];
+    let cursor = index;
+    while (cursor < parts.length && parts[cursor]?.type === "dynamic-tool") {
+      toolParts.push(parts[cursor] as EveDynamicToolPart);
+      cursor += 1;
+    }
+    const active = toolParts.some((toolPart) => !isToolTerminal(toolPart.state));
+    rendered.push(
+      <ToolGroupRoot defaultOpen={active} key={`tools:${toolParts[0]?.toolCallId}`} variant="ghost">
+        <ToolGroupTrigger
+          active={active}
+          count={toolParts.length}
+          label={localize(
+            locale,
+            `${toolParts.length} tool ${toolParts.length === 1 ? "call" : "calls"}`,
+            `运行了 ${toolParts.length} 个工具`,
+          )}
+        />
+        <ToolGroupContent>
+          {toolParts.map((toolPart) => (
+            <AgentMessagePart
+              canRespond={canRespond}
+              events={events}
+              inActiveExecution={inActiveExecution}
+              key={toolPart.toolCallId}
+              locale={locale}
+              onInputResponses={onInputResponses}
+              onOpenSubagent={onOpenSubagent}
+              part={toolPart}
+              showCaret={false}
+              turnId={turnId}
+            />
+          ))}
+        </ToolGroupContent>
+      </ToolGroupRoot>,
+    );
+    index = cursor;
+  }
+
+  return <>{rendered}</>;
+}
+
+function ToolPart({
+  canRespond,
+  events,
+  inActiveExecution,
+  locale,
+  onInputResponses,
+  onOpenSubagent,
+  part,
+}: {
+  readonly canRespond: boolean;
+  readonly events: readonly HandleMessageStreamEvent[];
+  readonly inActiveExecution: boolean;
+  readonly locale: AgentLocale;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly onOpenSubagent?: (sessionId: string) => void;
+  readonly part: EveDynamicToolPart;
+}) {
+  const running = !isToolTerminal(part.state);
+  const defaultOpen = (inActiveExecution && running) || part.state === "approval-requested" || part.state === "approval-responded";
+  const Icon = toolIcon(part);
+
+  return (
+    <ToolFallbackRoot className="my-0" defaultOpen={defaultOpen}>
+      <CollapsibleTrigger
+        className="group/trigger flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-left text-sm text-muted-foreground transition-[color,scale] hover:text-foreground active:scale-[0.98]"
+      >
+        {running ? (
+          <LoaderCircleIcon className="size-4 shrink-0 animate-spin [animation-duration:0.65s]" />
+        ) : part.state === "output-error" || part.state === "output-denied" ? (
+          <XCircleIcon className="size-4 shrink-0 text-destructive" />
+        ) : (
+          <Icon className="size-4 shrink-0" />
+        )}
+        <span className="truncate">{toolTitle(locale, part)}</span>
+        <span className={cn("shrink-0 text-xs", part.state === "output-error" && "text-destructive")}>
+          {toolStatusLabel(locale, part.state)}
+        </span>
+        <ChevronDownIcon className="size-3.5 shrink-0 -rotate-90 transition-transform group-data-[state=open]/trigger:rotate-0" />
+      </CollapsibleTrigger>
+      <ToolFallbackContent>
+        <KnownToolContent events={events} locale={locale} onOpenSubagent={onOpenSubagent} part={part} />
+        <InputRequestActions canRespond={canRespond} locale={locale} onInputResponses={onInputResponses} part={part} />
+        {part.errorText ? <p className="whitespace-pre-wrap text-xs text-destructive">{part.errorText}</p> : null}
+      </ToolFallbackContent>
+    </ToolFallbackRoot>
+  );
+}
+
+function KnownToolContent({
+  events,
+  locale,
+  onOpenSubagent,
+  part,
+}: {
+  readonly events: readonly HandleMessageStreamEvent[];
+  readonly locale: AgentLocale;
+  readonly onOpenSubagent?: (sessionId: string) => void;
+  readonly part: EveDynamicToolPart;
+}) {
+  const normalized = normalizeToolName(part.toolName);
+  const input = asRecord(part.input);
+  const output = "output" in part ? part.output : undefined;
+  const patch = toolPatch(part);
+  const fileChange = toolFileChange(part);
+
+  if (part.toolMetadata?.eve?.kind === "subagent-call") {
+    return <SubagentProgress events={events} locale={locale} onOpenSubagent={onOpenSubagent} part={part} />;
+  }
+
+  if (["apply_patch", "patch_file", "write_file", "edit_file"].includes(normalized)) {
+    if (patch) {
+      return <div className="max-h-[30rem] overflow-auto" data-tool-view="diff"><DiffViewer patch={patch} showIcon size="sm" variant="ghost" /></div>;
+    }
+    if (fileChange) {
+      return (
+        <div className="max-h-[30rem] overflow-auto" data-tool-view="diff">
+          <DiffViewer
+            newFile={{ content: fileChange.newContent, name: fileChange.path }}
+            oldFile={{ content: fileChange.oldContent, name: fileChange.path }}
+            showIcon
+            size="sm"
+            variant="ghost"
+          />
+        </div>
+      );
+    }
+    return <p className="text-xs text-muted-foreground">{localize(locale, "Receiving file changes...", "正在接收文件变更…")}</p>;
+  }
+
+  if (["bash", "shell", "terminal", "exec_command"].includes(normalized)) {
+    const command = firstString(input, ["command", "cmd"]);
+    const result = shellOutput(output);
+    return (
+      <div className="space-y-2 font-mono text-xs">
+        {command ? <pre className="overflow-x-auto whitespace-pre-wrap break-words text-foreground"><span className="select-none text-muted-foreground">$ </span>{command}</pre> : null}
+        {result ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-muted-foreground">{result}</pre> : output !== undefined ? <p className="font-sans text-muted-foreground">{localize(locale, "Command completed.", "命令已完成。")}</p> : null}
+      </div>
+    );
+  }
+
+  if (["read_file", "read", "view_file"].includes(normalized)) {
+    const path = firstString(input, ["path", "file", "filename"]);
+    const result = readableOutput(output);
+    return (
+      <div className="space-y-1.5 text-xs">
+        {path ? <p className="truncate font-mono text-muted-foreground">{path}</p> : null}
+        {result ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-foreground">{result}</pre> : null}
+      </div>
+    );
+  }
+
+  if (["todo", "todo_write", "update_plan"].includes(normalized)) {
+    const items = todoItems(part.input, output);
+    return (
+      <ol className="space-y-1.5 text-sm" data-tool-view="tasks">
+        {items.map((item, index) => (
+          <li className="flex items-start gap-2" key={`${item.label}:${index}`}>
+            <span className={cn("mt-1.5 size-2 shrink-0 rounded-full border", item.done && "border-foreground bg-foreground")} />
+            <span className={cn("min-w-0", item.done && "text-muted-foreground line-through")}>{item.label}</span>
+          </li>
+        ))}
+        {items.length === 0 ? <li className="text-xs text-muted-foreground">{localize(locale, "Preparing tasks...", "正在整理任务…")}</li> : null}
+      </ol>
+    );
+  }
+
+  if (["glob", "find_files", "grep", "search_files", "web_search", "search_web", "search"].includes(normalized)) {
+    const query = firstString(input, ["query", "pattern", "glob", "path"]);
+    const result = readableOutput(output);
+    return (
+      <div className="space-y-1.5 text-xs">
+        {query ? <p className="font-mono text-muted-foreground">{query}</p> : null}
+        {result ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-foreground">{result}</pre> : null}
+      </div>
+    );
+  }
+
+  if (["publish_preview", "website_preview"].includes(normalized)) {
+    const result = readableOutput(output);
+    const url = firstUrl(output) ?? firstString(input, ["url"]);
+    return url ? (
+      <a className="inline-flex items-center gap-1.5 text-sm underline underline-offset-4" href={url} rel="noreferrer" target="_blank">
+        {url}<ExternalLinkIcon className="size-3.5" />
+      </a>
+    ) : result ? <p className="whitespace-pre-wrap text-xs text-muted-foreground">{result}</p> : null;
+  }
+
+  if (["publish_artifact", "artifact_publish"].includes(normalized)) {
+    const record = asRecord(output);
+    const url = firstUrl(output);
+    const filename = firstString(record, ["filename", "name"]) ?? firstString(input, ["filename", "path"]);
+    return url ? (
+      <a className="inline-flex items-center gap-1.5 text-sm underline underline-offset-4" href={url} rel="noreferrer" target="_blank">
+        {filename ?? localize(locale, "Open artifact", "打开产物")}<ExternalLinkIcon className="size-3.5" />
+      </a>
+    ) : <p className="text-xs text-muted-foreground">{filename ?? localize(locale, "Publishing artifact...", "正在发布产物…")}</p>;
+  }
+
+  if (["record_checkpoint", "checkpoint"].includes(normalized)) {
+    const checkpoint = asRecord(output) ?? input;
+    const summary = firstString(checkpoint, ["summary"]);
+    const rows = [
+      { label: localize(locale, "Completed", "已完成"), values: stringArray(checkpoint?.completed) },
+      { label: localize(locale, "Next", "下一步"), values: stringArray(checkpoint?.next) },
+      { label: localize(locale, "Risks", "风险"), values: stringArray(checkpoint?.risks) },
+    ].filter((row) => row.values.length > 0);
+    return (
+      <div className="space-y-2 text-sm">
+        {summary ? <p>{summary}</p> : null}
+        {rows.map((row) => <div className="flex gap-2 text-xs" key={row.label}><span className="w-14 shrink-0 text-muted-foreground">{row.label}</span><span>{row.values.join(" · ")}</span></div>)}
+      </div>
+    );
+  }
+
+  if (part.toolMetadata?.eve?.kind === "load-skill") {
+    const skill = firstString(input, ["name", "skill", "id"]) ?? readableOutput(output);
+    return skill ? <p className="text-xs text-muted-foreground">{skill}</p> : null;
+  }
+
+  return (
+    <div className="space-y-2 text-xs" data-tool-view="fallback">
+      {part.input !== undefined ? (
+        <div><p className="mb-1 text-muted-foreground">{localize(locale, "Parameters", "参数")}</p><pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2.5">{safeStringify(part.input)}</pre></div>
+      ) : null}
+      {output !== undefined ? (
+        <div><p className="mb-1 text-muted-foreground">{localize(locale, "Result", "结果")}</p><pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2.5">{safeStringify(output)}</pre></div>
+      ) : null}
+    </div>
+  );
+}
+
+function toolIcon(part: EveDynamicToolPart): React.ComponentType<{ className?: string }> {
+  const normalized = normalizeToolName(part.toolName);
+  if (["bash", "shell", "terminal", "exec_command"].includes(normalized)) return TerminalIcon;
+  if (["read_file", "read", "view_file", "glob", "find_files"].includes(normalized)) return FileSearchIcon;
+  if (["grep", "search_files", "web_search", "search_web", "search"].includes(normalized)) return SearchIcon;
+  if (["todo", "todo_write", "update_plan"].includes(normalized)) return ListChecksIcon;
+  if (["write_file", "edit_file", "apply_patch", "patch_file", "publish_artifact", "artifact_publish"].includes(normalized)) return FileIcon;
+  if (["record_checkpoint", "checkpoint"].includes(normalized)) return CheckCircleIcon;
+  return BracesIcon;
+}
+
+function isToolTerminal(state: EveDynamicToolPart["state"]): boolean {
+  return state === "output-available" || state === "output-denied" || state === "output-error";
+}
+
+function normalizeToolName(toolName: string): string {
+  return toolName.toLocaleLowerCase().replaceAll("-", "_");
+}
+
+function ReasoningPart({
+  events,
+  locale,
+  part,
+  turnId,
+}: {
+  readonly events: readonly HandleMessageStreamEvent[];
+  readonly locale: AgentLocale;
+  readonly part: Extract<EveMessagePart, { type: "reasoning" }>;
+  readonly turnId?: string;
+}) {
+  const timing = reasoningTiming(events, turnId, part.stepIndex);
+  const durationSeconds = useElapsedSeconds(timing.startedAt, timing.endedAt);
+  const streaming = part.state === "streaming";
+  return (
+    <ReasoningRoot className="mb-1" defaultOpen={streaming} streaming={streaming} variant="ghost">
+      <ReasoningTrigger
+        active={streaming}
+        duration={timing.startedAt ? durationSeconds : undefined}
+        label={streaming
+          ? localize(locale, "Thinking", "思考中")
+          : localize(locale, "Reasoning complete", "思考完成")}
+      />
+      <ReasoningContent aria-busy={streaming}>
+        <ReasoningText><StaticMarkdownText text={part.text} /></ReasoningText>
+      </ReasoningContent>
+    </ReasoningRoot>
+  );
+}
+
+function reasoningTiming(
+  events: readonly HandleMessageStreamEvent[],
+  turnId: string | undefined,
+  stepIndex: number | undefined,
+): { readonly endedAt?: number; readonly startedAt?: number } {
+  const matching = events.filter((event) =>
+    (event.type === "reasoning.appended" || event.type === "reasoning.completed") &&
+    (turnId === undefined || event.data.turnId === turnId) &&
+    (stepIndex === undefined || event.data.stepIndex === stepIndex),
+  );
+  const startedAt = eventTime(matching[0]);
+  const completed = [...matching].reverse().find((event) => event.type === "reasoning.completed");
+  return {
+    ...(startedAt ? { startedAt } : {}),
+    ...(completed ? { endedAt: eventTime(completed) } : {}),
+  };
+}
+
+function eventTime(event: HandleMessageStreamEvent | undefined): number | undefined {
+  const at = event?.meta?.at;
+  if (!at) return undefined;
+  const parsed = Date.parse(at);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+type FileChange = {
+  readonly newContent: string;
+  readonly oldContent: string;
+  readonly path?: string;
+};
+
+function toolFileChange(part: EveDynamicToolPart): FileChange | undefined {
+  const input = asRecord(part.input);
+  if (!input) return undefined;
+  const newContent = firstString(input, ["content", "newContent", "new_content", "new_string", "replacement"]);
+  if (newContent === undefined) return undefined;
+  const oldContent = firstString(input, ["oldContent", "old_content", "old_string", "before"]) ?? "";
+  const path = firstString(input, ["path", "filePath", "file", "filename"]);
+  return { newContent, oldContent, ...(path ? { path } : {}) };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function firstString(
+  record: Record<string, unknown> | undefined,
+  keys: readonly string[],
+): string | undefined {
+  if (!record) return undefined;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+function readableOutput(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const lines = value.map((item) => readableOutput(item) ?? safeStringify(item));
+    return lines.length > 0 ? lines.join("\n") : undefined;
+  }
+  const record = asRecord(value);
+  if (!record) return value === undefined ? undefined : String(value);
+  return firstString(record, ["stdout", "content", "text", "message", "result", "output", "url"])
+    ?? (Object.keys(record).length > 0 ? safeStringify(record) : undefined);
+}
+
+function shellOutput(value: unknown): string | undefined {
+  if (typeof value === "string") return value || undefined;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const stdout = typeof record.stdout === "string" ? record.stdout.trimEnd() : "";
+  const stderr = typeof record.stderr === "string" ? record.stderr.trimEnd() : "";
+  return [stdout, stderr].filter(Boolean).join("\n") || undefined;
+}
+
+function stringArray(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function firstUrl(value: unknown): string | undefined {
+  const direct = typeof value === "string" ? value : firstString(asRecord(value), ["url", "previewUrl", "preview_url"]);
+  if (!direct) return undefined;
+  const match = direct.match(/https?:\/\/[^\s"'<>]+/u);
+  return match?.[0];
+}
+
+function todoItems(inputValue: unknown, outputValue: unknown): readonly { readonly done: boolean; readonly label: string }[] {
+  const source = todoArray(inputValue) ?? todoArray(outputValue) ?? [];
+  return source.flatMap((item) => {
+    if (typeof item === "string") return [{ done: false, label: item }];
+    const record = asRecord(item);
+    if (!record) return [];
+    const label = firstString(record, ["content", "label", "title", "text", "task"]);
+    if (!label) return [];
+    const status = firstString(record, ["status", "state"]);
+    const done = record.done === true || status === "completed" || status === "done";
+    return [{ done, label }];
+  });
+}
+
+function todoArray(value: unknown): readonly unknown[] | undefined {
+  if (Array.isArray(value)) return value;
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const candidate = record.todos ?? record.items ?? record.tasks ?? record.plan;
+  return Array.isArray(candidate) ? candidate : undefined;
 }
 
 function toolPatch(part: EveDynamicToolPart): string | undefined {
@@ -336,10 +715,10 @@ function SubagentProgress({
   return (
     <div
       className={cn(
-        "flex items-start gap-3 rounded-md border px-3 py-2.5 text-sm",
+        "flex items-start gap-3 py-1.5 text-sm",
         presentation.status === "failed"
-          ? "border-destructive/30 bg-destructive/5"
-          : "border-border bg-muted/30",
+          ? "text-destructive"
+          : "text-foreground",
       )}
       role={isActive ? "status" : undefined}
     >
@@ -706,16 +1085,6 @@ function localize(locale: AgentLocale, english: string, chinese: string): string
   return locale === "zh-CN" ? chinese : english;
 }
 
-function reasoningLabel(locale: AgentLocale, streaming: boolean, duration?: number) {
-  if (streaming || duration === 0) {
-    return <Shimmer duration={1}>{localize(locale, "Thinking...", "思考中…")}</Shimmer>;
-  }
-  if (duration === undefined) {
-    return <p>{localize(locale, "Reasoning complete", "思考完成")}</p>;
-  }
-  return <p>{localize(locale, `Thought for ${duration} seconds`, `思考了 ${duration} 秒`)}</p>;
-}
-
 function toolStatusLabel(locale: AgentLocale, state: EveDynamicToolPart["state"]): string {
   switch (state) {
     case "approval-requested":
@@ -741,10 +1110,15 @@ function toolTitle(locale: AgentLocale, part: EveDynamicToolPart): string {
   if (kind === "subagent-call") return localize(locale, "Sub-agent", "子代理");
 
   const normalized = part.toolName.toLocaleLowerCase().replaceAll("-", "_");
-  if (["bash", "shell", "terminal"].includes(normalized)) return localize(locale, "Terminal command", "终端命令");
+  if (["bash", "shell", "terminal", "exec_command"].includes(normalized)) return localize(locale, "Terminal command", "终端命令");
   if (["publish_preview", "website_preview"].includes(normalized)) return localize(locale, "Published preview", "发布网站预览");
+  if (["publish_artifact", "artifact_publish"].includes(normalized)) return localize(locale, "Published artifact", "发布产物");
+  if (["record_checkpoint", "checkpoint"].includes(normalized)) return localize(locale, "Saved checkpoint", "保存检查点");
   if (["read_file", "read", "view_file"].includes(normalized)) return localize(locale, "Read file", "读取文件");
-  if (["write_file", "edit_file", "apply_patch"].includes(normalized)) return localize(locale, "Edited files", "编辑文件");
+  if (["write_file", "edit_file", "apply_patch", "patch_file"].includes(normalized)) return localize(locale, "Edited files", "编辑文件");
+  if (["glob", "find_files"].includes(normalized)) return localize(locale, "Found files", "查找文件");
+  if (["grep", "search_files"].includes(normalized)) return localize(locale, "Searched files", "搜索文件");
+  if (["todo", "todo_write", "update_plan"].includes(normalized)) return localize(locale, "Updated tasks", "更新任务列表");
   if (["web_search", "search_web", "search"].includes(normalized)) return localize(locale, "Searched the web", "搜索网页");
   return part.toolName.replaceAll("_", " ");
 }

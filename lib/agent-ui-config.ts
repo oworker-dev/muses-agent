@@ -67,10 +67,16 @@ export const AGENT_UI_COMMANDS: readonly AgentPromptMenuItem[] = DEFAULT_UI_CONF
 export const AGENT_UI_MENTIONS: readonly AgentPromptMenuItem[] = [
   {
     id: "workspace",
-    label: "Current workspace",
+    label: "Workspace context",
     value: "@workspace",
     description: "Reference files and tools in this session sandbox.",
     keywords: ["files", "sandbox", "project"],
+    translations: {
+      "zh-CN": {
+        description: "引用当前会话沙盒中的文件和工具。",
+        label: "工作区上下文",
+      },
+    },
   },
 ];
 

@@ -1,39 +1,88 @@
 "use client";
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { ActionBarPrimitive, ComposerPrimitive, MessagePrimitive, ThreadPrimitive, useAuiState, unstable_useComposerInput, } from "@assistant-ui/react";
-import { CheckIcon, ChevronDownIcon, CopyIcon, LoaderCircleIcon, PencilIcon, RefreshCwIcon, SendIcon, SquareIcon, WrenchIcon, } from "lucide-react";
-import { useMemo, useState } from "react";
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { ActionBarPrimitive, ComposerPrimitive, MessagePrimitive, ThreadPrimitive, unstable_useMentionAdapter, useAui, useAuiState, } from "@assistant-ui/react";
+import { LexicalComposerInput } from "@assistant-ui/react-lexical";
+import { ArrowDownIcon, ArrowUpIcon, AtSignIcon, CheckIcon, CopyIcon, LoaderCircleIcon, PencilIcon, SlashIcon, SquareIcon, WrenchIcon, } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import { ComposerTriggerPopover } from "../assistant-ui/composer-trigger-popover.js";
+import { ContextDisplay } from "../assistant-ui/context-display.js";
+import { DirectiveText } from "../assistant-ui/directive-text.js";
+import { MarkdownText } from "../assistant-ui/markdown-text.js";
+import { ModelSelector } from "../assistant-ui/model-selector.js";
+import { ToolFallback } from "../assistant-ui/tool-fallback.js";
+import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.js";
 import { Button } from "../ui/button.js";
-import { DiffViewer } from "../ui/diff-viewer.js";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover.js";
-import { ContextDisplay } from "../context-display.js";
 import { AgentActivity } from "./agent-activity.js";
 import { AgentMessage } from "./agent-message.js";
-import { filterPromptMenuItems, findPromptTrigger, replacePromptTrigger } from "./prompt-menu.js";
-export function AssistantThreadSurface({ commands, events, eveMessages, fallbackStartedAt, isBusy, locale, mentions, messages, models, onInputResponses, onOpenSubagent, onPreferencesChange, pendingTurnText, preferences, quietActivity, reasoningLevels, usage, }) {
+export function AssistantThreadSurface({ cancellationState, commands, events, eveMessages, fallbackStartedAt, isBusy, locale, mentions, messages, models, onInputResponses, onOpenSubagent, onPreferencesChange, pendingTurnText, preferences, quietActivity, reasoningLevels, usage, }) {
     const eveMessagesById = useMemo(() => new Map(eveMessages.map((message) => [message.id, message])), [eveMessages]);
     const lastMessageId = eveMessages.at(-1)?.id;
-    return (_jsx(ThreadPrimitive.Root, { className: "aui-root flex h-full min-h-0 flex-col bg-background", children: _jsxs(ThreadPrimitive.Viewport, { "aria-live": "polite", autoScroll: true, turnAnchor: "top", className: "flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-4", role: "log", children: [_jsx(ThreadPrimitive.Messages, { children: ({ message }) => message.composer.isEditing ? (_jsx(EditMessage, { messages: messages })) : message.role === "user" ? (_jsx(UserMessage, { messages: messages })) : (_jsx(AssistantMessage, { canRespond: !isBusy, events: events, fallbackStartedAt: fallbackStartedAt, isStreaming: isBusy && message.id === lastMessageId, locale: locale, message: eveMessagesById.get(message.id), messages: messages, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent })) }), _jsx(ThreadPrimitive.Empty, { children: !pendingTurnText && !isBusy ? _jsx(AssistantEmptyState, { messages: messages }) : null }), pendingTurnText ? _jsx(PendingUserTurn, { text: pendingTurnText }) : null, isBusy ? (_jsx("div", { className: "mx-auto w-full max-w-3xl py-2", children: _jsx(AgentActivity, { events: events, messages: messages, quietUntilSlow: quietActivity }) })) : null, _jsxs(ThreadPrimitive.ViewportFooter, { className: "sticky bottom-0 mx-auto mt-auto flex w-full max-w-3xl flex-col gap-3 bg-background pb-4 pt-6 md:pb-6", children: [_jsx(ThreadPrimitive.ScrollToBottom, { asChild: true, children: _jsx(Button, { "aria-label": locale === "zh-CN" ? "滚动到底部" : "Scroll to bottom", className: "absolute -top-3 left-1/2 z-10 size-8 -translate-x-1/2 rounded-full shadow-sm disabled:invisible", size: "icon-sm", variant: "outline", children: _jsx(ChevronDownIcon, { className: "size-4" }) }) }), _jsx(AssistantComposer, { commands: commands, mentions: mentions, messages: messages, models: models, onPreferencesChange: onPreferencesChange, preferences: preferences, reasoningLevels: reasoningLevels, usage: usage })] })] }) }));
+    return (_jsx(ThreadPrimitive.Root, { className: "aui-root flex h-full min-h-0 flex-col bg-background", style: { "--thread-max-width": "48rem" }, children: _jsxs(ThreadPrimitive.Viewport, { "aria-live": "polite", autoScroll: true, turnAnchor: "top", className: "relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 pt-4", role: "log", children: [_jsxs("div", { className: "mx-auto mb-14 flex w-full max-w-(--thread-max-width) flex-col gap-6 empty:hidden", children: [_jsx(ThreadPrimitive.Messages, { children: ({ message }) => message.composer.isEditing ? (_jsx(EditMessage, { messages: messages })) : message.role === "user" ? (_jsx(UserMessage, { messages: messages })) : (_jsx(AssistantMessage, { canRespond: !isBusy, events: events, fallbackStartedAt: fallbackStartedAt, isStreaming: isBusy && message.id === lastMessageId, locale: locale, message: eveMessagesById.get(message.id), messages: messages, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent })) }), pendingTurnText ? _jsx(PendingUserTurn, { text: pendingTurnText }) : null, isBusy ? (_jsx(AgentActivity, { events: events, messages: messages, quietUntilSlow: quietActivity })) : null] }), _jsx(ThreadPrimitive.Empty, { children: !pendingTurnText && !isBusy ? _jsx(AssistantEmptyState, { messages: messages }) : null }), _jsxs(ThreadPrimitive.ViewportFooter, { className: "sticky bottom-0 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col bg-background pb-4 pt-5 md:pb-6", children: [_jsx(ThreadPrimitive.ScrollToBottom, { asChild: true, children: _jsx(TooltipIconButton, { tooltip: locale === "zh-CN" ? "滚动到底部" : "Scroll to bottom", className: "absolute -top-9 left-1/2 z-10 size-8 -translate-x-1/2 rounded-full disabled:invisible", variant: "outline", children: _jsx(ArrowDownIcon, { className: "size-4" }) }) }), _jsx(AssistantComposer, { cancellationState: cancellationState, commands: commands, locale: locale, mentions: mentions, messages: messages, models: models, onPreferencesChange: onPreferencesChange, preferences: preferences, reasoningLevels: reasoningLevels, usage: usage })] })] }) }));
 }
 function UserMessage({ messages }) {
-    return (_jsxs(MessagePrimitive.Root, { className: "group relative mx-auto flex w-full max-w-3xl justify-end py-1", children: [_jsx("div", { className: "max-w-[min(44rem,88%)] rounded-2xl bg-muted px-4 py-3 text-[15px] leading-6 text-foreground", children: _jsx(MessagePrimitive.Parts, {}) }), _jsx(ActionBarPrimitive.Root, { autohide: "always", autohideFloat: "always", className: "absolute right-0 top-full z-10 mt-1 flex gap-0.5 rounded-lg border border-border/60 bg-background/95 p-0.5 shadow-sm", children: _jsx(ActionBarPrimitive.Edit, { "aria-label": messages.editMessage, className: "size-7 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground", children: _jsx(PencilIcon, { className: "size-3.5" }) }) })] }));
+    const isLastUserMessage = useAuiState((state) => {
+        const lastUser = [...state.thread.messages].reverse().find((message) => message.role === "user");
+        return lastUser?.id === state.message.id;
+    });
+    return (_jsxs(MessagePrimitive.Root, { className: "group mx-auto flex w-full max-w-(--thread-max-width) flex-col items-end", children: [_jsx("div", { className: "max-w-[min(44rem,88%)] rounded-2xl bg-muted/75 px-4 py-3 text-[15px] leading-6 text-foreground", children: _jsx(MessagePrimitive.Parts, { components: { Text: DirectiveText } }) }), isLastUserMessage ? (_jsx(ActionBarPrimitive.Root, { autohide: "always", className: "mt-0.5 flex min-h-7 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100", children: _jsx(ActionBarPrimitive.Edit, { "aria-label": messages.editMessage, className: "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", children: _jsx(PencilIcon, { className: "size-3.5" }) }) })) : null] }));
 }
 function AssistantMessage({ canRespond, events, fallbackStartedAt, isStreaming, locale, message, messages, onInputResponses, onOpenSubagent, }) {
-    return (_jsxs(MessagePrimitive.Root, { className: "group relative mx-auto flex w-full max-w-3xl flex-col gap-2 py-1", children: [_jsx("div", { className: "min-w-0 text-[15px] leading-7 text-foreground", children: message ? (_jsx(AgentMessage, { canRespond: canRespond, events: events, fallbackStartedAt: fallbackStartedAt, isStreaming: isStreaming, locale: locale, message: message, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, showCopyAction: false })) : (_jsx(MessagePrimitive.Parts, { components: { tools: { Fallback: (props) => _jsx(AssistantTool, { ...props, uiMessages: messages }) } } })) }), _jsxs(ActionBarPrimitive.Root, { autohide: "not-last", autohideFloat: "single-branch", className: "flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100", children: [_jsx(ActionBarPrimitive.Copy, { "aria-label": messages.copyResponse, className: "size-7 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground", children: _jsx(CopyIcon, { className: "size-3.5" }) }), _jsx(ActionBarPrimitive.Reload, { "aria-label": messages.regenerate, className: "size-7 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground", children: _jsx(RefreshCwIcon, { className: "size-3.5" }) })] })] }));
+    return (_jsxs(MessagePrimitive.Root, { className: "group mx-auto flex w-full max-w-(--thread-max-width) flex-col", children: [_jsx("div", { className: "min-w-0 px-1 text-[15px] leading-7 text-foreground", children: message ? (_jsx(AgentMessage, { canRespond: canRespond, events: events, fallbackStartedAt: fallbackStartedAt, isStreaming: isStreaming, locale: locale, message: message, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, showCopyAction: false })) : (_jsx(MessagePrimitive.Parts, { components: { Text: MarkdownText, tools: { Fallback: ToolFallback } } })) }), _jsx(ActionBarPrimitive.Root, { autohide: "not-last", autohideFloat: "single-branch", className: "ml-0.5 flex min-h-7 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100", children: _jsx(ActionBarPrimitive.Copy, { "aria-label": messages.copyResponse, className: "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", children: _jsx(CopyIcon, { className: "size-3.5" }) }) })] }));
 }
 function PendingUserTurn({ text }) {
-    return (_jsx("div", { className: "mx-auto flex w-full max-w-3xl justify-end py-1", "data-optimistic": "true", children: _jsx("div", { className: "max-w-[min(44rem,88%)] rounded-2xl bg-muted px-4 py-3 text-[15px] leading-6 text-foreground", children: _jsx("p", { className: "whitespace-pre-wrap break-words", children: text }) }) }));
+    return (_jsx("div", { className: "flex w-full justify-end", "data-optimistic": "true", children: _jsx("div", { className: "max-w-[min(44rem,88%)] rounded-2xl bg-muted/75 px-4 py-3 text-[15px] leading-6 text-foreground", children: _jsx("p", { className: "whitespace-pre-wrap break-words", children: text }) }) }));
 }
 function EditMessage({ messages }) {
-    return (_jsx(MessagePrimitive.Root, { className: "mx-auto w-full max-w-3xl py-1", children: _jsxs(ComposerPrimitive.Root, { className: "rounded-2xl border border-border bg-background p-3 shadow-sm", children: [_jsx(ComposerPrimitive.Input, { autoFocus: true, className: "min-h-20 w-full resize-none border-0 bg-transparent text-[15px] leading-6 outline-none" }), _jsxs("div", { className: "mt-2 flex justify-end gap-2", children: [_jsx(ComposerPrimitive.Cancel, { asChild: true, children: _jsx(Button, { size: "sm", variant: "ghost", children: messages.cancelEdit }) }), _jsx(ComposerPrimitive.Send, { asChild: true, children: _jsxs(Button, { size: "sm", children: [_jsx(CheckIcon, { className: "size-3.5" }), messages.saveAndResend] }) })] })] }) }));
+    return (_jsx(MessagePrimitive.Root, { className: "mx-auto w-full max-w-(--thread-max-width)", children: _jsxs(ComposerPrimitive.Root, { className: "rounded-2xl bg-muted/75 px-4 py-3", children: [_jsx(ComposerPrimitive.Input, { autoFocus: true, className: "min-h-16 w-full resize-none border-0 bg-transparent text-[15px] leading-6 outline-none" }), _jsxs("div", { className: "mt-2 flex justify-end gap-1.5", children: [_jsx(ComposerPrimitive.Cancel, { asChild: true, children: _jsx(Button, { size: "sm", variant: "ghost", children: messages.cancelEdit }) }), _jsx(ComposerPrimitive.Send, { asChild: true, children: _jsxs(Button, { size: "sm", children: [_jsx(CheckIcon, { className: "size-3.5" }), messages.saveAndResend] }) })] })] }) }));
 }
-function AssistantComposer({ commands, mentions, messages, models, onPreferencesChange, preferences, reasoningLevels, usage, }) {
-    const composer = unstable_useComposerInput();
+export function AssistantComposer({ cancellationState, commands, inputDisabled = false, locale, mentions, messages, models, onPreferencesChange, preferences, reasoningLevels, usage, }) {
+    const aui = useAui();
     const isRunning = useAuiState((state) => state.thread.isRunning);
-    const [openMenu, setOpenMenu] = useState();
+    const composerIsEmpty = useAuiState((state) => state.composer.isEmpty);
+    const runtimeInputDisabled = useAuiState((state) => state.thread.isDisabled);
+    const stopping = cancellationState !== "idle";
+    const composerDisabled = inputDisabled || runtimeInputDisabled || stopping;
+    const composerInputRef = useRef(null);
+    useEffect(() => {
+        const input = composerInputRef.current?.querySelector('[role="textbox"]');
+        if (!input)
+            return;
+        input.setAttribute("aria-label", messages.inputPlaceholder);
+        input.setAttribute("aria-disabled", String(composerDisabled));
+        input.setAttribute("contenteditable", String(!composerDisabled));
+    }, [composerDisabled, messages.inputPlaceholder]);
+    const mention = unstable_useMentionAdapter({
+        fallbackIcon: AtSignIcon,
+        includeModelContextTools: false,
+        items: mentions.map((sourceItem) => {
+            const item = localizePromptMenuItem(sourceItem, locale);
+            return {
+                description: item.description,
+                id: item.value,
+                label: item.label,
+                type: "context",
+            };
+        }),
+    });
+    const command = unstable_useMentionAdapter({
+        fallbackIcon: SlashIcon,
+        includeModelContextTools: false,
+        items: commands.map((sourceItem) => {
+            const item = localizePromptMenuItem(sourceItem, locale);
+            return {
+                description: item.description,
+                id: item.value,
+                label: item.label,
+                type: "command",
+            };
+        }),
+    });
     const model = models.find((candidate) => candidate.id === preferences.modelId) ?? models[0];
-    const trigger = findPromptTrigger(composer.value);
-    const sourceItems = trigger?.kind === "command" ? commands : mentions;
+    const selectorModels = useMemo(() => models.map((candidate) => ({
+        efforts: reasoningLevels.map((level) => ({ id: level, name: formatReasoningLevel(level, locale) })),
+        id: candidate.id,
+        name: candidate.label,
+    })), [models, reasoningLevels]);
     const contextLabels = {
         cachedInput: messages.cacheReadTokens,
         contextUsage: messages.contextUsage,
@@ -49,40 +98,56 @@ function AssistantComposer({ commands, mentions, messages, models, onPreferences
         reasoningTokens: 0,
         totalTokens: usage.contextInputTokens,
     };
-    const promptItems = useMemo(() => trigger ? filterPromptMenuItems(sourceItems, trigger.query) : [], [sourceItems, trigger]);
-    return (_jsxs(ComposerPrimitive.Root, { className: "relative rounded-2xl border border-border/80 bg-background px-3 py-2 shadow-[0_10px_36px_-24px_rgba(15,23,42,0.45)] focus-within:border-border", children: [trigger && promptItems.length > 0 ? (_jsxs("div", { className: "absolute inset-x-2 bottom-[calc(100%+0.5rem)] z-50 max-h-60 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-xl", children: [_jsx("p", { className: "px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground", children: trigger.kind === "command" ? messages.skillsAndCommands : messages.contextItems }), promptItems.map((item) => (_jsxs("button", { className: "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-accent", onClick: () => composer.setText(replacePromptTrigger(composer.value, trigger, item.value)), type: "button", children: [_jsx("span", { className: "size-5 shrink-0 rounded-md bg-muted text-center text-xs leading-5 text-muted-foreground", children: trigger.kind === "command" ? "/" : "@" }), _jsxs("span", { className: "min-w-0 flex-1", children: [_jsx("span", { className: "block truncate font-medium", children: item.label }), item.description ? _jsx("span", { className: "block truncate text-xs text-muted-foreground", children: item.description }) : null] }), _jsx("span", { className: "font-mono text-xs text-muted-foreground", children: item.value })] }, item.id)))] })) : null, _jsx(ComposerPrimitive.Input, { "aria-label": messages.inputPlaceholder, className: "min-h-14 max-h-40 w-full resize-none border-0 bg-transparent px-1 py-1 text-[15px] leading-6 outline-none placeholder:text-muted-foreground", onKeyDown: (event) => {
-                    if (event.key !== "Tab" || !trigger || !promptItems[0])
-                        return;
-                    event.preventDefault();
-                    composer.setText(replacePromptTrigger(composer.value, trigger, promptItems[0].value));
-                }, placeholder: messages.inputPlaceholder }), _jsx("div", { className: "flex min-h-8 items-center gap-2", children: _jsxs("span", { className: "ml-auto flex items-center gap-2", children: [_jsx(PreferenceSelect, { label: messages.model, onChange: (value) => onPreferencesChange({ ...preferences, modelId: value }), options: models.map((candidate) => ({ id: candidate.id, label: candidate.label })), open: openMenu === "model", onOpenChange: (open) => setOpenMenu(open ? "model" : undefined), value: model?.id ?? preferences.modelId }), _jsx(PreferenceSelect, { label: messages.reasoning, onChange: (value) => onPreferencesChange({ ...preferences, reasoning: value }), options: reasoningLevels.map((level) => ({ id: level, label: level })), open: openMenu === "reasoning", onOpenChange: (open) => setOpenMenu(open ? "reasoning" : undefined), value: preferences.reasoning }), model ? (_jsxs(_Fragment, { children: [_jsx(ContextDisplay.Ring, { className: "px-1 sm:hidden", label: messages.context, labels: contextLabels, modelContextWindow: model.contextWindowTokens, side: "top", usage: contextUsage }), _jsx(ContextDisplay.Bar, { className: "hidden sm:inline-flex", label: messages.context, labels: contextLabels, modelContextWindow: model.contextWindowTokens, side: "top", usage: contextUsage })] })) : null, isRunning ? (_jsxs(_Fragment, { children: [_jsx(ComposerPrimitive.Send, { asChild: true, children: _jsx(Button, { "aria-label": messages.queueFollowUp, className: "size-8 rounded-full bg-foreground text-background hover:bg-foreground/90", size: "icon-sm", children: _jsx(SendIcon, { className: "size-4" }) }) }), _jsx(ComposerPrimitive.Cancel, { asChild: true, children: _jsx(Button, { "aria-label": messages.cancel, className: "size-8 rounded-full", size: "icon-sm", variant: "ghost", children: _jsx(SquareIcon, { className: "size-3.5 fill-current" }) }) })] })) : (_jsx(ComposerPrimitive.Send, { asChild: true, children: _jsx(Button, { "aria-label": messages.send, className: "size-8 rounded-full bg-foreground text-background hover:bg-foreground/90", size: "icon-sm", children: _jsx(SendIcon, { className: "size-4" }) }) }))] }) })] }));
+    return (_jsx(ComposerPrimitive.Unstable_TriggerPopoverRoot, { children: _jsxs(ComposerPrimitive.Root, { className: "relative flex w-full flex-col", onSubmit: (event) => {
+                event.preventDefault();
+                if (!composerDisabled)
+                    aui.composer.send();
+            }, children: [_jsxs("div", { className: "flex w-full flex-col gap-2 rounded-2xl border border-border/70 bg-background p-2 shadow-[0_4px_18px_-12px_rgba(0,0,0,0.2)]", children: [_jsx(LexicalComposerInput, { "aria-disabled": composerDisabled, directiveChip: DirectiveChip, placeholder: `${messages.inputPlaceholder}  (@ /)`, ref: composerInputRef, onKeyDown: (event) => {
+                                if (event.key !== "Enter" || event.shiftKey || composerDisabled || composerIsEmpty)
+                                    return;
+                                event.preventDefault();
+                                aui.composer.send();
+                            }, className: "aui-composer-input relative max-h-40 min-h-12 w-full resize-none overflow-y-auto bg-transparent px-2 py-1 text-[15px] leading-6 outline-none aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_.aui-directive-chip]:inline-flex [&_.aui-directive-chip]:items-center [&_.aui-directive-chip]:gap-1 [&_.aui-directive-chip]:rounded-md [&_.aui-directive-chip]:bg-muted [&_.aui-directive-chip]:px-1.5 [&_.aui-directive-chip]:py-0.5 [&_.aui-directive-chip]:text-[13px] [&_.aui-directive-chip]:font-medium [&_.aui-directive-chip]:text-foreground [&_.aui-directive-chip-icon]:text-muted-foreground [&_.aui-lexical-input]:min-h-6 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:inset-x-0 [&_.aui-lexical-placeholder]:top-0 [&_.aui-lexical-placeholder]:truncate [&_.aui-lexical-placeholder]:px-2 [&_.aui-lexical-placeholder]:py-1 [&_.aui-lexical-placeholder]:text-muted-foreground" }), _jsxs("div", { className: "flex min-h-8 items-center gap-1", children: [_jsx(ModelSelector, { align: "start", className: "h-8 max-w-56 rounded-full text-muted-foreground", contentClassName: "w-72", effort: preferences.reasoning, effortLabel: messages.reasoning, models: selectorModels, onEffortChange: (reasoning) => onPreferencesChange({ ...preferences, reasoning }), onValueChange: (modelId) => onPreferencesChange({ ...preferences, modelId }), searchable: models.length > 6, size: "sm", value: model?.id ?? preferences.modelId, variant: "ghost", triggerLabel: messages.model }), _jsxs("span", { className: "ml-auto flex items-center gap-1", children: [model ? (_jsx(ContextDisplay.Ring, { className: "h-8 rounded-full px-1.5", label: messages.context, labels: contextLabels, modelContextWindow: model.contextWindowTokens, side: "top", usage: contextUsage })) : null, stopping || (isRunning && composerIsEmpty) ? (_jsx(ComposerPrimitive.Cancel, { asChild: true, children: _jsx(Button, { "aria-label": cancellationState === "idle" ? messages.cancel : messages.stopping, className: "size-8 rounded-full", disabled: cancellationState !== "idle", size: "icon-sm", type: "button", children: cancellationState === "idle" ? (_jsx(SquareIcon, { className: "size-3.5 fill-current" })) : (_jsx(LoaderCircleIcon, { className: "size-4 animate-spin" })) }) })) : (_jsx(Button, { "aria-label": isRunning ? messages.queueFollowUp : messages.send, className: "size-8 rounded-full", disabled: composerDisabled, onClick: () => aui.composer.send(), size: "icon-sm", type: "button", children: _jsx(ArrowUpIcon, { className: "size-4" }) }))] })] })] }), _jsx(ComposerTriggerPopover, { char: "@", ...mention, emptyItemsLabel: messages.noPromptItems }), _jsx(ComposerTriggerPopover, { char: "/", ...command, emptyItemsLabel: messages.noPromptItems })] }) }));
 }
-function PreferenceSelect({ label, onChange, onOpenChange, open, options, value, }) {
-    const selected = options.find((option) => option.id === value) ?? options[0];
-    return (_jsxs(Popover, { onOpenChange: onOpenChange, open: open, children: [_jsx(PopoverTrigger, { asChild: true, children: _jsxs(Button, { "aria-label": label, className: "h-8 max-w-36 gap-1 rounded-full px-2 text-xs text-muted-foreground", size: "sm", type: "button", variant: "ghost", children: [_jsx("span", { className: "max-w-28 truncate", children: selected?.label ?? value }), _jsx(ChevronDownIcon, { className: "size-3.5 shrink-0" })] }) }), _jsxs(PopoverContent, { align: "end", className: "w-56 p-1.5", side: "top", sideOffset: 8, children: [_jsx("div", { className: "px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground", children: label }), _jsx("div", { className: "grid gap-0.5", children: options.map((option) => (_jsxs("button", { className: "flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-accent", onClick: () => { onChange(option.id); onOpenChange(false); }, type: "button", children: [_jsx("span", { className: "truncate", children: option.label }), option.id === value ? _jsx(CheckIcon, { className: "size-3.5 shrink-0" }) : null] }, option.id))) })] })] }));
+function DirectiveChip({ directiveId, directiveType, label }) {
+    const Icon = directiveType === "command" ? SlashIcon : AtSignIcon;
+    return (_jsxs("span", { className: "aui-directive-chip", "data-directive-id": directiveId, "data-directive-type": directiveType, children: [_jsx(Icon, { className: "aui-directive-chip-icon size-3" }), _jsx("span", { children: label })] }));
+}
+function formatReasoningLevel(level, locale) {
+    if (locale === "zh-CN") {
+        if (level === "low")
+            return "低";
+        if (level === "medium")
+            return "中";
+        if (level === "high")
+            return "高";
+        if (level === "xhigh")
+            return "极高";
+    }
+    if (level === "xhigh")
+        return "X high";
+    if (level === "medium")
+        return "Med";
+    return level.charAt(0).toUpperCase() + level.slice(1);
+}
+function localizePromptMenuItem(item, locale) {
+    const translation = item.translations?.[locale];
+    if (!translation)
+        return item;
+    return {
+        ...item,
+        description: translation.description ?? item.description,
+        label: translation.label ?? item.label,
+    };
 }
 function AssistantEmptyState({ messages }) {
-    const { setText } = unstable_useComposerInput();
-    const suggestions = [messages.suggestionImplement, messages.suggestionInspect, messages.suggestionResearch, messages.suggestionReview];
-    return (_jsxs("div", { className: "flex min-h-[min(28rem,60vh)] flex-1 flex-col items-center justify-center gap-6 px-4 pb-8 text-center", children: [_jsx("div", { className: "flex size-11 items-center justify-center rounded-2xl border border-border bg-card shadow-sm", children: _jsx(WrenchIcon, { className: "size-5 text-muted-foreground" }) }), _jsxs("div", { children: [_jsx("h1", { className: "text-2xl font-medium tracking-normal text-foreground", children: messages.emptyTitle }), _jsx("p", { className: "mt-1 text-sm text-muted-foreground", children: messages.emptyDescription })] }), _jsx("div", { className: "grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2", children: suggestions.map((suggestion) => _jsx("button", { className: "rounded-xl border border-border/70 bg-card px-3 py-3 text-left text-sm leading-5 transition-colors hover:border-border hover:bg-accent", onClick: () => setText(suggestion), type: "button", children: suggestion }, suggestion)) })] }));
-}
-function AssistantTool(props) {
-    const running = props.status.type === "running";
-    const label = toolLabel(props.toolName);
-    const args = asRecord(props.args);
-    const command = typeof args?.command === "string" ? args.command : typeof args?.cmd === "string" ? args.cmd : undefined;
-    const patch = typeof args?.patch === "string" ? args.patch : typeof args?.diff === "string" ? args.diff : undefined;
-    const taskItems = Array.isArray(args?.items) ? args.items : undefined;
-    return (_jsxs("div", { className: "my-2 flex min-w-0 items-start gap-2 border-b border-border/60 py-2 text-sm last:border-b-0", children: [running ? _jsx(LoaderCircleIcon, { className: "mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" }) : _jsx(WrenchIcon, { className: "mt-0.5 size-4 shrink-0 text-muted-foreground" }), _jsxs("div", { className: "min-w-0 flex-1", children: [_jsxs("div", { className: "flex items-center gap-2", children: [_jsx("span", { className: "font-medium", children: label }), running ? _jsx("span", { className: "text-xs text-muted-foreground", children: props.uiMessages.toolRunning }) : props.isError ? _jsx("span", { className: "text-xs text-destructive", children: props.uiMessages.toolFailed }) : _jsx("span", { className: "text-xs text-muted-foreground", children: props.uiMessages.toolCompleted })] }), command ? _jsxs("pre", { className: "mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-950 px-3 py-2.5 font-mono text-xs text-zinc-100", children: ["$ ", command] }) : null, patch ? _jsx("div", { className: "mt-2 max-h-72 overflow-auto", children: _jsx(DiffViewer, { patch: patch, size: "sm", showIcon: false }) }) : null, taskItems ? _jsx("div", { className: "mt-2 space-y-1 rounded-lg bg-muted/50 px-3 py-2", children: taskItems.map((item, index) => _jsxs("div", { className: "flex items-start gap-2 text-xs", children: [_jsx("span", { className: "mt-1 size-1.5 shrink-0 rounded-full bg-muted-foreground/60" }), _jsx("span", { children: typeof item === "string" ? item : JSON.stringify(item) })] }, index)) }) : null, !command && !patch && !taskItems ? _jsxs("details", { className: "mt-1", children: [_jsx("summary", { className: "cursor-pointer text-xs text-muted-foreground", children: props.uiMessages.toolDetails }), _jsx("pre", { className: "mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-2 text-xs", children: JSON.stringify(props.result ?? props.args, null, 2) })] }) : null] })] }));
-}
-function asRecord(value) {
-    return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
-}
-function toolLabel(toolName) {
-    const labels = { bash: "Terminal", glob: "Find files", grep: "Search files", read_file: "Read file", write_file: "Edit file", apply_patch: "Apply patch", todo: "Task list", publish_preview: "Publish preview" };
-    return labels[toolName.toLowerCase()] ?? toolName.replaceAll("_", " ");
-}
-export function AssistantText({ children }) {
-    return _jsx("p", { className: "whitespace-pre-wrap break-words", children: children });
+    const suggestions = [
+        messages.suggestionInspect,
+        messages.suggestionImplement,
+        messages.suggestionResearch,
+        messages.suggestionReview,
+    ];
+    const aui = useAui();
+    return (_jsxs("div", { className: "mx-auto flex min-h-[min(30rem,62vh)] w-full max-w-(--thread-max-width) flex-1 flex-col items-center justify-center gap-6 px-2 pb-8 text-center", children: [_jsx(WrenchIcon, { className: "size-8 text-muted-foreground/60" }), _jsx("h1", { className: "text-2xl font-medium tracking-normal text-foreground", children: messages.emptyTitle }), _jsx("div", { className: "grid w-full grid-cols-1 gap-2 sm:grid-cols-2", children: suggestions.map((suggestion) => (_jsx("button", { className: "min-h-20 rounded-lg border border-border/70 px-3 py-3 text-left text-sm leading-5 transition-colors hover:bg-muted/50", onClick: () => aui.composer.setText(suggestion), type: "button", children: suggestion }, suggestion))) })] }));
 }
 //# sourceMappingURL=assistant-thread-surface.js.map

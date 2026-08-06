@@ -2,7 +2,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEveAgent } from "eve/react";
 import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
-import { AssistantRuntimeProvider, useExternalStoreRuntime } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, unstable_defaultDirectiveFormatter, useExternalStoreRuntime } from "@assistant-ui/react";
 import { AlertCircleIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
@@ -91,6 +91,11 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
         }
         if (event.type === "turn.completed" || event.type === "turn.cancelled") {
             setTurnError(undefined);
+        }
+        if (event.type === "session.waiting" &&
+            (cancellationRef.current.requested || cancellationRef.current.sentTurnId)) {
+            cancellationRef.current = { requested: false };
+            setCancellationState("idle");
         }
         onEvent?.(event);
     }, [cancelTurn, onChange, onEvent]);
@@ -244,7 +249,7 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
             cancelTurn(cancellationRef.current.turnId);
     };
     const submit = async (message) => {
-        const text = message.text.trim();
+        const text = expandPromptDirectives(message.text, commands, mentions).trim();
         if ((text.length === 0 && message.files.length === 0) || awaitingInput || !providerReady)
             return;
         if (isBusy || turnAdmissionBusyRef.current) {
@@ -344,12 +349,6 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
         },
         onNew: async (message) => {
             await submit(promptFromAssistantMessage(getEveMessageContent(message)));
-        },
-        onReload: async () => {
-            const lastUser = [...agent.data.messages].reverse().find((message) => message.role === "user");
-            const text = lastUser?.parts.find((part) => part.type === "text")?.text;
-            if (text)
-                await submit({ files: [], text });
         },
         onRespondToToolApproval: async (response) => {
             prepareTurn();
@@ -466,7 +465,21 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
     const showPendingTurn = Boolean(thread.pendingTurn && !hasProjectedUserText(agent.data.messages, thread.pendingTurn.text));
     const activeTaskIsVisible = (isBusy || awaitingInput) && visibleMessages.some((message) => message.role === "assistant" &&
         message.parts.some((part) => part.type === "dynamic-tool"));
-    return (_jsx(AssistantRuntimeProvider, { runtime: assistantRuntime, children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx(AssistantThreadSurface, { commands: commands, events: agent.events, eveMessages: visibleMessages, fallbackStartedAt: thread.pendingTurn?.submittedAt, isBusy: isBusy, locale: locale, mentions: mentions, messages: messages, models: models, onInputResponses: respond, onOpenSubagent: onOpenSubagent, onPreferencesChange: (preferences) => onChange({ preferences }), pendingTurnText: showPendingTurn ? thread.pendingTurn?.text : undefined, preferences: thread.preferences, quietActivity: activeTaskIsVisible, reasoningLevels: reasoningLevels, usage: usage }), errorMessage ? _jsx(TurnError, { message: errorMessage, messages: messages, preserved: Boolean(thread.pendingTurn) }) : null, thread.queuedTurns.length > 0 || queueError ? _jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: removeQueuedTurn, onRetry: markQueuedTurnForRetry, turns: thread.queuedTurns }) : null] }) }));
+    return (_jsx(AssistantRuntimeProvider, { runtime: assistantRuntime, children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx(AssistantThreadSurface, { cancellationState: cancellationState, commands: commands, events: agent.events, eveMessages: visibleMessages, fallbackStartedAt: thread.pendingTurn?.submittedAt, isBusy: isBusy, locale: locale, mentions: mentions, messages: messages, models: models, onInputResponses: respond, onOpenSubagent: onOpenSubagent, onPreferencesChange: (preferences) => onChange({ preferences }), pendingTurnText: showPendingTurn ? thread.pendingTurn?.text : undefined, preferences: thread.preferences, quietActivity: activeTaskIsVisible, reasoningLevels: reasoningLevels, usage: usage }), errorMessage ? _jsx(TurnError, { message: errorMessage, messages: messages, preserved: Boolean(thread.pendingTurn) }) : null, thread.queuedTurns.length > 0 || queueError ? _jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: removeQueuedTurn, onRetry: markQueuedTurnForRetry, turns: thread.queuedTurns }) : null] }) }));
+}
+function expandPromptDirectives(value, commands, mentions) {
+    const segments = unstable_defaultDirectiveFormatter.parse(value);
+    if (segments.every((segment) => segment.kind === "text"))
+        return value;
+    const catalogs = new Map([
+        ...commands.map((item) => [`command:${item.value}`, item.value]),
+        ...mentions.map((item) => [`context:${item.value}`, item.value]),
+    ]);
+    return segments.map((segment) => {
+        if (segment.kind === "text")
+            return segment.text;
+        return catalogs.get(`${segment.type}:${segment.id}`) ?? segment.label;
+    }).join("");
 }
 export function FollowUpQueue({ error, messages, onRemove, onRetry, turns, }) {
     return (_jsxs("div", { className: "mx-auto mb-2 w-full max-w-3xl overflow-hidden rounded-xl border border-border/70 bg-background text-sm", children: [_jsxs(Collapsible, { defaultOpen: true, children: [_jsx(CollapsibleTrigger, { asChild: true, children: _jsxs("button", { "aria-label": `${messages.queuedFollowUps} (${turns.length})`, className: "flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-left text-muted-foreground hover:text-foreground", type: "button", children: [_jsx(Clock3Icon, { className: "size-4" }), messages.queuedFollowUps, _jsx("span", { className: "rounded-full bg-muted px-1.5 text-xs", children: turns.length })] }) }), _jsx(CollapsibleContent, { className: "border-t border-border/60", children: _jsx("div", { className: "space-y-1 p-2", children: turns.map((turn) => (_jsxs("div", { className: "flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-muted/60", children: [_jsx("span", { className: cn("size-1.5 shrink-0 rounded-full", turn.state === "delivery-failed" ? "bg-destructive" : "bg-amber-500") }), _jsx("span", { className: "min-w-0 flex-1 truncate", children: turn.text }), turn.state === "delivery-failed" ? _jsx("span", { className: "shrink-0 text-xs text-destructive", children: messages.queueDeliveryFailed }) : turn.state === "admission-ambiguous" ? _jsx("span", { className: "shrink-0 text-xs text-amber-700 dark:text-amber-300", children: messages.queueAdmissionAmbiguous }) : null, turn.state === "delivery-failed" ? _jsx(Button, { "aria-label": messages.retryQueuedMessage, className: "size-7", onClick: () => onRetry(turn.id), size: "icon-sm", variant: "ghost", children: _jsx(RotateCcwIcon, { className: "size-3.5" }) }) : null, turn.state !== "admission-ambiguous" ? _jsx(Button, { "aria-label": messages.removeQueuedMessage, className: "size-7", onClick: () => onRemove(turn.id), size: "icon-sm", variant: "ghost", children: _jsx(XIcon, { className: "size-3.5" }) }) : null] }, turn.id))) }) })] }), error ? _jsx("p", { className: "px-2 text-xs text-destructive", role: "alert", children: error }) : null] }));
