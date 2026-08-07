@@ -45,8 +45,8 @@ export function StandaloneAgentWorkspace({
     () => createHttpAgentMailbox({ endpoint: "/api/standalone/mailbox" }),
     [],
   );
-  const handleActiveThreadChange = useCallback((threadId: string) => {
-    const target = `/threads/${encodeURIComponent(threadId)}`;
+  const handleActiveThreadChange = useCallback((threadId?: string) => {
+    const target = threadId ? `/threads/${encodeURIComponent(threadId)}` : "/";
     if (window.location.pathname !== target) window.history.replaceState(null, "", target);
   }, [pathname]);
   const handleActiveSubagentChange = useCallback((threadId: string, sessionId?: string) => {

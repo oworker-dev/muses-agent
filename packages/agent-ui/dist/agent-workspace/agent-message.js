@@ -71,14 +71,19 @@ function ProcessParts({ canRespond, events, inActiveExecution, locale, onInputRe
             cursor += 1;
         }
         const active = toolParts.some((toolPart) => !isToolTerminal(toolPart.state));
-        rendered.push(_jsxs(ToolGroupRoot, { defaultOpen: active, variant: "ghost", children: [_jsx(ToolGroupTrigger, { active: active, count: toolParts.length, label: localize(locale, `${toolParts.length} tool ${toolParts.length === 1 ? "call" : "calls"}`, `运行了 ${toolParts.length} 个工具`) }), _jsx(ToolGroupContent, { children: toolParts.map((toolPart) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: inActiveExecution, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: toolPart, showCaret: false, turnId: turnId }, toolPart.toolCallId))) })] }, `tools:${toolParts[0]?.toolCallId}`));
+        const needsInput = toolParts.some((toolPart) => toolPart.state === "approval-requested" ||
+            Boolean(toolPart.toolMetadata?.eve?.inputRequest && !toolPart.toolMetadata.eve.inputResponse));
+        rendered.push(_jsxs(ToolGroupRoot, { defaultOpen: needsInput, variant: "ghost", children: [_jsx(ToolGroupTrigger, { active: active, count: toolParts.length, label: localize(locale, active
+                        ? `Running ${toolParts.length} ${toolParts.length === 1 ? "tool" : "tools"}`
+                        : `Ran ${toolParts.length} ${toolParts.length === 1 ? "tool" : "tools"}`, active ? `正在运行 ${toolParts.length} 个工具` : `已运行 ${toolParts.length} 个工具`) }), _jsx(ToolGroupContent, { children: toolParts.map((toolPart) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: inActiveExecution, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: toolPart, showCaret: false, turnId: turnId }, toolPart.toolCallId))) })] }, `tools:${toolParts[0]?.toolCallId}`));
         index = cursor;
     }
     return _jsx(_Fragment, { children: rendered });
 }
-function ToolPart({ canRespond, events, inActiveExecution, locale, onInputResponses, onOpenSubagent, part, }) {
+function ToolPart({ canRespond, events, locale, onInputResponses, onOpenSubagent, part, }) {
     const running = !isToolTerminal(part.state);
-    const defaultOpen = (inActiveExecution && running) || part.state === "approval-requested" || part.state === "approval-responded";
+    const defaultOpen = part.state === "approval-requested" ||
+        Boolean(part.toolMetadata?.eve?.inputRequest && !part.toolMetadata.eve.inputResponse);
     const Icon = toolIcon(part);
     return (_jsxs(ToolFallbackRoot, { className: "my-0", defaultOpen: defaultOpen, children: [_jsxs(CollapsibleTrigger, { className: "group/trigger flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-left text-sm text-muted-foreground transition-[color,scale] hover:text-foreground active:scale-[0.98]", children: [running ? (_jsx(LoaderCircleIcon, { className: "size-4 shrink-0 animate-spin [animation-duration:0.65s]" })) : part.state === "output-error" || part.state === "output-denied" ? (_jsx(XCircleIcon, { className: "size-4 shrink-0 text-destructive" })) : (_jsx(Icon, { className: "size-4 shrink-0" })), _jsx("span", { className: "truncate", children: toolTitle(locale, part) }), _jsx("span", { className: cn("shrink-0 text-xs", part.state === "output-error" && "text-destructive"), children: toolStatusLabel(locale, part.state) }), _jsx(ChevronDownIcon, { className: "size-3.5 shrink-0 -rotate-90 transition-transform group-data-[state=open]/trigger:rotate-0" })] }), _jsxs(ToolFallbackContent, { children: [_jsx(KnownToolContent, { events: events, locale: locale, onOpenSubagent: onOpenSubagent, part: part }), _jsx(InputRequestActions, { canRespond: canRespond, locale: locale, onInputResponses: onInputResponses, part: part }), part.errorText ? _jsx("p", { className: "whitespace-pre-wrap text-xs text-destructive", children: part.errorText }) : null] })] }));
 }
@@ -93,17 +98,17 @@ function KnownToolContent({ events, locale, onOpenSubagent, part, }) {
     }
     if (["apply_patch", "patch_file", "write_file", "edit_file"].includes(normalized)) {
         if (patch) {
-            return _jsx("div", { className: "max-h-[30rem] overflow-auto", "data-tool-view": "diff", children: _jsx(DiffViewer, { patch: patch, showIcon: true, size: "sm", variant: "ghost" }) });
+            return _jsx("div", { "data-tool-view": "diff", children: _jsx(DiffViewer, { contentClassName: "max-h-[28rem] overflow-auto", patch: patch, showIcon: true, size: "sm", variant: "ghost" }) });
         }
         if (fileChange) {
-            return (_jsx("div", { className: "max-h-[30rem] overflow-auto", "data-tool-view": "diff", children: _jsx(DiffViewer, { newFile: { content: fileChange.newContent, name: fileChange.path }, oldFile: { content: fileChange.oldContent, name: fileChange.path }, showIcon: true, size: "sm", variant: "ghost" }) }));
+            return (_jsx("div", { "data-tool-view": "diff", children: _jsx(DiffViewer, { contentClassName: "max-h-[28rem] overflow-auto", newFile: { content: fileChange.newContent, name: fileChange.path }, oldFile: { content: fileChange.oldContent, name: fileChange.path }, showIcon: true, size: "sm", variant: "ghost" }) }));
         }
         return _jsx("p", { className: "text-xs text-muted-foreground", children: localize(locale, "Receiving file changes...", "正在接收文件变更…") });
     }
     if (["bash", "shell", "terminal", "exec_command"].includes(normalized)) {
         const command = firstString(input, ["command", "cmd"]);
         const result = shellOutput(output);
-        return (_jsxs("div", { className: "space-y-2 font-mono text-xs", children: [command ? _jsxs("pre", { className: "overflow-x-auto whitespace-pre-wrap break-words text-foreground", children: [_jsx("span", { className: "select-none text-muted-foreground", children: "$ " }), command] }) : null, result ? _jsx("pre", { className: "max-h-80 overflow-auto whitespace-pre-wrap break-words text-muted-foreground", children: result }) : output !== undefined ? _jsx("p", { className: "font-sans text-muted-foreground", children: localize(locale, "Command completed.", "命令已完成。") }) : null] }));
+        return _jsx(ShellToolContent, { command: command, locale: locale, output: output, result: result, running: !isToolTerminal(part.state) });
     }
     if (["read_file", "read", "view_file"].includes(normalized)) {
         const path = firstString(input, ["path", "file", "filename"]);
@@ -173,8 +178,18 @@ function ReasoningPart({ events, locale, part, turnId, }) {
     const durationSeconds = useElapsedSeconds(timing.startedAt, timing.endedAt);
     const streaming = part.state === "streaming";
     return (_jsxs(ReasoningRoot, { className: "mb-1", defaultOpen: streaming, streaming: streaming, variant: "ghost", children: [_jsx(ReasoningTrigger, { active: streaming, duration: timing.startedAt ? durationSeconds : undefined, label: streaming
-                    ? localize(locale, "Thinking", "思考中")
+                    ? reasoningSummary(part.text) ?? localize(locale, "Thinking", "正在思考")
                     : localize(locale, "Reasoning complete", "思考完成") }), _jsx(ReasoningContent, { "aria-busy": streaming, children: _jsx(ReasoningText, { children: _jsx(StaticMarkdownText, { text: part.text }) }) })] }));
+}
+function reasoningSummary(text) {
+    const firstLine = text
+        .replaceAll(/^[#>*\-\s]+/gm, "")
+        .split(/\n|(?<=[.!?。！？])\s+/u)
+        .map((line) => line.trim())
+        .find(Boolean);
+    if (!firstLine)
+        return undefined;
+    return firstLine.length > 64 ? `${firstLine.slice(0, 63)}…` : firstLine;
 }
 function reasoningTiming(events, turnId, stepIndex) {
     const matching = events.filter((event) => (event.type === "reasoning.appended" || event.type === "reasoning.completed") &&
@@ -242,6 +257,29 @@ function shellOutput(value) {
     const stdout = typeof record.stdout === "string" ? record.stdout.trimEnd() : "";
     const stderr = typeof record.stderr === "string" ? record.stderr.trimEnd() : "";
     return [stdout, stderr].filter(Boolean).join("\n") || undefined;
+}
+function ShellToolContent({ command, locale, output, result, running, }) {
+    const [copied, setCopied] = useState(false);
+    const exitCode = shellExitCode(output);
+    const copyCommand = async () => {
+        if (!command)
+            return;
+        await navigator.clipboard.writeText(command);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1_500);
+    };
+    return (_jsxs("div", { className: "overflow-hidden rounded-md bg-muted/55 font-mono text-xs", "data-tool-view": "terminal", children: [_jsxs("div", { className: "flex min-h-9 items-center gap-2 px-3 py-2", children: [_jsx(TerminalIcon, { className: "size-3.5 shrink-0 text-muted-foreground" }), _jsx("pre", { className: "min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words text-foreground", children: command ?? localize(locale, "Shell command", "终端命令") }), running ? (_jsx(LoaderCircleIcon, { className: "size-3.5 shrink-0 animate-spin text-muted-foreground" })) : exitCode !== undefined ? (_jsxs("span", { className: cn("shrink-0 tabular-nums", exitCode === 0 ? "text-muted-foreground" : "text-destructive"), children: ["exit ", exitCode] })) : null, command ? (_jsx(Button, { "aria-label": localize(locale, "Copy command", "复制命令"), className: "size-6 shrink-0", onClick: () => void copyCommand(), size: "icon-sm", type: "button", variant: "ghost", children: copied ? _jsx(CheckIcon, { className: "size-3.5" }) : _jsx(CopyIcon, { className: "size-3.5" }) })) : null] }), result ? (_jsx("pre", { className: "max-h-80 overflow-auto border-t border-border/50 px-3 py-2.5 whitespace-pre-wrap break-words text-muted-foreground", children: result })) : !running && output !== undefined ? (_jsx("p", { className: "border-t border-border/50 px-3 py-2 font-sans text-muted-foreground", children: localize(locale, "Command completed with no output.", "命令已完成，没有输出。") })) : null] }));
+}
+function shellExitCode(value) {
+    const record = asRecord(value);
+    if (!record)
+        return undefined;
+    for (const key of ["exitCode", "exit_code", "code"]) {
+        const candidate = record[key];
+        if (typeof candidate === "number" && Number.isFinite(candidate))
+            return candidate;
+    }
+    return undefined;
 }
 function stringArray(value) {
     return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];

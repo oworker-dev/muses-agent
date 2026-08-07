@@ -4,7 +4,7 @@ import type { UserContent } from "ai";
 import type { HandleMessageStreamEvent } from "eve/client";
 import { useEveAgent, type EveMessage } from "eve/react";
 import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
-import { AssistantRuntimeProvider, unstable_defaultDirectiveFormatter, useExternalStoreRuntime, type AppendMessage, type ExternalThreadQueueAdapter } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, unstable_defaultDirectiveFormatter, useExternalStoreRuntime, type AppendMessage, type AttachmentAdapter, type CompleteAttachment, type ExternalThreadQueueAdapter, type PendingAttachment } from "@assistant-ui/react";
 import { AlertCircleIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
@@ -14,6 +14,7 @@ import { createAgentSession } from "./agent-client.js";
 import type { AgentInputResponse } from "./agent-message.js";
 import { AssistantThreadSurface } from "./assistant-thread-surface.js";
 import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig, AgentWorkspaceMailbox, PromptInputMessage } from "./contracts.js";
+import { sanitizeAgentError } from "./error-presentation.js";
 import { messagesFor, type AgentLocale, type AgentMessages } from "./i18n.js";
 import { appendThreadEvent, titleFromPrompt } from "./thread-storage.js";
 import {
@@ -31,6 +32,8 @@ type Cancellation = {
 export function AgentThreadView({
   client,
   commands,
+  draftStorageKey,
+  isRecovering = false,
   locale,
   mailbox,
   mentions,
@@ -45,6 +48,8 @@ export function AgentThreadView({
 }: {
   readonly client?: AgentWorkspaceClientConfig;
   readonly commands: readonly AgentPromptMenuItem[];
+  readonly draftStorageKey: string;
+  readonly isRecovering?: boolean;
   readonly locale: AgentLocale;
   readonly mailbox?: AgentWorkspaceMailbox;
   readonly mentions: readonly AgentPromptMenuItem[];
@@ -166,12 +171,14 @@ export function AgentThreadView({
   });
   const stopAgent = agent.stop;
 
-  const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const agentIsBusy = agent.status === "submitted" || agent.status === "streaming";
+  const isBusy = agentIsBusy || isRecovering;
+  const admissionBusy = agentIsBusy || isRecovering;
   const awaitingInput = hasUnresolvedInputRequests(agent.events);
 
   useEffect(() => {
-    turnAdmissionBusyRef.current = isBusy;
-  }, [isBusy]);
+    turnAdmissionBusyRef.current = admissionBusy;
+  }, [admissionBusy]);
 
   const requestRecovery = useCallback(() => {
     if (recoveryRequestedRef.current) return;
@@ -194,16 +201,18 @@ export function AgentThreadView({
     const lastEvent = agent.events.at(-1);
     if (
       agent.session.sessionId &&
+      !isRecovering &&
+      !cancellationRef.current.requested &&
       !isBusy &&
       lastEvent &&
       !isSessionBoundary(lastEvent)
     ) {
       requestRecovery();
     }
-  }, [agent.events, agent.session.sessionId, isBusy, requestRecovery]);
+  }, [agent.events, agent.session.sessionId, isBusy, isRecovering, requestRecovery]);
 
   useEffect(() => {
-    if (!isBusy || !agent.session.sessionId || recoveryRequestedRef.current) return;
+    if (isRecovering || !agentIsBusy || !agent.session.sessionId || recoveryRequestedRef.current) return;
     let disposed = false;
     let timer: number | undefined;
     const probe = async () => {
@@ -228,9 +237,10 @@ export function AgentThreadView({
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [agent.events.length, agent.session.sessionId, isBusy, requestRecovery, session]);
+  }, [agent.events.length, agent.session.sessionId, agentIsBusy, isRecovering, requestRecovery, session]);
 
   useEffect(() => {
+    if (isRecovering) return;
     const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
     const streamIndex = Math.max(
       agent.session.streamIndex,
@@ -250,7 +260,7 @@ export function AgentThreadView({
       status: turnError ? "error" : awaitingInput ? "waiting" : agent.status,
       updatedAt: Date.now(),
     });
-  }, [agent.events, agent.session, agent.status, awaitingInput, onChange, turnError]);
+  }, [agent.events, agent.session, agent.status, awaitingInput, isRecovering, onChange, turnError]);
 
   const errorMessage = cancellationError ?? turnError ?? agent.error?.message;
   const usage = summarizeUsage(agent.events);
@@ -327,14 +337,26 @@ export function AgentThreadView({
   const requestCancellation = () => {
     if (!isBusy || cancellationState !== "idle") return;
     cancellationRef.current.requested = true;
-    setCancellationState("requested");
-    if (cancellationRef.current.turnId) cancelTurn(cancellationRef.current.turnId);
+    setCancellationState("cancelling");
+    stopAgent();
+    const turnId = cancellationRef.current.turnId;
+    void session.cancel(turnId ? { turnId } : undefined).then(() => {
+      cancellationRef.current = { requested: false };
+      setCancellationState("idle");
+      onChange({ status: "ready", updatedAt: Date.now() });
+      onRecoveryNeeded();
+    }).catch((error: unknown) => {
+      cancellationRef.current = { requested: false };
+      setCancellationError(error instanceof Error ? error.message : "Unable to stop this turn.");
+      setCancellationState("idle");
+      onRecoveryNeeded();
+    });
   };
 
   const submit = async (message: PromptInputMessage) => {
     const text = expandPromptDirectives(message.text, commands, mentions).trim();
     if ((text.length === 0 && message.files.length === 0) || awaitingInput || !providerReady) return;
-    if (isBusy || turnAdmissionBusyRef.current) {
+    if (admissionBusy || turnAdmissionBusyRef.current) {
       if (message.files.length > 0) {
         setQueueError(messages.queueAttachmentsUnsupported);
         return;
@@ -418,6 +440,7 @@ export function AgentThreadView({
     steerItems: [],
   };
   const assistantRuntime = useExternalStoreRuntime({
+    adapters: { attachments: browserAttachmentAdapter },
     isDisabled: !providerReady || awaitingInput,
     isRunning: isBusy,
     messages: assistantMessages,
@@ -516,17 +539,17 @@ export function AgentThreadView({
 
   useEffect(() => {
     if (
-      !mailbox || isBusy || awaitingInput || recoveryRequestedRef.current ||
+      !mailbox || admissionBusy || awaitingInput || recoveryRequestedRef.current ||
       !queuedTurnsRef.current.some((turn) =>
         turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId)
       )
     ) return;
     requestRecovery();
-  }, [awaitingInput, isBusy, mailbox, requestRecovery, thread.queuedTurns]);
+  }, [admissionBusy, awaitingInput, mailbox, requestRecovery, thread.queuedTurns]);
 
   useEffect(() => {
     if (
-      isBusy || awaitingInput || !providerReady ||
+      admissionBusy || awaitingInput || !providerReady ||
       dispatchingQueuedTurnIdRef.current ||
       !agent.session.continuationToken
     ) return;
@@ -560,7 +583,7 @@ export function AgentThreadView({
       dispatchingQueuedTurnIdRef.current = undefined;
       onChange({ pendingTurn: undefined, queuedTurns });
     });
-  }, [agent, agent.session.continuationToken, awaitingInput, isBusy, onChange, providerReady, thread.queuedTurns]);
+  }, [admissionBusy, agent, agent.session.continuationToken, awaitingInput, onChange, providerReady, thread.queuedTurns]);
 
   const respond = (inputResponses: readonly AgentInputResponse[]) => {
     prepareTurn();
@@ -581,6 +604,7 @@ export function AgentThreadView({
         <AssistantThreadSurface
           cancellationState={cancellationState}
           commands={commands}
+          draftStorageKey={draftStorageKey}
           events={agent.events}
           eveMessages={visibleMessages}
           fallbackStartedAt={thread.pendingTurn?.submittedAt}
@@ -598,7 +622,7 @@ export function AgentThreadView({
           reasoningLevels={reasoningLevels}
           usage={usage}
         />
-        {errorMessage ? <TurnError message={errorMessage} messages={messages} preserved={Boolean(thread.pendingTurn)} /> : null}
+        {errorMessage ? <TurnError message={sanitizeAgentError(errorMessage)} messages={messages} preserved={Boolean(thread.pendingTurn)} /> : null}
         {thread.queuedTurns.length > 0 || queueError ? <FollowUpQueue error={queueError} messages={messages} onRemove={removeQueuedTurn} onRetry={markQueuedTurnForRetry} turns={thread.queuedTurns} /> : null}
       </main>
     </AssistantRuntimeProvider>
@@ -680,6 +704,52 @@ function promptFromAssistantMessage(content: NonNullable<import("eve/client").Se
   const text = content.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text").map((part) => part.text).join("\n");
   const files = content.filter((part): part is Extract<typeof part, { type: "file" }> => part.type === "file").map((part) => ({ filename: part.filename, mediaType: part.mediaType, url: typeof part.data === "string" ? part.data : String(part.data) }));
   return { files, text };
+}
+
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+const browserAttachmentAdapter: AttachmentAdapter = {
+  accept: "*",
+  async add({ file }): Promise<PendingAttachment> {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      throw new Error("Attachments must be 20 MB or smaller.");
+    }
+    return {
+      contentType: file.type || "application/octet-stream",
+      file,
+      id: typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `attachment-${Date.now()}`,
+      name: file.name,
+      status: { reason: "composer-send", type: "requires-action" },
+      type: file.type.startsWith("image/") ? "image" : "file",
+    };
+  },
+  async remove() {
+    // Browser data URLs do not allocate a remote resource.
+  },
+  async send(attachment): Promise<CompleteAttachment> {
+    const data = await fileToDataUrl(attachment.file);
+    return {
+      ...attachment,
+      content: [{
+        data,
+        filename: attachment.name,
+        mimeType: attachment.contentType || "application/octet-stream",
+        type: "file",
+      }],
+      status: { type: "complete" },
+    };
+  },
+};
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read the attachment."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function isSessionBoundary(event: HandleMessageStreamEvent): boolean {

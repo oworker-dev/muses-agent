@@ -280,15 +280,21 @@ function ProcessParts({
       cursor += 1;
     }
     const active = toolParts.some((toolPart) => !isToolTerminal(toolPart.state));
+    const needsInput = toolParts.some((toolPart) =>
+      toolPart.state === "approval-requested" ||
+      Boolean(toolPart.toolMetadata?.eve?.inputRequest && !toolPart.toolMetadata.eve.inputResponse)
+    );
     rendered.push(
-      <ToolGroupRoot defaultOpen={active} key={`tools:${toolParts[0]?.toolCallId}`} variant="ghost">
+      <ToolGroupRoot defaultOpen={needsInput} key={`tools:${toolParts[0]?.toolCallId}`} variant="ghost">
         <ToolGroupTrigger
           active={active}
           count={toolParts.length}
           label={localize(
             locale,
-            `${toolParts.length} tool ${toolParts.length === 1 ? "call" : "calls"}`,
-            `运行了 ${toolParts.length} 个工具`,
+            active
+              ? `Running ${toolParts.length} ${toolParts.length === 1 ? "tool" : "tools"}`
+              : `Ran ${toolParts.length} ${toolParts.length === 1 ? "tool" : "tools"}`,
+            active ? `正在运行 ${toolParts.length} 个工具` : `已运行 ${toolParts.length} 个工具`,
           )}
         />
         <ToolGroupContent>
@@ -318,7 +324,6 @@ function ProcessParts({
 function ToolPart({
   canRespond,
   events,
-  inActiveExecution,
   locale,
   onInputResponses,
   onOpenSubagent,
@@ -333,7 +338,8 @@ function ToolPart({
   readonly part: EveDynamicToolPart;
 }) {
   const running = !isToolTerminal(part.state);
-  const defaultOpen = (inActiveExecution && running) || part.state === "approval-requested" || part.state === "approval-responded";
+  const defaultOpen = part.state === "approval-requested" ||
+    Boolean(part.toolMetadata?.eve?.inputRequest && !part.toolMetadata.eve.inputResponse);
   const Icon = toolIcon(part);
 
   return (
@@ -386,12 +392,13 @@ function KnownToolContent({
 
   if (["apply_patch", "patch_file", "write_file", "edit_file"].includes(normalized)) {
     if (patch) {
-      return <div className="max-h-[30rem] overflow-auto" data-tool-view="diff"><DiffViewer patch={patch} showIcon size="sm" variant="ghost" /></div>;
+      return <div data-tool-view="diff"><DiffViewer contentClassName="max-h-[28rem] overflow-auto" patch={patch} showIcon size="sm" variant="ghost" /></div>;
     }
     if (fileChange) {
       return (
-        <div className="max-h-[30rem] overflow-auto" data-tool-view="diff">
+        <div data-tool-view="diff">
           <DiffViewer
+            contentClassName="max-h-[28rem] overflow-auto"
             newFile={{ content: fileChange.newContent, name: fileChange.path }}
             oldFile={{ content: fileChange.oldContent, name: fileChange.path }}
             showIcon
@@ -407,12 +414,7 @@ function KnownToolContent({
   if (["bash", "shell", "terminal", "exec_command"].includes(normalized)) {
     const command = firstString(input, ["command", "cmd"]);
     const result = shellOutput(output);
-    return (
-      <div className="space-y-2 font-mono text-xs">
-        {command ? <pre className="overflow-x-auto whitespace-pre-wrap break-words text-foreground"><span className="select-none text-muted-foreground">$ </span>{command}</pre> : null}
-        {result ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-muted-foreground">{result}</pre> : output !== undefined ? <p className="font-sans text-muted-foreground">{localize(locale, "Command completed.", "命令已完成。")}</p> : null}
-      </div>
-    );
+    return <ShellToolContent command={command} locale={locale} output={output} result={result} running={!isToolTerminal(part.state)} />;
   }
 
   if (["read_file", "read", "view_file"].includes(normalized)) {
@@ -545,7 +547,7 @@ function ReasoningPart({
         active={streaming}
         duration={timing.startedAt ? durationSeconds : undefined}
         label={streaming
-          ? localize(locale, "Thinking", "思考中")
+          ? reasoningSummary(part.text) ?? localize(locale, "Thinking", "正在思考")
           : localize(locale, "Reasoning complete", "思考完成")}
       />
       <ReasoningContent aria-busy={streaming}>
@@ -553,6 +555,16 @@ function ReasoningPart({
       </ReasoningContent>
     </ReasoningRoot>
   );
+}
+
+function reasoningSummary(text: string): string | undefined {
+  const firstLine = text
+    .replaceAll(/^[#>*\-\s]+/gm, "")
+    .split(/\n|(?<=[.!?。！？])\s+/u)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return undefined;
+  return firstLine.length > 64 ? `${firstLine.slice(0, 63)}…` : firstLine;
 }
 
 function reasoningTiming(
@@ -633,6 +645,62 @@ function shellOutput(value: unknown): string | undefined {
   const stdout = typeof record.stdout === "string" ? record.stdout.trimEnd() : "";
   const stderr = typeof record.stderr === "string" ? record.stderr.trimEnd() : "";
   return [stdout, stderr].filter(Boolean).join("\n") || undefined;
+}
+
+function ShellToolContent({
+  command,
+  locale,
+  output,
+  result,
+  running,
+}: {
+  readonly command?: string;
+  readonly locale: AgentLocale;
+  readonly output: unknown;
+  readonly result?: string;
+  readonly running: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const exitCode = shellExitCode(output);
+  const copyCommand = async () => {
+    if (!command) return;
+    await navigator.clipboard.writeText(command);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1_500);
+  };
+  return (
+    <div className="overflow-hidden rounded-md bg-muted/55 font-mono text-xs" data-tool-view="terminal">
+      <div className="flex min-h-9 items-center gap-2 px-3 py-2">
+        <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words text-foreground">{command ?? localize(locale, "Shell command", "终端命令")}</pre>
+        {running ? (
+          <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+        ) : exitCode !== undefined ? (
+          <span className={cn("shrink-0 tabular-nums", exitCode === 0 ? "text-muted-foreground" : "text-destructive")}>exit {exitCode}</span>
+        ) : null}
+        {command ? (
+          <Button aria-label={localize(locale, "Copy command", "复制命令")} className="size-6 shrink-0" onClick={() => void copyCommand()} size="icon-sm" type="button" variant="ghost">
+            {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+          </Button>
+        ) : null}
+      </div>
+      {result ? (
+        <pre className="max-h-80 overflow-auto border-t border-border/50 px-3 py-2.5 whitespace-pre-wrap break-words text-muted-foreground">{result}</pre>
+      ) : !running && output !== undefined ? (
+        <p className="border-t border-border/50 px-3 py-2 font-sans text-muted-foreground">{localize(locale, "Command completed with no output.", "命令已完成，没有输出。")}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function shellExitCode(value: unknown): number | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  for (const key of ["exitCode", "exit_code", "code"]) {
+    const candidate = record[key];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function stringArray(value: unknown): readonly string[] {

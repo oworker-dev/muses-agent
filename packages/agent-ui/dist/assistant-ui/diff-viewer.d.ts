@@ -78,8 +78,9 @@ export type DiffViewerProps = Partial<SyntaxHighlighterProps> & VariantProps<typ
     showIcon?: boolean;
     showStats?: boolean;
     className?: string;
+    contentClassName?: string;
 };
-declare function DiffViewer({ code, patch, oldFile, newFile, viewMode, showLineNumbers, showIcon, showStats, variant, size, className, }: DiffViewerProps): import("react/jsx-runtime").JSX.Element;
+declare function DiffViewer({ code, patch, oldFile, newFile, viewMode, showLineNumbers, showIcon, showStats, variant, size, className, contentClassName, }: DiffViewerProps): import("react/jsx-runtime").JSX.Element;
 declare namespace DiffViewer {
     var displayName: string;
 }

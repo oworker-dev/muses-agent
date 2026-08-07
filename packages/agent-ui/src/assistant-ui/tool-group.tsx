@@ -127,21 +127,13 @@ function ToolGroupTrigger({
         data-slot="tool-group-trigger-label"
         className={cn(
           "aui-tool-group-trigger-label-wrapper relative inline-block text-start leading-none font-medium",
+          active && "shimmer motion-reduce:animate-none",
           "group-data-[variant=ghost]/tool-group-root:font-normal",
           "group-data-[variant=outline]/tool-group-root:grow",
           "group-data-[variant=muted]/tool-group-root:grow",
         )}
       >
         <span className="text-xs">{label}</span>
-        {active && (
-          <span
-            aria-hidden
-            data-slot="tool-group-trigger-shimmer"
-            className="aui-tool-group-trigger-shimmer shimmer pointer-events-none absolute inset-0 text-xs motion-reduce:animate-none"
-          >
-            {label}
-          </span>
-        )}
       </span>
       <ChevronDownIcon
         data-slot="tool-group-trigger-chevron"
@@ -181,7 +173,7 @@ function ToolGroupContent({
       <div
         className={cn(
           "mt-2 flex flex-col gap-2",
-          "group-data-[variant=ghost]/tool-group-root:mt-1 group-data-[variant=ghost]/tool-group-root:gap-1",
+          "group-data-[variant=ghost]/tool-group-root:mt-1.5 group-data-[variant=ghost]/tool-group-root:gap-2",
           "group-data-[variant=outline]/tool-group-root:mt-3 group-data-[variant=outline]/tool-group-root:border-t group-data-[variant=outline]/tool-group-root:px-4 group-data-[variant=outline]/tool-group-root:pt-3",
           "group-data-[variant=muted]/tool-group-root:mt-3 group-data-[variant=muted]/tool-group-root:border-t group-data-[variant=muted]/tool-group-root:px-4 group-data-[variant=muted]/tool-group-root:pt-3",
           "[&>*]:animate-in [&>*]:fade-in-0 [&>*]:blur-in-[2px] [&>*]:slide-in-from-top-1 [&>*]:duration-(--animation-duration) [&>*]:ease-[cubic-bezier(0.32,0.72,0,1)]",

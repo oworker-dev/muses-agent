@@ -9,6 +9,17 @@ test.beforeEach(async ({ page }) => {
   threadStores.set(page, store);
   await page.route("**/api/standalone/thread-collections/**", async (route) => {
     if (route.request().method() === "PUT") {
+      if ((store.conflictsRemaining ?? 0) > 0) {
+        store.conflictsRemaining = (store.conflictsRemaining ?? 0) - 1;
+        store.revision += 1;
+        await route.fulfill({
+          body: JSON.stringify({ code: "thread_collection_conflict", ok: false }),
+          contentType: "application/json",
+          headers: { etag: `"${store.revision}"` },
+          status: 409,
+        });
+        return;
+      }
       const expected = Number((route.request().headers()["if-match"] ?? "").replaceAll('"', ""));
       if (expected !== store.revision) {
         await route.fulfill({
@@ -39,7 +50,7 @@ test("wide workspace supports navigation, search, settings, and multiple threads
   await expect(page.getByRole("heading", { name: "What should we work on?" })).toBeVisible();
   await expect(page.locator("aside").getByRole("button", { name: "New task", exact: true }).first()).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
-  await expect(page).toHaveURL(/\/threads\/[0-9a-f-]+$/);
+  await expect(page).toHaveURL(/\/$/);
 
   await page.locator("aside").getByRole("button", { name: "New task", exact: true }).first().click();
   await expect(page.locator("aside").getByText("New task", { exact: true })).toHaveCount(3);
@@ -63,7 +74,9 @@ test("wide workspace supports navigation, search, settings, and multiple threads
   await composer.press("/");
   await expect(page.getByText("技能与命令", { exact: true })).toHaveCount(0);
   await expect(composer).toHaveText("/");
-  await composer.fill("");
+  await composer.press("ControlOrMeta+A");
+  await composer.press("Backspace");
+  await expect(composer).toHaveText("");
   await composer.press("@");
   await expect(page.getByText("工作区上下文")).toBeVisible();
   await composer.press("Tab");
@@ -93,8 +106,70 @@ test("composer clears immediately while a turn is still being accepted", async (
   await composer.fill("A delayed request");
   await composer.press("Enter");
   await expect(composer).toHaveText("", { timeout: 300 });
+  await expect(page).toHaveURL(/\/threads\/[0-9a-f-]+$/);
   await expect(page.getByRole("log").getByText("A delayed request", { exact: true })).toBeVisible({ timeout: 300 });
   await expect(page.getByText("Accepted.", { exact: true })).toBeVisible({ timeout: 5_000 });
+});
+
+test("root stays clean and an unsent draft survives refresh", async ({ page }) => {
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await expect(page).toHaveURL(/\/$/);
+  await composer.fill("Keep this draft across refresh");
+  await page.waitForTimeout(350);
+  await page.reload();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("textbox", { name: "Describe a task" })).toHaveText("Keep this draft across refresh");
+});
+
+test("composer exposes assistant-ui attachments, permissions, and safe trigger selection", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Add files" })).toBeVisible();
+  const fileChooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Add files" }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles({
+    buffer: Buffer.from("attachment body"),
+    mimeType: "text/plain",
+    name: "brief.txt",
+  });
+  await expect(page.getByText("brief.txt", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Execution mode" }).click();
+  await expect(page.getByText("Work autonomously and ask before sensitive operations.")).toBeVisible();
+  await expect(page.getByText("Run sandbox workspace operations without approval; external sensitive actions remain gated.")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("@");
+  await expect(page.getByText("Workspace context")).toBeVisible();
+  await composer.press("Enter");
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("log").getByText("@", { exact: true })).toHaveCount(0);
+});
+
+test("a collection conflict reloads, merges, and retries without a permanent warning", async ({ page }) => {
+  const sessionId = "storage-conflict-session";
+  await page.route("**/eve/v1/session", (route) => route.fulfill({
+    body: JSON.stringify({ continuationToken: "storage-conflict-token", sessionId }),
+    contentType: "application/json",
+    status: 200,
+  }));
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, (route) => route.fulfill({
+    body: mockSuccessfulTurn("Persist after conflict", "Saved."),
+    contentType: "application/x-ndjson",
+    status: 200,
+  }));
+  await page.goto("/");
+  await page.waitForTimeout(350);
+  const store = threadStores.get(page)!;
+  store.conflictsRemaining = 1;
+  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await composer.fill("Persist after conflict");
+  await composer.press("Enter");
+  await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
+  await expect.poll(() => store.collection.threads.length).toBe(1);
+  await expect(page.getByRole("alert").filter({ hasText: /could not be saved/i })).toHaveCount(0);
 });
 
 test("small workspace keeps the conversation focused and opens navigation on demand", async ({ page }) => {
@@ -150,20 +225,24 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
 
 test("a real conversation survives refresh and continues with the latest token", async ({ page }) => {
   test.skip(process.env.RUN_AGENT_LIVE_E2E !== "1", "Requires a healthy live model provider.");
+  test.setTimeout(9 * 60_000);
   await page.goto("/");
   const composer = page.getByRole("textbox", { name: "Describe a task" });
 
   await composer.fill("Reply with exactly: web agent ready");
   await composer.press("Enter");
-  await expect(page.getByText("web agent ready", { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText("web agent ready", { exact: true })).toBeVisible({ timeout: 4 * 60_000 });
   await page.getByRole("button", { name: "Context" }).hover();
-  await expect(page.getByText("Cache read", { exact: true })).toBeVisible();
+  const contextTooltip = page.getByRole("tooltip");
+  await expect(contextTooltip).toContainText("Context usage");
+  await expect(contextTooltip).toContainText("Input");
+  await expect(contextTooltip).toContainText("Output");
 
   await page.reload();
   await expect(page.getByText("web agent ready", { exact: true })).toBeVisible();
   await composer.fill("Now reply exactly: continuation works");
   await composer.press("Enter");
-  await expect(page.getByText("continuation works", { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText("continuation works", { exact: true })).toBeVisible({ timeout: 4 * 60_000 });
 });
 
 test("tool work collapses into one timed execution cycle and keeps the final delivery visible", async ({ page }) => {
@@ -197,7 +276,7 @@ test("tool work collapses into one timed execution cycle and keeps the final del
 
   await execution.click();
   await expect(page.getByText("Inspecting the workspace.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: /1 tool call/u }).click();
+  await page.getByRole("button", { name: /(?:Ran|Running) 1 tool/u }).click();
   await expect(page.getByRole("button", { name: /Terminal command/u })).toBeVisible();
   await expect(page.getByText(/exitCode/u)).toHaveCount(0);
   await expect(page.locator('[data-slot="tool-group-root"][data-variant="ghost"]')).toBeVisible();
@@ -273,7 +352,7 @@ test("file patch tools render with the assistant-ui diff viewer", async ({ page 
   await composer.fill("Update the application");
   await composer.press("Enter");
   await page.getByRole("button", { name: /Worked for/u }).click();
-  await page.getByRole("button", { name: /1 tool call/u }).click();
+  await page.getByRole("button", { name: /(?:Ran|Running) 1 tool/u }).click();
   await page.getByRole("button", { name: "Edited files" }).click();
 
   const diffViewer = page.locator('[data-tool-view="diff"] [data-slot="diff-viewer"]');
@@ -294,6 +373,8 @@ test("a live autonomous website task survives refresh and publishes a usable pre
     "Work autonomously and finish by giving me the working preview link.",
   ].join(" ");
   const composer = page.getByRole("textbox", { name: "Describe a task" });
+  await page.getByRole("button", { name: "Execution mode" }).click();
+  await page.getByRole("menuitemradio").filter({ hasText: "Automation" }).click();
   await composer.fill(prompt);
   await composer.press("Enter");
   await expect(composer).toHaveText("", { timeout: 1_000 });
@@ -307,11 +388,9 @@ test("a live autonomous website task survives refresh and publishes a usable pre
   expect(page.url()).toBe(threadUrl);
   await expect(page.getByText(prompt, { exact: true })).toBeVisible({ timeout: 30_000 });
 
-  await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 18 * 60_000 });
-  const previewTool = page.getByRole("button", { name: /publish_preview/u }).last();
-  await expect(previewTool).toBeVisible();
-  await previewTool.click();
-  const previewLink = page.getByRole("link", { name: "Open preview" }).last();
+  await expect(page.getByRole("button", { name: "Stop" })).toBeHidden({ timeout: 18 * 60_000 });
+  await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+  const previewLink = page.locator('a[href*="/api/previews/"]').last();
   await expect(previewLink).toBeVisible();
   const href = await previewLink.getAttribute("href");
   expect(href).toBeTruthy();
@@ -382,9 +461,9 @@ test("a slow Provider does not force the live Agent stream into recovery", async
   await composer.fill("Run a slow task");
   await composer.press("Enter");
   await expect(composer).toBeEnabled();
-  const activity = page.getByRole("status").filter({ hasText: "Starting task" });
+  const activity = page.getByRole("status").filter({ hasText: "Thinking" });
   await expect(activity).toBeVisible();
-  await expect(activity).toHaveText("Starting task");
+  await expect(activity).toHaveText("Thinking");
   await page.waitForTimeout(8_500);
   await expect(page.getByText("Reconnecting to the active run...")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
@@ -395,8 +474,15 @@ test("a slow Provider does not force the live Agent stream into recovery", async
 test("follow-up messages queue during a run and deliver in order at the waiting boundary", async ({ page }) => {
   const sessionId = "mock-follow-up-session";
   let continuationRequests = 0;
+  let continuationAvailable = false;
   let mailboxBody: Record<string, unknown> | undefined;
   let mailboxRequests = 0;
+  const initialEvents = eventsFromNdjson(
+    mockSuccessfulTurn("Start the long task", "First turn completed."),
+  );
+  const continuationEvents = eventsFromNdjson(
+    mockContinuationTurn("Add the requested footer", "Footer added."),
+  );
 
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
@@ -432,6 +518,7 @@ test("follow-up messages queue during a run and deliver in order at the waiting 
     });
   });
   await page.route("**/api/standalone/mailbox/mail-follow-up", async (route) => {
+    continuationAvailable = true;
     await route.fulfill({
       body: JSON.stringify({
         item: {
@@ -450,18 +537,20 @@ test("follow-up messages queue during a run and deliver in order at the waiting 
     if (startIndex === 0) {
       await new Promise((resolve) => setTimeout(resolve, 4_000));
       await route.fulfill({
-        body: mockSuccessfulTurn("Start the long task", "First turn completed."),
+        body: ndjson(initialEvents),
         contentType: "application/x-ndjson",
+        headers: { "x-eve-stream-tail-index": String(initialEvents.length - 1) },
         status: 200,
       });
       return;
     }
-    const body = mockContinuationTurn("Add the requested footer", "Footer added.");
-    const eventCount = eventsFromNdjson(body).length;
+    const availableEvents = continuationAvailable
+      ? [...initialEvents, ...continuationEvents]
+      : initialEvents;
     await route.fulfill({
-      body,
+      body: ndjson(availableEvents.slice(startIndex)),
       contentType: "application/x-ndjson",
-      headers: { "x-eve-stream-tail-index": String(startIndex + eventCount - 1) },
+      headers: { "x-eve-stream-tail-index": String(availableEvents.length - 1) },
       status: 200,
     });
   });
@@ -921,7 +1010,6 @@ test("a proxied child approval stays attached to the parent task and resumes it"
   await page.goto("/threads/child-approval-thread");
   await expect(page.getByText("Waiting for approval", { exact: true })).toBeVisible();
   await expect(page.getByText("A delegated task needs your approval", { exact: true })).toBeVisible();
-  await expect(page.getByText("Sub-agent is working independently", { exact: true })).toBeVisible();
   const approve = page.getByRole("button", { name: "Approve", exact: true });
   await expect(approve).toBeEnabled();
   await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeDisabled();
@@ -932,7 +1020,7 @@ test("a proxied child approval stays attached to the parent task and resumes it"
   });
   await expect(page.getByText("The delegated task resumed and completed.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Worked for/ }).click();
-  await page.getByRole("button", { name: /1 tool call/u }).click();
+  await page.getByRole("button", { name: /(?:Ran|Running) 1 tool/u }).click();
   await page.getByRole("button", { name: /Sub-agent/u }).click();
   await expect(page.getByText("Sub-agent finished and returned its result to the parent Agent", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open sub-agents" }).click();
@@ -1210,6 +1298,7 @@ test("stop cancels server work and returns the thread to an interactive state", 
     await route.fulfill({
       body: `${events.slice(startIndex).map((event) => JSON.stringify(event)).join("\n")}\n`,
       contentType: "application/x-ndjson",
+      headers: { "x-eve-stream-tail-index": String(events.length - 1) },
       status: 200,
     });
   });
@@ -1321,6 +1410,10 @@ function eventsFromNdjson(payload: string): readonly unknown[] {
   return payload.trim().split("\n").map((line) => JSON.parse(line) as unknown);
 }
 
+function ndjson(events: readonly unknown[]): string {
+  return events.length > 0 ? `${events.map((event) => JSON.stringify(event)).join("\n")}\n` : "";
+}
+
 function mockChildApprovalEvents(): readonly unknown[] {
   const base = Date.now() - 5_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
@@ -1406,6 +1499,7 @@ type FakeThreadCollection = {
 
 type FakeThreadStore = {
   collection: FakeThreadCollection;
+  conflictsRemaining?: number;
   revision: number;
 };
 

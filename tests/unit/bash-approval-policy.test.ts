@@ -57,6 +57,25 @@ test("cautious execution mode gates otherwise safe shell commands", () => {
   );
 });
 
+test("automation permits sandbox-local cleanup but keeps external side effects gated", () => {
+  assert.equal(
+    bashApprovalDecision({
+      command: 'kill "$server_pid"',
+      executionMode: "automation",
+      mode: "risky",
+    }),
+    "not-applicable",
+  );
+  assert.equal(
+    bashApprovalDecision({
+      command: "curl -X POST https://example.com/jobs",
+      executionMode: "automation",
+      mode: "risky",
+    }),
+    "user-approval",
+  );
+});
+
 test("parses only supported shell approval modes", () => {
   assert.equal(readBashApprovalMode({}), "risky");
   assert.equal(readBashApprovalMode({ AGENT_BASH_APPROVAL_MODE: "always" }), "always");

@@ -144,7 +144,7 @@ export type AgentWorkspaceConfig = {
   readonly models: readonly AgentModelOption[];
   readonly mentions?: readonly AgentPromptMenuItem[];
   readonly onEvent?: (event: HandleMessageStreamEvent) => void;
-  readonly onActiveThreadChange?: (threadId: string) => void;
+  readonly onActiveThreadChange?: (threadId?: string) => void;
   readonly onActiveSubagentChange?: (threadId: string, sessionId?: string) => void;
   readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
   readonly onStorageError?: (error: unknown) => void;

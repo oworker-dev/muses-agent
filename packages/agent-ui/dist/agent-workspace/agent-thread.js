@@ -10,11 +10,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/colla
 import { cn } from "../utils.js";
 import { createAgentSession } from "./agent-client.js";
 import { AssistantThreadSurface } from "./assistant-thread-surface.js";
+import { sanitizeAgentError } from "./error-presentation.js";
 import { messagesFor } from "./i18n.js";
 import { appendThreadEvent, titleFromPrompt } from "./thread-storage.js";
 import { hasUnresolvedInputRequests, isProxiedInputOnlyMessage, } from "./turn-presentation.js";
 import { summarizeUsage } from "./usage.js";
-export function AgentThreadView({ client, commands, locale, mailbox, mentions, models, onChange, onEvent, onOpenSubagent, onRecoveryNeeded, providerReady, reasoningLevels, thread, }) {
+export function AgentThreadView({ client, commands, draftStorageKey, isRecovering = false, locale, mailbox, mentions, models, onChange, onEvent, onOpenSubagent, onRecoveryNeeded, providerReady, reasoningLevels, thread, }) {
     const preferencesRef = useRef(thread.preferences);
     const cancellationRef = useRef({ requested: false });
     const recoveryRequestedRef = useRef(false);
@@ -108,11 +109,13 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
         session,
     });
     const stopAgent = agent.stop;
-    const isBusy = agent.status === "submitted" || agent.status === "streaming";
+    const agentIsBusy = agent.status === "submitted" || agent.status === "streaming";
+    const isBusy = agentIsBusy || isRecovering;
+    const admissionBusy = agentIsBusy || isRecovering;
     const awaitingInput = hasUnresolvedInputRequests(agent.events);
     useEffect(() => {
-        turnAdmissionBusyRef.current = isBusy;
-    }, [isBusy]);
+        turnAdmissionBusyRef.current = admissionBusy;
+    }, [admissionBusy]);
     const requestRecovery = useCallback(() => {
         if (recoveryRequestedRef.current)
             return;
@@ -131,14 +134,16 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
     useEffect(() => {
         const lastEvent = agent.events.at(-1);
         if (agent.session.sessionId &&
+            !isRecovering &&
+            !cancellationRef.current.requested &&
             !isBusy &&
             lastEvent &&
             !isSessionBoundary(lastEvent)) {
             requestRecovery();
         }
-    }, [agent.events, agent.session.sessionId, isBusy, requestRecovery]);
+    }, [agent.events, agent.session.sessionId, isBusy, isRecovering, requestRecovery]);
     useEffect(() => {
-        if (!isBusy || !agent.session.sessionId || recoveryRequestedRef.current)
+        if (isRecovering || !agentIsBusy || !agent.session.sessionId || recoveryRequestedRef.current)
             return;
         let disposed = false;
         let timer;
@@ -164,8 +169,10 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
             disposed = true;
             window.clearTimeout(timer);
         };
-    }, [agent.events.length, agent.session.sessionId, isBusy, requestRecovery, session]);
+    }, [agent.events.length, agent.session.sessionId, agentIsBusy, isRecovering, requestRecovery, session]);
     useEffect(() => {
+        if (isRecovering)
+            return;
         const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
         const streamIndex = Math.max(agent.session.streamIndex, initialStreamIndexRef.current + consumedEvents);
         if (agent.events.length < processedEventCountRef.current) {
@@ -183,7 +190,7 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
             status: turnError ? "error" : awaitingInput ? "waiting" : agent.status,
             updatedAt: Date.now(),
         });
-    }, [agent.events, agent.session, agent.status, awaitingInput, onChange, turnError]);
+    }, [agent.events, agent.session, agent.status, awaitingInput, isRecovering, onChange, turnError]);
     const errorMessage = cancellationError ?? turnError ?? agent.error?.message;
     const usage = summarizeUsage(agent.events);
     useEffect(() => {
@@ -244,15 +251,26 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
         if (!isBusy || cancellationState !== "idle")
             return;
         cancellationRef.current.requested = true;
-        setCancellationState("requested");
-        if (cancellationRef.current.turnId)
-            cancelTurn(cancellationRef.current.turnId);
+        setCancellationState("cancelling");
+        stopAgent();
+        const turnId = cancellationRef.current.turnId;
+        void session.cancel(turnId ? { turnId } : undefined).then(() => {
+            cancellationRef.current = { requested: false };
+            setCancellationState("idle");
+            onChange({ status: "ready", updatedAt: Date.now() });
+            onRecoveryNeeded();
+        }).catch((error) => {
+            cancellationRef.current = { requested: false };
+            setCancellationError(error instanceof Error ? error.message : "Unable to stop this turn.");
+            setCancellationState("idle");
+            onRecoveryNeeded();
+        });
     };
     const submit = async (message) => {
         const text = expandPromptDirectives(message.text, commands, mentions).trim();
         if ((text.length === 0 && message.files.length === 0) || awaitingInput || !providerReady)
             return;
-        if (isBusy || turnAdmissionBusyRef.current) {
+        if (admissionBusy || turnAdmissionBusyRef.current) {
             if (message.files.length > 0) {
                 setQueueError(messages.queueAttachmentsUnsupported);
                 return;
@@ -330,6 +348,7 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
         steerItems: [],
     };
     const assistantRuntime = useExternalStoreRuntime({
+        adapters: { attachments: browserAttachmentAdapter },
         isDisabled: !providerReady || awaitingInput,
         isRunning: isBusy,
         messages: assistantMessages,
@@ -421,13 +440,13 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
         };
     }, [mailbox, thread.queuedTurns]);
     useEffect(() => {
-        if (!mailbox || isBusy || awaitingInput || recoveryRequestedRef.current ||
+        if (!mailbox || admissionBusy || awaitingInput || recoveryRequestedRef.current ||
             !queuedTurnsRef.current.some((turn) => turn.delivery === "server" && turn.state === "queued" && Boolean(turn.mailboxItemId)))
             return;
         requestRecovery();
-    }, [awaitingInput, isBusy, mailbox, requestRecovery, thread.queuedTurns]);
+    }, [admissionBusy, awaitingInput, mailbox, requestRecovery, thread.queuedTurns]);
     useEffect(() => {
-        if (isBusy || awaitingInput || !providerReady ||
+        if (admissionBusy || awaitingInput || !providerReady ||
             dispatchingQueuedTurnIdRef.current ||
             !agent.session.continuationToken)
             return;
@@ -457,7 +476,7 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
             dispatchingQueuedTurnIdRef.current = undefined;
             onChange({ pendingTurn: undefined, queuedTurns });
         });
-    }, [agent, agent.session.continuationToken, awaitingInput, isBusy, onChange, providerReady, thread.queuedTurns]);
+    }, [admissionBusy, agent, agent.session.continuationToken, awaitingInput, onChange, providerReady, thread.queuedTurns]);
     const respond = (inputResponses) => {
         prepareTurn();
         return agent.send({ inputResponses });
@@ -465,7 +484,7 @@ export function AgentThreadView({ client, commands, locale, mailbox, mentions, m
     const showPendingTurn = Boolean(thread.pendingTurn && !hasProjectedUserText(agent.data.messages, thread.pendingTurn.text));
     const activeTaskIsVisible = (isBusy || awaitingInput) && visibleMessages.some((message) => message.role === "assistant" &&
         message.parts.some((part) => part.type === "dynamic-tool"));
-    return (_jsx(AssistantRuntimeProvider, { runtime: assistantRuntime, children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx(AssistantThreadSurface, { cancellationState: cancellationState, commands: commands, events: agent.events, eveMessages: visibleMessages, fallbackStartedAt: thread.pendingTurn?.submittedAt, isBusy: isBusy, locale: locale, mentions: mentions, messages: messages, models: models, onInputResponses: respond, onOpenSubagent: onOpenSubagent, onPreferencesChange: (preferences) => onChange({ preferences }), pendingTurnText: showPendingTurn ? thread.pendingTurn?.text : undefined, preferences: thread.preferences, quietActivity: activeTaskIsVisible, reasoningLevels: reasoningLevels, usage: usage }), errorMessage ? _jsx(TurnError, { message: errorMessage, messages: messages, preserved: Boolean(thread.pendingTurn) }) : null, thread.queuedTurns.length > 0 || queueError ? _jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: removeQueuedTurn, onRetry: markQueuedTurnForRetry, turns: thread.queuedTurns }) : null] }) }));
+    return (_jsx(AssistantRuntimeProvider, { runtime: assistantRuntime, children: _jsxs("main", { className: "flex min-h-0 flex-1 flex-col overflow-hidden", children: [_jsx(AssistantThreadSurface, { cancellationState: cancellationState, commands: commands, draftStorageKey: draftStorageKey, events: agent.events, eveMessages: visibleMessages, fallbackStartedAt: thread.pendingTurn?.submittedAt, isBusy: isBusy, locale: locale, mentions: mentions, messages: messages, models: models, onInputResponses: respond, onOpenSubagent: onOpenSubagent, onPreferencesChange: (preferences) => onChange({ preferences }), pendingTurnText: showPendingTurn ? thread.pendingTurn?.text : undefined, preferences: thread.preferences, quietActivity: activeTaskIsVisible, reasoningLevels: reasoningLevels, usage: usage }), errorMessage ? _jsx(TurnError, { message: sanitizeAgentError(errorMessage), messages: messages, preserved: Boolean(thread.pendingTurn) }) : null, thread.queuedTurns.length > 0 || queueError ? _jsx(FollowUpQueue, { error: queueError, messages: messages, onRemove: removeQueuedTurn, onRetry: markQueuedTurnForRetry, turns: thread.queuedTurns }) : null] }) }));
 }
 function expandPromptDirectives(value, commands, mentions) {
     const segments = unstable_defaultDirectiveFormatter.parse(value);
@@ -498,6 +517,48 @@ function promptFromAssistantMessage(content) {
     const text = content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
     const files = content.filter((part) => part.type === "file").map((part) => ({ filename: part.filename, mediaType: part.mediaType, url: typeof part.data === "string" ? part.data : String(part.data) }));
     return { files, text };
+}
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const browserAttachmentAdapter = {
+    accept: "*",
+    async add({ file }) {
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+            throw new Error("Attachments must be 20 MB or smaller.");
+        }
+        return {
+            contentType: file.type || "application/octet-stream",
+            file,
+            id: typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `attachment-${Date.now()}`,
+            name: file.name,
+            status: { reason: "composer-send", type: "requires-action" },
+            type: file.type.startsWith("image/") ? "image" : "file",
+        };
+    },
+    async remove() {
+    },
+    async send(attachment) {
+        const data = await fileToDataUrl(attachment.file);
+        return {
+            ...attachment,
+            content: [{
+                    data,
+                    filename: attachment.name,
+                    mimeType: attachment.contentType || "application/octet-stream",
+                    type: "file",
+                }],
+            status: { type: "complete" },
+        };
+    },
+};
+function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error ?? new Error("Unable to read the attachment."));
+        reader.readAsDataURL(file);
+    });
 }
 function isSessionBoundary(event) {
     return event.type === "session.waiting" || event.type === "session.completed" || event.type === "session.failed";

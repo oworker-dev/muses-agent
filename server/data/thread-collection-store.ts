@@ -4,7 +4,7 @@ import {
   quoteIdentifier,
   readAgentDatabaseConfig,
   type AgentDatabaseConfig,
-} from "./agent-database";
+} from "./agent-database.ts";
 
 export type StoredThreadCollection<TCollection> = {
   readonly collection: TCollection;
@@ -32,8 +32,8 @@ export interface AgentThreadCollectionStore<TCollection = unknown> {
 
 export function createPostgresThreadCollectionStore<TCollection = unknown>(
   config: AgentDatabaseConfig,
+  pool: Pool = getAgentDatabasePool(config),
 ): AgentThreadCollectionStore<TCollection> {
-  const pool = getAgentDatabasePool(config);
   const table = `${quoteIdentifier(config.schema)}."agent_thread_collections"`;
   return postgresThreadCollectionStore<TCollection>(pool, table);
 }
@@ -72,7 +72,8 @@ function postgresThreadCollectionStore<TCollection>(
     async save(tenantId, principalId, storageKey, expectedRevision, collection) {
       assertScope(tenantId, principalId, storageKey);
       assertRevision(expectedRevision);
-      const serialized = JSON.stringify(collection);
+      const normalized = normalizeJsonbValue(collection);
+      const serialized = JSON.stringify(normalized);
       if (serialized === undefined) throw new Error("Thread collection must be JSON serializable.");
 
       const result = expectedRevision === 0
@@ -107,6 +108,27 @@ function postgresThreadCollectionStore<TCollection>(
       return { currentRevision: current?.revision ?? 0, status: "conflict" };
     },
   };
+}
+
+export function normalizeJsonbValue<T>(value: T): T {
+  if (typeof value === "string") {
+    return value.toWellFormed().replaceAll("\u0000", "\uFFFD") as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeJsonbValue(entry)) as T;
+  }
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, normalizeJsonbValue(entry)]),
+    ) as T;
+  }
+  return value;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function assertScope(tenantId: string, principalId: string, storageKey: string): void {

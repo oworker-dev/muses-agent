@@ -200,14 +200,14 @@ test("a root approval is not rendered twice", () => {
   assert.equal(presentation.proxiedInputParts.length, 0);
 });
 
-test("slow model and recovery labels communicate durable progress honestly", () => {
+test("normal and recovery activity use one calm thinking state without transport details", () => {
   const messages = messagesFor("en");
   const events = [event("step.started", startedAt, { sequence: 0, stepIndex: 0, turnId: "turn-task" })];
   const base = Date.parse(startedAt);
-  assert.equal(activityLabel(events, messages, { mountedAt: base, now: base + 16_000 }), messages.providerTakingLonger);
-  assert.equal(activityLabel(events, messages, { mountedAt: base, now: base + 46_000 }), messages.providerStillWaiting);
-  assert.equal(activityLabel(events, messages, { mode: "recovery", mountedAt: base, now: base + 10_000 }), messages.catchingUpDurableRun);
-  assert.equal(activityLabel(events, messages, { mode: "recovery", mountedAt: base, now: base + 46_000 }), messages.recoveryConnectionSlow);
+  assert.equal(activityLabel(events, messages, { mountedAt: base, now: base + 16_000 }), messages.thinking);
+  assert.equal(activityLabel(events, messages, { mountedAt: base, now: base + 46_000 }), messages.thinking);
+  assert.equal(activityLabel(events, messages, { mode: "recovery", mountedAt: base, now: base + 10_000 }), messages.thinking);
+  assert.equal(activityLabel(events, messages, { mode: "recovery", mountedAt: base, now: base + 46_000 }), messages.thinking);
 });
 
 test("context usage moves during a streamed step and reconciles to Provider usage", () => {

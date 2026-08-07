@@ -45,6 +45,7 @@ export type ContextDisplayLabels = {
   readonly of: string;
   readonly output: string;
   readonly reasoning: string;
+  readonly sessionUsage: string;
 };
 
 const defaultLabels: ContextDisplayLabels = {
@@ -54,6 +55,7 @@ const defaultLabels: ContextDisplayLabels = {
   of: "of",
   output: "Output",
   reasoning: "Reasoning",
+  sessionUsage: "Session usage",
 };
 
 const getUsageSeverity = (percent: number): UsageSeverity => {
@@ -79,6 +81,7 @@ const getBarColor = (percent: number): string => {
 type ContextDisplayContextValue = {
   labels: ContextDisplayLabels;
   usage: ThreadTokenUsage | undefined;
+  sessionUsage: ThreadTokenUsage | undefined;
   totalTokens: number;
   percent: number;
   modelContextWindow: number;
@@ -103,6 +106,7 @@ type PresetProps = {
   labels?: Partial<ContextDisplayLabels>;
   side?: "top" | "bottom" | "left" | "right";
   usage?: ThreadTokenUsage | undefined;
+  sessionUsage?: ThreadTokenUsage | undefined;
 };
 
 type ContextDisplayRootProps = {
@@ -110,6 +114,7 @@ type ContextDisplayRootProps = {
   children: ReactNode;
   labels?: Partial<ContextDisplayLabels>;
   usage?: ThreadTokenUsage | undefined;
+  sessionUsage?: ThreadTokenUsage | undefined;
 };
 
 function ContextDisplayRootBase({
@@ -117,11 +122,13 @@ function ContextDisplayRootBase({
   children,
   labels: labelOverrides,
   usage,
+  sessionUsage,
 }: {
   modelContextWindow: number;
   children: ReactNode;
   labels: Partial<ContextDisplayLabels> | undefined;
   usage: ThreadTokenUsage | undefined;
+  sessionUsage: ThreadTokenUsage | undefined;
 }) {
   const threadId = useAuiState((s) => s.threadListItem.id);
   const rawTokens = usage?.totalTokens ?? 0;
@@ -161,11 +168,12 @@ function ContextDisplayRootBase({
     () => ({
       labels,
       usage: tokenState.usage,
+      sessionUsage,
       totalTokens,
       percent,
       modelContextWindow,
     }),
-    [labels, tokenState.usage, totalTokens, percent, modelContextWindow],
+    [labels, modelContextWindow, percent, sessionUsage, tokenState.usage, totalTokens],
   );
 
   return (
@@ -192,6 +200,7 @@ function ContextDisplayRootInternal({
       modelContextWindow={modelContextWindow}
       labels={labels}
       usage={usage}
+      sessionUsage={usage}
     >
       {children}
     </ContextDisplayRootBase>
@@ -205,6 +214,7 @@ function ContextDisplayRoot(props: ContextDisplayRootProps) {
         modelContextWindow={props.modelContextWindow}
         labels={props.labels}
         usage={props.usage}
+        sessionUsage={props.sessionUsage}
       >
         {props.children}
       </ContextDisplayRootBase>
@@ -264,9 +274,9 @@ function ContextDisplayContent({
   side?: "top" | "bottom" | "left" | "right" | undefined;
   className?: string;
 }) {
-  const { labels, usage, totalTokens, percent, modelContextWindow } =
+  const { labels, sessionUsage, totalTokens, percent, modelContextWindow } =
     useContextDisplay();
-  const segments = getContextSegments(usage, labels);
+  const segments = getContextSegments(sessionUsage, labels);
 
   return (
     <TooltipContent
@@ -299,6 +309,7 @@ function ContextDisplayContent({
         </div>
         {segments.length > 0 && (
           <div className="mt-3 grid gap-1.5">
+            <span className="font-medium">{labels.sessionUsage}</span>
             {segments.map((segment) => (
               <div
                 key={segment.label}
@@ -361,20 +372,16 @@ function RingVisual() {
   );
 }
 
-function RingPercentLabel() {
-  const { percent } = useContextDisplay();
-  return <span className="font-mono tabular-nums">{Math.round(percent)}%</span>;
-}
-
 const ContextDisplayRing: FC<PresetProps> = ({
   modelContextWindow,
   className,
   label = "Context usage",
   labels,
   side,
+  sessionUsage,
   usage,
 }) => (
-  <ContextDisplayRoot labels={labels} modelContextWindow={modelContextWindow} usage={usage}>
+  <ContextDisplayRoot labels={labels} modelContextWindow={modelContextWindow} sessionUsage={sessionUsage} usage={usage}>
     <ContextDisplayTrigger
       className={cn(
         "text-muted-foreground hover:text-foreground gap-1.5 px-1.5 py-1 text-xs",
@@ -383,7 +390,6 @@ const ContextDisplayRing: FC<PresetProps> = ({
       aria-label={label}
     >
       <RingVisual />
-      <RingPercentLabel />
     </ContextDisplayTrigger>
     <ContextDisplayContent side={side} />
   </ContextDisplayRoot>
@@ -416,9 +422,10 @@ const ContextDisplayBar: FC<PresetProps> = ({
   label = "Context usage",
   labels,
   side,
+  sessionUsage,
   usage,
 }) => (
-  <ContextDisplayRoot labels={labels} modelContextWindow={modelContextWindow} usage={usage}>
+  <ContextDisplayRoot labels={labels} modelContextWindow={modelContextWindow} sessionUsage={sessionUsage} usage={usage}>
     <ContextDisplayTrigger
       className={cn("px-2 py-1", className)}
       aria-label={label}
@@ -445,9 +452,10 @@ const ContextDisplayText: FC<PresetProps> = ({
   label = "Context usage",
   labels,
   side,
+  sessionUsage,
   usage,
 }) => (
-  <ContextDisplayRoot labels={labels} modelContextWindow={modelContextWindow} usage={usage}>
+  <ContextDisplayRoot labels={labels} modelContextWindow={modelContextWindow} sessionUsage={sessionUsage} usage={usage}>
     <ContextDisplayTrigger
       aria-label={label}
       className={cn(

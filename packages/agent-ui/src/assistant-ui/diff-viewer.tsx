@@ -443,6 +443,7 @@ export type DiffViewerProps = Partial<SyntaxHighlighterProps> &
     showIcon?: boolean;
     showStats?: boolean;
     className?: string;
+    contentClassName?: string;
   };
 
 function DiffViewer({
@@ -457,6 +458,7 @@ function DiffViewer({
   variant,
   size,
   className,
+  contentClassName,
 }: DiffViewerProps) {
   const diffPatch = patch ?? code;
   const oldContent = oldFile?.content;
@@ -524,7 +526,7 @@ function DiffViewer({
             showIcon={showIcon}
             showStats={showStats}
           />
-          <div data-slot="diff-viewer-content" className="overflow-x-auto">
+          <div data-slot="diff-viewer-content" className={cn("overflow-x-auto", contentClassName)}>
             {viewMode === "split"
               ? (splitLinePairs[fileIndex] ?? []).map((pair, pairIndex) => (
                   <DiffViewerSplitLine

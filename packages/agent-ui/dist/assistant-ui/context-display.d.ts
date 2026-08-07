@@ -7,6 +7,7 @@ export type ContextDisplayLabels = {
     readonly of: string;
     readonly output: string;
     readonly reasoning: string;
+    readonly sessionUsage: string;
 };
 type PresetProps = {
     modelContextWindow: number;
@@ -15,12 +16,14 @@ type PresetProps = {
     labels?: Partial<ContextDisplayLabels>;
     side?: "top" | "bottom" | "left" | "right";
     usage?: ThreadTokenUsage | undefined;
+    sessionUsage?: ThreadTokenUsage | undefined;
 };
 type ContextDisplayRootProps = {
     modelContextWindow: number;
     children: ReactNode;
     labels?: Partial<ContextDisplayLabels>;
     usage?: ThreadTokenUsage | undefined;
+    sessionUsage?: ThreadTokenUsage | undefined;
 };
 declare function ContextDisplayRoot(props: ContextDisplayRootProps): import("react/jsx-runtime").JSX.Element;
 declare function ContextDisplayTrigger({ className, children, ...props }: React.ComponentProps<"button">): import("react/jsx-runtime").JSX.Element;

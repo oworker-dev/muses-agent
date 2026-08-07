@@ -19,7 +19,7 @@ export declare function AgentWorkspace({ client, commands, defaultPreferences, e
     readonly onEvent?: (event: HandleMessageStreamEvent) => void;
     readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
     readonly onActiveSubagentChange?: (threadId: string, sessionId?: string) => void;
-    readonly onActiveThreadChange?: (threadId: string) => void;
+    readonly onActiveThreadChange?: (threadId?: string) => void;
     readonly onStorageError?: (error: unknown) => void;
     readonly productName?: string;
     readonly reasoningLevels: readonly string[];

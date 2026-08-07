@@ -2,6 +2,7 @@
 
 import {
   ActionBarPrimitive,
+  AttachmentPrimitive,
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
@@ -19,7 +20,9 @@ import {
   CheckIcon,
   CopyIcon,
   LoaderCircleIcon,
+  PaperclipIcon,
   PencilIcon,
+  ShieldCheckIcon,
   SlashIcon,
   SquareIcon,
   WrenchIcon,
@@ -33,9 +36,17 @@ import { ModelSelector, type ModelOption } from "../assistant-ui/model-selector.
 import { ToolFallback } from "../assistant-ui/tool-fallback.js";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.js";
 import { Button } from "../ui/button.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu.js";
 import { AgentActivity } from "./agent-activity.js";
 import { AgentMessage, type AgentInputResponse } from "./agent-message.js";
-import type { AgentModelOption, AgentPromptMenuItem, AgentThreadPreferences } from "./contracts.js";
+import type { AgentExecutionMode, AgentModelOption, AgentPromptMenuItem, AgentThreadPreferences } from "./contracts.js";
 import type { AgentLocale, AgentMessages } from "./i18n.js";
 import type { AgentUsageSummary } from "./usage.js";
 
@@ -44,6 +55,7 @@ export type AgentCancellationState = "idle" | "requested" | "cancelling";
 export function AssistantThreadSurface({
   cancellationState,
   commands,
+  draftStorageKey,
   events,
   eveMessages,
   fallbackStartedAt,
@@ -63,6 +75,7 @@ export function AssistantThreadSurface({
 }: {
   readonly cancellationState: AgentCancellationState;
   readonly commands: readonly AgentPromptMenuItem[];
+  readonly draftStorageKey: string;
   readonly events: readonly HandleMessageStreamEvent[];
   readonly eveMessages: readonly EveMessage[];
   readonly fallbackStartedAt?: number;
@@ -128,7 +141,7 @@ export function AssistantThreadSurface({
           {!pendingTurnText && !isBusy ? <AssistantEmptyState messages={messages} /> : null}
         </ThreadPrimitive.Empty>
 
-        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col bg-background pb-4 pt-5 md:pb-6">
+        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col bg-background pb-4 pt-5 md:pb-6">
           <ThreadPrimitive.ScrollToBottom asChild>
             <TooltipIconButton
               tooltip={locale === "zh-CN" ? "滚动到底部" : "Scroll to bottom"}
@@ -141,6 +154,7 @@ export function AssistantThreadSurface({
           <AssistantComposer
             cancellationState={cancellationState}
             commands={commands}
+            draftStorageKey={draftStorageKey}
             locale={locale}
             mentions={mentions}
             messages={messages}
@@ -167,19 +181,22 @@ function UserMessage({ messages }: { readonly messages: AgentMessages }) {
       <div className="max-w-[min(44rem,88%)] rounded-2xl bg-muted/75 px-4 py-3 text-[15px] leading-6 text-foreground">
         <MessagePrimitive.Parts components={{ Text: DirectiveText }} />
       </div>
-      {isLastUserMessage ? (
-        <ActionBarPrimitive.Root
-          autohide="always"
-          className="mt-0.5 flex min-h-7 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-        >
+      <ActionBarPrimitive.Root
+        className="mt-0.5 flex min-h-7 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+          <ActionBarPrimitive.Copy
+            aria-label={messages.copyResponse}
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <CopyIcon className="size-3.5" />
+          </ActionBarPrimitive.Copy>
           <ActionBarPrimitive.Edit
             aria-label={messages.editMessage}
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+            className={`inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground ${isLastUserMessage ? "" : "invisible pointer-events-none"}`}
           >
             <PencilIcon className="size-3.5" />
           </ActionBarPrimitive.Edit>
-        </ActionBarPrimitive.Root>
-      ) : null}
+      </ActionBarPrimitive.Root>
     </MessagePrimitive.Root>
   );
 }
@@ -271,6 +288,7 @@ function EditMessage({ messages }: { readonly messages: AgentMessages }) {
 export function AssistantComposer({
   cancellationState,
   commands,
+  draftStorageKey,
   inputDisabled = false,
   locale,
   mentions,
@@ -283,6 +301,7 @@ export function AssistantComposer({
 }: {
   readonly cancellationState: AgentCancellationState;
   readonly commands: readonly AgentPromptMenuItem[];
+  readonly draftStorageKey: string;
   readonly inputDisabled?: boolean;
   readonly locale: AgentLocale;
   readonly mentions: readonly AgentPromptMenuItem[];
@@ -296,10 +315,34 @@ export function AssistantComposer({
   const aui = useAui();
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const composerIsEmpty = useAuiState((state) => state.composer.isEmpty);
+  const composerText = useAuiState((state) => state.composer.text);
   const runtimeInputDisabled = useAuiState((state) => state.thread.isDisabled);
   const stopping = cancellationState !== "idle";
   const composerDisabled = inputDisabled || runtimeInputDisabled || stopping;
   const composerInputRef = useRef<HTMLDivElement>(null);
+  const auiRef = useRef(aui);
+  const draftHydrationRef = useRef<{ readonly key: string; readonly text: string } | undefined>(undefined);
+  const previousDraftKeyRef = useRef<string | undefined>(undefined);
+  auiRef.current = aui;
+  useEffect(() => {
+    if (previousDraftKeyRef.current && previousDraftKeyRef.current !== draftStorageKey) {
+      window.localStorage.removeItem(previousDraftKeyRef.current);
+    }
+    previousDraftKeyRef.current = draftStorageKey;
+    const savedDraft = window.localStorage.getItem(draftStorageKey) ?? "";
+    draftHydrationRef.current = { key: draftStorageKey, text: savedDraft };
+    const composer = auiRef.current.composer;
+    if (composer.getState().text !== savedDraft) composer.setText(savedDraft);
+  }, [draftStorageKey]);
+  useEffect(() => {
+    const hydration = draftHydrationRef.current;
+    if (hydration?.key === draftStorageKey) {
+      if (composerText !== hydration.text) return;
+      draftHydrationRef.current = undefined;
+    }
+    if (composerText) window.localStorage.setItem(draftStorageKey, composerText);
+    else window.localStorage.removeItem(draftStorageKey);
+  }, [composerText, draftStorageKey]);
   useEffect(() => {
     const input = composerInputRef.current?.querySelector<HTMLElement>('[role="textbox"]');
     if (!input) return;
@@ -346,13 +389,17 @@ export function AssistantComposer({
     of: messages.tokenUsageOf,
     output: messages.outputTokens,
     reasoning: messages.reasoning,
+    sessionUsage: messages.sessionUsage,
   };
   const contextUsage = {
+    totalTokens: usage.contextInputTokens,
+  };
+  const sessionUsage = {
     cachedInputTokens: usage.cacheReadTokens,
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     reasoningTokens: 0,
-    totalTokens: usage.contextInputTokens,
+    totalTokens: usage.inputTokens + usage.outputTokens,
   };
 
   return (
@@ -365,19 +412,39 @@ export function AssistantComposer({
         }}
       >
         <div className="flex w-full flex-col gap-2 rounded-2xl border border-border/70 bg-background p-2 shadow-[0_4px_18px_-12px_rgba(0,0,0,0.2)]">
+          <ComposerPrimitive.Attachments>
+            {({ attachment }) => (
+              <AttachmentPrimitive.Root className="group/attachment mr-1.5 inline-flex max-w-full items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs">
+                <span className="max-w-52 truncate">{attachment.name}</span>
+                <AttachmentPrimitive.Remove aria-label={messages.removeAttachment} className="rounded-sm text-muted-foreground hover:text-foreground">
+                  <span aria-hidden>×</span>
+                </AttachmentPrimitive.Remove>
+              </AttachmentPrimitive.Root>
+            )}
+          </ComposerPrimitive.Attachments>
           <LexicalComposerInput
             aria-disabled={composerDisabled}
             directiveChip={DirectiveChip}
             placeholder={`${messages.inputPlaceholder}  (@ /)`}
             ref={composerInputRef}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || composerDisabled || composerIsEmpty) return;
+            onKeyDownCapture={(event) => {
+              if (!isRunning || event.key !== "Enter" || event.shiftKey || composerDisabled || composerIsEmpty) return;
+              const input = event.target instanceof HTMLElement
+                ? event.target.closest<HTMLElement>('[role="textbox"]')
+                : null;
+              if (input?.getAttribute("aria-expanded") === "true") return;
               event.preventDefault();
               aui.composer.send();
             }}
             className="aui-composer-input relative max-h-40 min-h-12 w-full resize-none overflow-y-auto bg-transparent px-2 py-1 text-[15px] leading-6 outline-none aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_.aui-directive-chip]:inline-flex [&_.aui-directive-chip]:items-center [&_.aui-directive-chip]:gap-1 [&_.aui-directive-chip]:rounded-md [&_.aui-directive-chip]:bg-muted [&_.aui-directive-chip]:px-1.5 [&_.aui-directive-chip]:py-0.5 [&_.aui-directive-chip]:text-[13px] [&_.aui-directive-chip]:font-medium [&_.aui-directive-chip]:text-foreground [&_.aui-directive-chip-icon]:text-muted-foreground [&_.aui-lexical-input]:min-h-6 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:inset-x-0 [&_.aui-lexical-placeholder]:top-0 [&_.aui-lexical-placeholder]:truncate [&_.aui-lexical-placeholder]:px-2 [&_.aui-lexical-placeholder]:py-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
           />
           <div className="flex min-h-8 items-center gap-1">
+            <ComposerPrimitive.AddAttachment asChild>
+              <Button aria-label={messages.addFiles} className="size-8 rounded-full text-muted-foreground" size="icon-sm" type="button" variant="ghost">
+                <PaperclipIcon className="size-4" />
+              </Button>
+            </ComposerPrimitive.AddAttachment>
+            <ExecutionModeMenu messages={messages} onChange={(executionMode) => onPreferencesChange({ ...preferences, executionMode })} value={preferences.executionMode ?? "standard"} />
             <ModelSelector
               align="start"
               className="h-8 max-w-56 rounded-full text-muted-foreground"
@@ -401,6 +468,7 @@ export function AssistantComposer({
                   labels={contextLabels}
                   modelContextWindow={model.contextWindowTokens}
                   side="top"
+                  sessionUsage={sessionUsage}
                   usage={contextUsage}
                 />
               ) : null}
@@ -450,6 +518,50 @@ function DirectiveChip({ directiveId, directiveType, label }: DirectiveChipProps
       <Icon className="aui-directive-chip-icon size-3" />
       <span>{label}</span>
     </span>
+  );
+}
+
+function ExecutionModeMenu({
+  messages,
+  onChange,
+  value,
+}: {
+  readonly messages: AgentMessages;
+  readonly onChange: (value: AgentExecutionMode) => void;
+  readonly value: AgentExecutionMode;
+}) {
+  const options: readonly {
+    readonly description: string;
+    readonly label: string;
+    readonly value: AgentExecutionMode;
+  }[] = [
+    { description: messages.executionStandardDescription, label: messages.executionStandard, value: "standard" },
+    { description: messages.executionAutomationDescription, label: messages.executionAutomation, value: "automation" },
+    { description: messages.executionCautiousDescription, label: messages.executionCautious, value: "cautious" },
+  ];
+  const selected = options.find((option) => option.value === value) ?? options[0]!;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button aria-label={messages.executionMode} className="h-8 max-w-40 gap-1.5 rounded-full px-2.5 text-muted-foreground" type="button" variant="ghost">
+          <ShieldCheckIcon className="size-4" />
+          <span className="hidden truncate text-xs sm:inline">{selected.label}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-80" side="top">
+        <DropdownMenuLabel>{messages.executionMode}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup onValueChange={(next) => onChange(next as AgentExecutionMode)} value={value}>
+          {options.map((option) => (
+            <DropdownMenuRadioItem className="items-start py-2" key={option.value} value={option.value}>
+              <span className="min-w-0">
+                <span className="block font-medium text-foreground">{option.label}</span>
+                <span className="mt-0.5 block whitespace-normal text-xs leading-4 text-muted-foreground">{option.description}</span>
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

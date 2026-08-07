@@ -1,0 +1,1 @@
+{"version":3,"file":"error-presentation.js","sourceRoot":"","sources":["../../src/agent-workspace/error-presentation.ts"],"names":[],"mappings":"AAAA,MAAM,UAAU,kBAAkB,CAAC,OAAe;IAChD,OAAO,OAAO;SACX,OAAO,CAAC,uEAAuE,EAAE,YAAY,CAAC;SAC9F,OAAO,CAAC,6BAA6B,EAAE,4BAA4B,CAAC,CAAC;AAC1E,CAAC"}

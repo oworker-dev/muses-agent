@@ -24,6 +24,7 @@ const defaultLabels = {
     of: "of",
     output: "Output",
     reasoning: "Reasoning",
+    sessionUsage: "Session usage",
 };
 const getUsageSeverity = (percent) => {
     if (percent > 85)
@@ -56,7 +57,7 @@ function useContextDisplay() {
     }
     return ctx;
 }
-function ContextDisplayRootBase({ modelContextWindow, children, labels: labelOverrides, usage, }) {
+function ContextDisplayRootBase({ modelContextWindow, children, labels: labelOverrides, usage, sessionUsage, }) {
     const threadId = useAuiState((s) => s.threadListItem.id);
     const rawTokens = usage?.totalTokens ?? 0;
     const [tokenState, setTokenState] = useState({
@@ -88,19 +89,20 @@ function ContextDisplayRootBase({ modelContextWindow, children, labels: labelOve
     const contextValue = useMemo(() => ({
         labels,
         usage: tokenState.usage,
+        sessionUsage,
         totalTokens,
         percent,
         modelContextWindow,
-    }), [labels, tokenState.usage, totalTokens, percent, modelContextWindow]);
+    }), [labels, modelContextWindow, percent, sessionUsage, tokenState.usage, totalTokens]);
     return (_jsx(ContextDisplayContext.Provider, { value: contextValue, children: _jsx(TooltipProvider, { children: _jsx(Tooltip, { children: children }) }) }));
 }
 function ContextDisplayRootInternal({ modelContextWindow, children, labels, }) {
     const usage = useThreadTokenUsage();
-    return (_jsx(ContextDisplayRootBase, { modelContextWindow: modelContextWindow, labels: labels, usage: usage, children: children }));
+    return (_jsx(ContextDisplayRootBase, { modelContextWindow: modelContextWindow, labels: labels, usage: usage, sessionUsage: usage, children: children }));
 }
 function ContextDisplayRoot(props) {
     if (props.usage !== undefined) {
-        return (_jsx(ContextDisplayRootBase, { modelContextWindow: props.modelContextWindow, labels: props.labels, usage: props.usage, children: props.children }));
+        return (_jsx(ContextDisplayRootBase, { modelContextWindow: props.modelContextWindow, labels: props.labels, usage: props.usage, sessionUsage: props.sessionUsage, children: props.children }));
     }
     return (_jsx(ContextDisplayRootInternal, { modelContextWindow: props.modelContextWindow, labels: props.labels, children: props.children }));
 }
@@ -118,9 +120,9 @@ const getContextSegments = (usage, labels) => {
     ].filter((segment) => segment.tokens > 0);
 };
 function ContextDisplayContent({ side = "top", className, }) {
-    const { labels, usage, totalTokens, percent, modelContextWindow } = useContextDisplay();
-    const segments = getContextSegments(usage, labels);
-    return (_jsx(TooltipContent, { side: side, sideOffset: 8, hideArrow: true, "data-slot": "context-display-popover", className: cn("bg-popover text-popover-foreground w-56 rounded-lg border p-3 text-left shadow-md", className), children: _jsxs("div", { className: "text-xs", children: [_jsxs("div", { className: "flex items-baseline justify-between gap-6 whitespace-nowrap", children: [_jsx("span", { className: "font-medium", children: labels.contextUsage }), _jsxs("span", { className: "text-muted-foreground tabular-nums", children: [formatTokenCount(Math.min(totalTokens, modelContextWindow)), " ", labels.of, " ", formatTokenCount(modelContextWindow)] })] }), _jsx("div", { className: "bg-muted mt-2.5 h-1 overflow-hidden rounded-full", children: _jsx("div", { className: cn("h-full w-(--usage-width) rounded-full transition-[width] duration-300", totalTokens > 0 && "min-w-1", getBarColor(percent)), style: { "--usage-width": `${percent}%` } }) }), segments.length > 0 && (_jsx("div", { className: "mt-3 grid gap-1.5", children: segments.map((segment) => (_jsxs("div", { className: "flex items-baseline justify-between gap-6", children: [_jsx("span", { className: "text-muted-foreground", children: segment.label }), _jsx("span", { className: "tabular-nums", children: formatTokenCount(segment.tokens) })] }, segment.label))) }))] }) }));
+    const { labels, sessionUsage, totalTokens, percent, modelContextWindow } = useContextDisplay();
+    const segments = getContextSegments(sessionUsage, labels);
+    return (_jsx(TooltipContent, { side: side, sideOffset: 8, hideArrow: true, "data-slot": "context-display-popover", className: cn("bg-popover text-popover-foreground w-56 rounded-lg border p-3 text-left shadow-md", className), children: _jsxs("div", { className: "text-xs", children: [_jsxs("div", { className: "flex items-baseline justify-between gap-6 whitespace-nowrap", children: [_jsx("span", { className: "font-medium", children: labels.contextUsage }), _jsxs("span", { className: "text-muted-foreground tabular-nums", children: [formatTokenCount(Math.min(totalTokens, modelContextWindow)), " ", labels.of, " ", formatTokenCount(modelContextWindow)] })] }), _jsx("div", { className: "bg-muted mt-2.5 h-1 overflow-hidden rounded-full", children: _jsx("div", { className: cn("h-full w-(--usage-width) rounded-full transition-[width] duration-300", totalTokens > 0 && "min-w-1", getBarColor(percent)), style: { "--usage-width": `${percent}%` } }) }), segments.length > 0 && (_jsxs("div", { className: "mt-3 grid gap-1.5", children: [_jsx("span", { className: "font-medium", children: labels.sessionUsage }), segments.map((segment) => (_jsxs("div", { className: "flex items-baseline justify-between gap-6", children: [_jsx("span", { className: "text-muted-foreground", children: segment.label }), _jsx("span", { className: "tabular-nums", children: formatTokenCount(segment.tokens) })] }, segment.label)))] }))] }) }));
 }
 const RING_SIZE = 18;
 const RING_STROKE = 2.5;
@@ -130,21 +132,17 @@ function RingVisual() {
     const { percent } = useContextDisplay();
     return (_jsxs("svg", { "aria-hidden": "true", width: RING_SIZE, height: RING_SIZE, viewBox: `0 0 ${RING_SIZE} ${RING_SIZE}`, className: "-rotate-90", children: [_jsx("circle", { cx: RING_SIZE / 2, cy: RING_SIZE / 2, r: RING_RADIUS, fill: "none", strokeWidth: RING_STROKE, className: "stroke-muted-foreground/25" }), _jsx("circle", { cx: RING_SIZE / 2, cy: RING_SIZE / 2, r: RING_RADIUS, fill: "none", strokeWidth: RING_STROKE, strokeLinecap: "round", strokeDasharray: RING_CIRCUMFERENCE, strokeDashoffset: RING_CIRCUMFERENCE - (percent / 100) * RING_CIRCUMFERENCE, className: cn("transition-[stroke-dashoffset,stroke] duration-300", getStrokeColor(percent)) })] }));
 }
-function RingPercentLabel() {
-    const { percent } = useContextDisplay();
-    return _jsxs("span", { className: "font-mono tabular-nums", children: [Math.round(percent), "%"] });
-}
-const ContextDisplayRing = ({ modelContextWindow, className, label = "Context usage", labels, side, usage, }) => (_jsxs(ContextDisplayRoot, { labels: labels, modelContextWindow: modelContextWindow, usage: usage, children: [_jsxs(ContextDisplayTrigger, { className: cn("text-muted-foreground hover:text-foreground gap-1.5 px-1.5 py-1 text-xs", className), "aria-label": label, children: [_jsx(RingVisual, {}), _jsx(RingPercentLabel, {})] }), _jsx(ContextDisplayContent, { side: side })] }));
+const ContextDisplayRing = ({ modelContextWindow, className, label = "Context usage", labels, side, sessionUsage, usage, }) => (_jsxs(ContextDisplayRoot, { labels: labels, modelContextWindow: modelContextWindow, sessionUsage: sessionUsage, usage: usage, children: [_jsx(ContextDisplayTrigger, { className: cn("text-muted-foreground hover:text-foreground gap-1.5 px-1.5 py-1 text-xs", className), "aria-label": label, children: _jsx(RingVisual, {}) }), _jsx(ContextDisplayContent, { side: side })] }));
 function BarVisual() {
     const { percent, totalTokens } = useContextDisplay();
     return (_jsxs("div", { className: "flex items-center gap-2", children: [_jsx("div", { className: "bg-muted h-1.5 w-16 overflow-hidden rounded-full", children: _jsx("div", { className: cn("h-full rounded-full transition-all duration-300", getBarColor(percent)), style: { width: `${percent}%` } }) }), _jsxs("span", { className: "text-muted-foreground text-[10px] tabular-nums", children: [formatTokenCount(totalTokens), " (", Math.round(percent), "%)"] })] }));
 }
-const ContextDisplayBar = ({ modelContextWindow, className, label = "Context usage", labels, side, usage, }) => (_jsxs(ContextDisplayRoot, { labels: labels, modelContextWindow: modelContextWindow, usage: usage, children: [_jsx(ContextDisplayTrigger, { className: cn("px-2 py-1", className), "aria-label": label, children: _jsx(BarVisual, {}) }), _jsx(ContextDisplayContent, { side: side })] }));
+const ContextDisplayBar = ({ modelContextWindow, className, label = "Context usage", labels, side, sessionUsage, usage, }) => (_jsxs(ContextDisplayRoot, { labels: labels, modelContextWindow: modelContextWindow, sessionUsage: sessionUsage, usage: usage, children: [_jsx(ContextDisplayTrigger, { className: cn("px-2 py-1", className), "aria-label": label, children: _jsx(BarVisual, {}) }), _jsx(ContextDisplayContent, { side: side })] }));
 function TextVisual() {
     const { totalTokens, modelContextWindow } = useContextDisplay();
     return (_jsxs(_Fragment, { children: [formatTokenCount(totalTokens), " / ", formatTokenCount(modelContextWindow)] }));
 }
-const ContextDisplayText = ({ modelContextWindow, className, label = "Context usage", labels, side, usage, }) => (_jsxs(ContextDisplayRoot, { labels: labels, modelContextWindow: modelContextWindow, usage: usage, children: [_jsx(ContextDisplayTrigger, { "aria-label": label, className: cn("text-muted-foreground hover:bg-accent hover:text-accent-foreground px-2 py-1 font-mono text-xs tabular-nums", className), children: _jsx(TextVisual, {}) }), _jsx(ContextDisplayContent, { side: side })] }));
+const ContextDisplayText = ({ modelContextWindow, className, label = "Context usage", labels, side, sessionUsage, usage, }) => (_jsxs(ContextDisplayRoot, { labels: labels, modelContextWindow: modelContextWindow, sessionUsage: sessionUsage, usage: usage, children: [_jsx(ContextDisplayTrigger, { "aria-label": label, className: cn("text-muted-foreground hover:bg-accent hover:text-accent-foreground px-2 py-1 font-mono text-xs tabular-nums", className), children: _jsx(TextVisual, {}) }), _jsx(ContextDisplayContent, { side: side })] }));
 const ContextDisplay = {};
 ContextDisplay.Root = ContextDisplayRoot;
 ContextDisplay.Trigger = ContextDisplayTrigger;

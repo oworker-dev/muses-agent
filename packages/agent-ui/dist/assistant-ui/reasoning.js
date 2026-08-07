@@ -2,7 +2,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, } from "react";
 import { cva } from "class-variance-authority";
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useScrollLock, useAuiState, } from "@assistant-ui/react";
 import { MarkdownText } from "./markdown-text.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, } from "../ui/collapsible.js";
@@ -60,7 +60,7 @@ function ReasoningFade({ side = "bottom", className, ...props }) {
 function ReasoningTrigger({ active, duration, label = "Reasoning", className, ...props }) {
     const durationText = duration !== undefined ? ` (${duration}s)` : "";
     const displayLabel = typeof label === "string" ? `${label}${durationText}` : label;
-    return (_jsxs(CollapsibleTrigger, { "data-slot": "reasoning-trigger", className: cn("aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]", className), ...props, children: [_jsx(BrainIcon, { "data-slot": "reasoning-trigger-icon", className: "aui-reasoning-trigger-icon size-4 shrink-0" }), _jsxs("span", { "data-slot": "reasoning-trigger-label", className: "aui-reasoning-trigger-label-wrapper relative inline-block whitespace-nowrap leading-none tabular-nums", children: [_jsx("span", { children: displayLabel }), active ? (_jsx("span", { "aria-hidden": true, "data-slot": "reasoning-trigger-shimmer", className: "aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none", children: displayLabel })) : null] }), _jsx(ChevronDownIcon, { "data-slot": "reasoning-trigger-chevron", className: cn("aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0", "transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none", "-rotate-90", "group-data-open/trigger:rotate-0", "group-data-panel-open/trigger:rotate-0") })] }));
+    return (_jsxs(CollapsibleTrigger, { "data-slot": "reasoning-trigger", className: cn("aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]", className), ...props, children: [_jsxs("span", { "data-slot": "reasoning-trigger-label", className: "aui-reasoning-trigger-label-wrapper relative inline-block whitespace-nowrap leading-none tabular-nums", children: [_jsx("span", { children: displayLabel }), active ? (_jsx("span", { "aria-hidden": true, "data-slot": "reasoning-trigger-shimmer", className: "aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none", children: displayLabel })) : null] }), _jsx(ChevronDownIcon, { "data-slot": "reasoning-trigger-chevron", className: cn("aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0", "transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none", "-rotate-90", "group-data-open/trigger:rotate-0", "group-data-panel-open/trigger:rotate-0") })] }));
 }
 function ReasoningContent({ className, children, ...props }) {
     const isPreview = useContext(ReasoningPreviewContext);

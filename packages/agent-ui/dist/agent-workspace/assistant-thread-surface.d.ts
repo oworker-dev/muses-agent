@@ -5,9 +5,10 @@ import type { AgentModelOption, AgentPromptMenuItem, AgentThreadPreferences } fr
 import type { AgentLocale, AgentMessages } from "./i18n.js";
 import type { AgentUsageSummary } from "./usage.js";
 export type AgentCancellationState = "idle" | "requested" | "cancelling";
-export declare function AssistantThreadSurface({ cancellationState, commands, events, eveMessages, fallbackStartedAt, isBusy, locale, mentions, messages, models, onInputResponses, onOpenSubagent, onPreferencesChange, pendingTurnText, preferences, quietActivity, reasoningLevels, usage, }: {
+export declare function AssistantThreadSurface({ cancellationState, commands, draftStorageKey, events, eveMessages, fallbackStartedAt, isBusy, locale, mentions, messages, models, onInputResponses, onOpenSubagent, onPreferencesChange, pendingTurnText, preferences, quietActivity, reasoningLevels, usage, }: {
     readonly cancellationState: AgentCancellationState;
     readonly commands: readonly AgentPromptMenuItem[];
+    readonly draftStorageKey: string;
     readonly events: readonly HandleMessageStreamEvent[];
     readonly eveMessages: readonly EveMessage[];
     readonly fallbackStartedAt?: number;
@@ -25,9 +26,10 @@ export declare function AssistantThreadSurface({ cancellationState, commands, ev
     readonly reasoningLevels: readonly string[];
     readonly usage: AgentUsageSummary;
 }): import("react/jsx-runtime").JSX.Element;
-export declare function AssistantComposer({ cancellationState, commands, inputDisabled, locale, mentions, messages, models, onPreferencesChange, preferences, reasoningLevels, usage, }: {
+export declare function AssistantComposer({ cancellationState, commands, draftStorageKey, inputDisabled, locale, mentions, messages, models, onPreferencesChange, preferences, reasoningLevels, usage, }: {
     readonly cancellationState: AgentCancellationState;
     readonly commands: readonly AgentPromptMenuItem[];
+    readonly draftStorageKey: string;
     readonly inputDisabled?: boolean;
     readonly locale: AgentLocale;
     readonly mentions: readonly AgentPromptMenuItem[];
