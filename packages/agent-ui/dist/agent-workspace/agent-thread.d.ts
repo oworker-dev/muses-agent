@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import { type MessageStreamEvent } from "eve/client";
 import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig, AgentWorkspaceMailbox } from "./contracts.js";
 import { type AgentLocale, type AgentMessages } from "./i18n.js";
 export declare function AgentThreadView({ client, commands, draftStorageKey, isRecovering, locale, mailbox, mentions, models, onChange, onEvent, onOpenSubagent, onRecoveryNeeded, providerReady, reasoningLevels, thread, }: {
@@ -11,7 +11,7 @@ export declare function AgentThreadView({ client, commands, draftStorageKey, isR
     readonly mentions: readonly AgentPromptMenuItem[];
     readonly models: readonly AgentModelOption[];
     readonly onChange: (patch: AgentThreadPatch) => void;
-    readonly onEvent?: (event: HandleMessageStreamEvent) => void;
+    readonly onEvent?: (event: MessageStreamEvent) => void;
     readonly onOpenSubagent?: (sessionId: string) => void;
     readonly onRecoveryNeeded: () => void;
     readonly providerReady: boolean;

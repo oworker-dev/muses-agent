@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import type { EveMessage } from "eve/react";
 import { type AgentInputResponse } from "./agent-message.js";
 import type { AgentModelOption, AgentPromptMenuItem, AgentThreadPreferences } from "./contracts.js";
@@ -9,7 +9,7 @@ export declare function AssistantThreadSurface({ cancellationState, commands, dr
     readonly cancellationState: AgentCancellationState;
     readonly commands: readonly AgentPromptMenuItem[];
     readonly draftStorageKey: string;
-    readonly events: readonly HandleMessageStreamEvent[];
+    readonly events: readonly MessageStreamEvent[];
     readonly eveMessages: readonly EveMessage[];
     readonly fallbackStartedAt?: number;
     readonly isBusy: boolean;

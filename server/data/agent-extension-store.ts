@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 
-import type { AgentRunPolicy } from "../../contracts/agent-run.ts";
+import type { AgentRunPolicy } from "@oworker/open-agent-contracts/agent-run";
 import {
   AGENT_EXTENSION_CATALOG,
   extensionRefKey,

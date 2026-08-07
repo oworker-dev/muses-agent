@@ -134,7 +134,7 @@ function ModelSelectorValue({ placeholder = "Select model", showEffort = true, c
     const effortName = showEffort && effort !== undefined
         ? efforts?.find((e) => e.id === effort)?.name
         : undefined;
-    return (_jsxs("span", { "data-slot": "model-selector-value", className: cn("flex min-w-0 items-center gap-2", className), children: [selectedModel.icon && _jsx(ModelIcon, { children: selectedModel.icon }), _jsx("span", { className: "truncate font-medium", children: selectedModel.name }), effortName && (_jsx("span", { className: "text-muted-foreground min-w-7.5 truncate text-center", children: effortName }))] }));
+    return (_jsxs("span", { "data-slot": "model-selector-value", className: cn("flex min-w-0 items-center gap-1", className), children: [selectedModel.icon && _jsx(ModelIcon, { children: selectedModel.icon }), _jsx("span", { className: "truncate font-medium", children: selectedModel.name }), effortName && (_jsx("span", { className: "text-muted-foreground truncate", children: effortName }))] }));
 }
 function useLazyFlipSide() {
     const [side, setSide] = useState();
@@ -193,7 +193,7 @@ function ModelSelectorItem({ model, className, children, onSelect, ...props }) {
             setValue(model.id);
             setOpen(false);
             onSelect?.(selectedValue);
-        }, className: cn("relative items-start gap-2 rounded-lg py-2 ps-3 pe-9 [&_svg:not([class*='size-'])]:size-3.5", className), ...props, children: [children ?? (_jsxs(_Fragment, { children: [model.icon && (_jsx(ModelIcon, { className: "mt-[3px]", children: model.icon })), _jsxs("span", { className: "flex min-w-0 flex-col", children: [_jsx("span", { className: "truncate font-medium", children: model.name }), model.description && (_jsx("span", { className: "text-muted-foreground truncate text-xs", children: model.description }))] })] })), isSelected && (_jsx("span", { className: "absolute end-3 top-2.5 flex size-4 items-center justify-center", children: _jsx(CheckIcon, { className: "size-4" }) }))] }));
+        }, className: cn("relative items-start gap-2 rounded-lg py-2 ps-3 pe-9 [&_svg:not([class*='size-'])]:size-3.5", className), ...props, children: [children ?? (_jsxs(_Fragment, { children: [model.icon && (_jsx(ModelIcon, { className: "mt-[3px]", children: model.icon })), _jsxs("span", { className: "flex min-w-0 flex-col", children: [_jsx("span", { className: "truncate text-[13px] leading-5 font-medium", children: model.name }), model.description && (_jsx("span", { className: "text-muted-foreground truncate text-xs", children: model.description }))] })] })), isSelected && (_jsx("span", { className: "absolute end-3 top-2.5 flex size-4 items-center justify-center", children: _jsx(CheckIcon, { className: "size-4" }) }))] }));
 }
 function ModelSelectorEffort({ label = "Thinking", className, onKeyDown, ...props }) {
     const { efforts, effort, setEffort } = useModelSelectorEfforts();
@@ -231,8 +231,8 @@ function ModelSelectorModelContext() {
     }, [api, value, effort]);
     return null;
 }
-const ModelSelectorImpl = ({ searchable, variant, size, align, className, contentClassName, effortLabel, triggerLabel, ...rootProps }) => {
-    return (_jsxs(ModelSelectorRoot, { ...rootProps, children: [_jsx(ModelSelectorModelContext, {}), _jsx(ModelSelectorTrigger, { "aria-label": triggerLabel, variant: variant, size: size, className: className }), _jsx(ModelSelectorContent, { ...(align !== undefined ? { align } : {}), className: contentClassName, effortLabel: effortLabel, searchable: searchable ?? false })] }));
+const ModelSelectorImpl = ({ searchable, variant, size, align, className, contentClassName, effortLabel, triggerLabel, valueClassName, ...rootProps }) => {
+    return (_jsxs(ModelSelectorRoot, { ...rootProps, children: [_jsx(ModelSelectorModelContext, {}), _jsx(ModelSelectorTrigger, { "aria-label": triggerLabel, variant: variant, size: size, className: className, children: _jsx(ModelSelectorValue, { className: valueClassName }) }), _jsx(ModelSelectorContent, { ...(align !== undefined ? { align } : {}), className: contentClassName, effortLabel: effortLabel, searchable: searchable ?? false })] }));
 };
 const ModelSelector = memo(ModelSelectorImpl);
 ModelSelector.displayName = "ModelSelector";

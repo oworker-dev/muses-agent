@@ -17,7 +17,7 @@ import {
   agentExtensionCatalogForConfig,
   resolveAgentRunPolicy,
 } from "../../lib/agent-extension-catalog";
-import type { AgentRunPolicy } from "../../contracts/agent-run";
+import type { AgentRunPolicy } from "@oworker/open-agent-contracts/agent-run";
 import { createPostgresSessionOwnershipStoreFromEnvironment } from "../../server/data/session-ownership-store";
 import { createPostgresAgentExtensionStoreFromEnvironment } from "../../server/data/agent-extension-store";
 import { hostJwtAuthFromEnvironment } from "../lib/host-auth";
@@ -164,9 +164,7 @@ const channel = eveChannel({
 });
 
 const mailboxRoute = POST(MAILBOX_ROUTE, async (request, {
-  getSession,
-  resolveActiveSession,
-  send,
+  attachSession,
 }) => {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > MAX_MAILBOX_REQUEST_BYTES) {
@@ -195,7 +193,7 @@ const mailboxRoute = POST(MAILBOX_ROUTE, async (request, {
   }
   let boundary: MailboxBoundary;
   try {
-    boundary = await inspectMailboxBoundary(getSession(input.sessionId));
+    boundary = await inspectMailboxBoundary(attachSession(input.sessionId));
   } catch {
     return mailboxProblem(404, "mailbox_session_not_found", "The Agent session was not found.");
   }
@@ -211,23 +209,14 @@ const mailboxRoute = POST(MAILBOX_ROUTE, async (request, {
         : "The Agent session has not reached a waiting boundary.",
     );
   }
-  if (boundary.continuationToken !== input.continuationToken) {
-    return mailboxProblem(409, "mailbox_continuation_stale", "The mailbox continuation token is stale.");
-  }
-  const active = await resolveActiveSession({ continuationToken: boundary.continuationToken });
-  if (active?.sessionId !== input.sessionId) {
-    return mailboxProblem(409, "mailbox_session_not_active", "The continuation no longer owns this Agent session.");
-  }
-
   try {
-    const accepted = await send(
+    const accepted = await attachSession(input.sessionId).send(
       input.message,
       {
         auth: mailboxSessionAuth(input),
-        continuationToken: boundary.continuationToken,
       },
     );
-    if (accepted.id !== input.sessionId) {
+    if (accepted.status !== "accepted" || accepted.sessionId !== input.sessionId) {
       return mailboxProblem(
         409,
         "mailbox_session_identity_changed",
@@ -235,7 +224,7 @@ const mailboxRoute = POST(MAILBOX_ROUTE, async (request, {
       );
     }
     return Response.json(
-      { ok: true, sessionId: accepted.id },
+      { ok: true, sessionId: input.sessionId },
       { headers: { "cache-control": "no-store" }, status: 202 },
     );
   } catch {
@@ -256,7 +245,7 @@ export default {
 
 type MailboxBoundary =
   | { readonly state: "running" }
-  | { readonly continuationToken: string; readonly state: "waiting" }
+  | { readonly state: "waiting" }
   | { readonly state: "terminal" };
 
 type MailboxInspectRequest = {
@@ -267,7 +256,6 @@ type MailboxInspectRequest = {
 type MailboxDeliverRequest = {
   readonly action: "deliver";
   readonly clientMessageId: string;
-  readonly continuationToken: string;
   readonly executionMode?: AgentRunPolicy["executionMode"];
   readonly issuer?: string;
   readonly itemId: string;
@@ -292,7 +280,6 @@ function parseMailboxRequest(body: string): MailboxInspectRequest | MailboxDeliv
   if (
     value.action !== "deliver" ||
     !validText(value.clientMessageId, 200) ||
-    !validText(value.continuationToken, 2_000) ||
     !validText(value.itemId, 512) ||
     !validText(value.message, 65_536) ||
     !validText(value.principalId, 512) ||
@@ -309,7 +296,6 @@ function parseMailboxRequest(body: string): MailboxInspectRequest | MailboxDeliv
   return {
     action: "deliver",
     clientMessageId: value.clientMessageId,
-    continuationToken: value.continuationToken,
     ...(value.executionMode ? { executionMode: value.executionMode } : {}),
     ...(value.issuer ? { issuer: value.issuer } : {}),
     itemId: value.itemId,
@@ -332,10 +318,7 @@ async function inspectMailboxBoundary(
     const latest = await reader.read();
     if (latest.done || !latest.value) return { state: "running" };
     if (latest.value.type === "session.waiting") {
-      return {
-        continuationToken: latest.value.data.continuationToken,
-        state: "waiting",
-      };
+      return { state: "waiting" };
     }
     if (latest.value.type === "session.completed" || latest.value.type === "session.failed") {
       return { state: "terminal" };

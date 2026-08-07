@@ -15,7 +15,7 @@ export const eveAgentSessionDeletionRuntime: AgentSessionDeletionRuntime = {
 export type DeleteAgentSessionOutcome = {
   readonly deletion: SandboxDeletionRecord;
   readonly disposition: "authorized" | "already_authorized";
-  readonly reset: Exclude<EveResetStatus, "unavailable">;
+  readonly reset: EveResetStatus;
 };
 
 export class AgentSessionDeletionError extends Error {
@@ -32,7 +32,6 @@ export class AgentSessionDeletionError extends Error {
 
 export async function deleteAgentSession(options: {
   readonly accessToken: string;
-  readonly continuationToken?: string;
   readonly deletionStore: SandboxDeletionStore;
   readonly identity: AgentSessionOwner;
   readonly ownershipStore: AgentSessionOwnershipStore;
@@ -50,27 +49,11 @@ export async function deleteAgentSession(options: {
       reset: "no_active_session",
     };
   }
-  if (!options.continuationToken?.trim()) {
-    throw new AgentSessionDeletionError(
-      409,
-      "agent_session_continuation_required",
-      "This durable session cannot be retired without its continuation token.",
-    );
-  }
-  if (options.continuationToken.length > 4_096 || /\s/.test(options.continuationToken)) {
-    throw new AgentSessionDeletionError(
-      400,
-      "agent_session_continuation_invalid",
-      "The durable session continuation token is invalid.",
-    );
-  }
-
   const runtime = options.runtime ?? eveAgentSessionDeletionRuntime;
   let reset: EveResetStatus;
   try {
     reset = await runtime.reset(
       options.sessionId,
-      options.continuationToken,
       options.accessToken,
       `delete-${randomUUID()}`,
     );
@@ -81,14 +64,6 @@ export async function deleteAgentSession(options: {
       "The Agent runtime could not retire this session. Its sandbox was left intact.",
     );
   }
-  if (reset === "unavailable") {
-    throw new AgentSessionDeletionError(
-      409,
-      "agent_session_retirement_unavailable",
-      "This durable session could not be retired, so its sandbox was left intact.",
-    );
-  }
-
   const authorization = await options.deletionStore.request({
     owner: options.identity,
     reason: "user-requested-session-deletion",

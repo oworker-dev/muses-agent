@@ -3,6 +3,7 @@ import "server-only";
 import { readAgentRuntimeStatus } from "@/lib/agent-runtime-status";
 import { createAgentUiConfig, AGENT_UI_MENTIONS } from "@/lib/agent-ui-config";
 import { readDeploymentAgentRuntimeConfig } from "@/lib/agent-runtime-config";
+import { resolveStandaloneStorageMode } from "@/lib/standalone-storage-mode";
 import { StandaloneAgentWorkspace } from "./standalone-agent-workspace";
 
 export function AgentPage({
@@ -24,6 +25,7 @@ export function AgentPage({
       models={ui.models}
       reasoningLevels={ui.reasoningLevels}
       runtimeStatus={readAgentRuntimeStatus()}
+      storageMode={resolveStandaloneStorageMode()}
     />
   );
 }

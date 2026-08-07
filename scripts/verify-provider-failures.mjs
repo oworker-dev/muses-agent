@@ -71,9 +71,8 @@ try {
   assert(completedMessageText(interrupted) === "STREAM_RECOVERED",
     "The pre-tool stream interruption did not recover automatically.");
 
-  const exhaustedSession = createSession(eveUrl);
-  const exhausted = await consume(
-    exhaustedSession,
+  const { events: exhausted, session: exhaustedSession } = await createAndConsume(
+    eveUrl,
     "PROVIDER_STALL_THREE. Reply exactly: STALE",
   );
   assertRecoverableFailure(exhausted, "exhausted provider timeout");
@@ -119,18 +118,22 @@ try {
   await rm(isolatedAppRoot, { force: true, recursive: true });
 }
 
-function createSession(host) {
-  return new Client({ host, preserveCompletedSessions: true }).session();
-}
-
 async function completedTurn(host, message) {
-  const events = await consume(createSession(host), message);
+  const { events } = await createAndConsume(host, message);
   assertCompleted(events, message);
   return events;
 }
 
+async function createAndConsume(host, message) {
+  const { response, session } = await new Client({ host }).sessions.create({ message });
+  return { events: await collect(response), session };
+}
+
 async function consume(session, message) {
-  const response = await session.send({ message });
+  return collect(await session.send(message));
+}
+
+async function collect(response) {
   const events = [];
   for await (const event of response) events.push(event);
   return events;

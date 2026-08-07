@@ -80,8 +80,9 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> & Vari
     contentClassName?: string;
     effortLabel?: ReactNode;
     triggerLabel?: string;
+    valueClassName?: string;
 };
-declare const ModelSelectorImpl: ({ searchable, variant, size, align, className, contentClassName, effortLabel, triggerLabel, ...rootProps }: ModelSelectorProps) => import("react/jsx-runtime").JSX.Element;
+declare const ModelSelectorImpl: ({ searchable, variant, size, align, className, contentClassName, effortLabel, triggerLabel, valueClassName, ...rootProps }: ModelSelectorProps) => import("react/jsx-runtime").JSX.Element;
 type ModelSelectorComponent = typeof ModelSelectorImpl & {
     displayName?: string;
     Root: typeof ModelSelectorRoot;

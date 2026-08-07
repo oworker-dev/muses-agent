@@ -46,10 +46,8 @@ One Web thread maps to one Eve durable session. The session is the isolation and
 continuation boundary; a user, account, project, or canvas may own many sessions.
 Do not use user-wide or canvas-wide state as the implicit Agent history.
 
-Eve exposes two different handles:
-
-- `sessionId` attaches to the durable event stream;
-- `continuationToken` submits the next turn after `session.waiting`.
+Eve exposes one stable `sessionId` handle for messages, controls, and the durable
+event stream. No operation follows or replaces that identity implicitly.
 
 `turn.completed` is not a safe continuation boundary. A client may submit the
 next turn only after `session.waiting`. Terminal alternatives are
@@ -79,11 +77,12 @@ or overwriting another client's state.
 
 ### Follow-up mailbox
 
-Eve's `continuationToken` is a resume handle, not a durable FIFO. The Web client
-therefore uses an application-owned `agent_mailbox_items` table when a host
-provides `AgentWorkspaceMailbox`. A follow-up is accepted by the Web API with a
-stable `clientMessageId`, then a separate mailbox worker leases and delivers it
-only after the Eve session reports `session.waiting`.
+Eve accepts ID-addressed follow-ups but does not provide the product-level FIFO,
+client idempotency, and delivery audit required by a multi-client Web product.
+The Web client therefore uses an application-owned `agent_mailbox_items` table
+when a host provides `AgentWorkspaceMailbox`. A follow-up is accepted by the Web
+API with a stable `clientMessageId`, then a separate mailbox worker leases and
+delivers it only after the Eve session reports `session.waiting`.
 
 The mailbox is strictly ordered per session. A later item cannot be leased while
 an earlier item is queued, delivering, accepted, failed, or
@@ -107,9 +106,10 @@ replacement for Eve's model loop.
 
 The browser removes one queued item only when the corresponding future
 `message.received` arrives. Refresh, a closed tab, or a second browser observes
-the same server queue and cannot submit another Eve continuation directly. Hosts
-without a mailbox may use the SDK's browser fallback, but that path is a
-best-effort compatibility mode and is not durable.
+the same server queue and cannot submit another Eve message directly. Without a
+mailbox, the SDK sends directly to the stable session ID; that mode is intended
+for the standalone single-client product and does not claim server-side queue
+durability.
 
 ## Headless AgentRun contract
 
@@ -121,14 +121,14 @@ The public host boundary has two independent projections:
 
 Both use the same Host JWT identity. Neither interface imports Muses domain
 types, owns host billing, or gives browser-supplied metadata authorization
-meaning. Eve session and continuation identifiers remain internal harness
-details behind stable AgentRun ids and events.
+meaning. Eve session identifiers remain internal harness details behind stable
+AgentRun ids and events.
 
 `open-agent` exposes a host-facing run API without making hosts depend on Eve's
-session protocol. `runId` is the durable public identity; Eve `sessionId` and
-`continuationToken` remain internal harness handles. The API currently supports
-start, inspection, incremental event reads, and cancellation under the draft
-contract version `0.1.0-draft`.
+session protocol. `runId` is the durable public identity; Eve `sessionId` remains
+an internal harness handle. The API currently supports start, inspection,
+incremental event reads, and cancellation under the draft contract version
+`0.1.0-draft`.
 
 Start is reserved in PostgreSQL before Eve submission. The unique scope is
 `tenantId + principalId + idempotencyKey`, and the request fingerprint excludes
@@ -150,9 +150,9 @@ failure, event count, and usage projection. `inputTokens`, `outputTokens`,
 runtime provides them. Cancellation first records `cancellationRequestedAt`
 after Eve accepts the cooperative request. The service consumes the stream for
 a bounded grace period; a normal `turn.cancelled` boundary wins without further
-action. If Eve does not settle, the service uses the stored continuation token
-to terminally reset that Headless AgentRun's exclusive durable session and then
-atomically marks the run cancelled. Projection freezes ordinary completed or
+action. If Eve does not settle, the service terminally resets that Headless
+AgentRun's exclusive durable session by its stable ID and then atomically marks
+the run cancelled. Projection freezes ordinary completed or
 failed terminal states while cancellation is pending, so late provider output
 can contribute usage but cannot publish a result or reverse user intent.
 Inspection and event reads run the same idempotent reconciliation to recover an
@@ -207,10 +207,9 @@ The browser sends validated model and reasoning preferences as channel headers.
 The Eve channel projects those values into authenticated session attributes; a
 dynamic model resolver reads them at each `step.started` event.
 
-The installed Eve 0.27.8 ToolLoopAgent path does not reliably apply dynamic
-`modelOptions` to every provider call. The model is therefore wrapped with AI SDK
-`defaultSettingsMiddleware` so OpenAI Responses always receives the effective
-reasoning setting and `store: false`.
+The model uses Eve's dynamic resolver for the selected provider model and wraps
+the resolved AI SDK model with `defaultSettingsMiddleware` so OpenAI Responses
+always receives the effective reasoning setting and `store: false`.
 
 `store: false` is required because Eve owns durable history and the configured
 OpenAI-compatible endpoint may not persist response items. Relying on
@@ -240,7 +239,7 @@ session-owned `/workspace`, and applies `deny-all` egress at backend creation
 and session start. Docker and microsandbox enforce the coarse policy; Vercel
 Sandbox receives the live policy through Eve's network-policy API.
 
-`AGENT_DEPLOYMENT_TENANCY` makes the trust model explicit. Eve 0.27.8's Docker
+`AGENT_DEPLOYMENT_TENANCY` makes the trust model explicit. Eve 0.31.1's Docker
 backend does not expose CPU, memory, PID, Linux capability, or non-root controls
 and is accepted only for a trusted single-tenant alpha/staging deployment. The
 production doctor rejects Docker for mutually untrusted multi-tenant traffic;
@@ -256,12 +255,11 @@ available without changing Eve's durable reattachment semantics.
 
 Physical deletion is authorized by the Agent product database, not by a Docker
 label or age alone. The authenticated Web session deletion route verifies the
-immutable session owner, terminally retires Eve with its continuation token, and
+immutable session owner, terminally retires Eve by its stable session ID, and
 then creates one idempotent `agent_sandbox_deletions` record. The reaper claims
 that record with a short lease, revalidates the container, removes it, and marks
 the record completed; failures return to a retryable state. Missing ownership,
-missing continuation state, cross-tenant requests, or a failed Eve reset leave
-the sandbox intact.
+cross-tenant requests, or a failed Eve reset leave the sandbox intact.
 
 Production still requires evidence on the selected deployment backend. Remaining gates are:
 
@@ -329,13 +327,11 @@ import Muses identity code.
 Eve route auth does not natively enforce session ownership. The Agent service
 therefore records the verified `tenantId + principalId` in its own PostgreSQL
 table from the durable `session.started` hook. The Host JWT auth wrapper checks
-that immutable owner on every session-specific continue, stream, cancel, file,
-and callback path. The standard reset route carries its session identity in the
-continuation token, so it is authenticated by Eve's token validation rather
-than a path-based ownership lookup. Creation is allowed before a session id
-exists; the first subscription waits briefly for the durable ownership claim to
-remove the create/stream race, then fails closed. Model preference headers
-remain untrusted until validated and projected by the authenticated channel.
+that immutable owner on every session-specific message, stream, cancel, reset,
+file, and callback path. Creation is allowed before a session id exists; the
+first subscription waits briefly for the durable ownership claim to remove the
+create/stream race, then fails closed. Model preference headers remain untrusted
+until validated and projected by the authenticated channel.
 
 ## Web integration contract
 
@@ -475,16 +471,15 @@ pretending that unavailable child events were observed.
 
 ### Supervisor boundary
 
-Eve 0.27.8 owns parent waiting, recursive cancellation, child task results, and
-durable child sessions. Its public client exposes send, stream, cancel, and
-reset. It does not currently expose the Codex App Server equivalents of
-`turn/steer` or `thread/inject_items`, detached/no-wait child execution,
-arbitrary parent-to-child follow-up injection, or a public close/archive
-lifecycle. Those are supervisor protocol capabilities, not presentation
-controls. Open Agent keeps Eve's native loop intact and must not simulate them
-with browser state. A future implementation requires either an upstream Eve
-contract or a separately versioned durable supervisor service with ownership,
-idempotency, ordering, cancellation, and recovery semantics.
+Eve 0.31.1 owns parent waiting, recursive cancellation, child task results, and
+durable child sessions. Open Agent enables its persistent-subagent option, so a
+parked child keeps a stable `agentId` and the parent can continue it on a later
+model step. The public client still does not expose the Codex App Server
+equivalents of `turn/steer` or `thread/inject_items`, detached/no-wait child
+execution, injection into a busy child, or a public close/archive lifecycle.
+Those are supervisor protocol capabilities, not presentation controls. Open
+Agent keeps Eve's native loop intact and must not simulate them with browser
+state.
 
 Browser recovery is evidence-driven. A live stream with no new events may mean
 either a slow Provider or a stale transport, so the client periodically probes
@@ -536,8 +531,9 @@ The project must not be called production-complete until all of these are done:
 - production identity, authorization, abuse protection, retention, and deletion;
 - deployment validation on the selected hosting topology.
 
-The headless AgentRun API itself has passed deterministic unit tests and a local
-production conformance run against Eve 0.27.8, PostgreSQL World, Host JWT
-authentication, structured output, event cursors, idempotency, isolation, and
-bounded cancellation reconciliation, plus a real-Provider sandbox and signed
-preview task. That evidence does not waive the remaining release gates above.
+The headless AgentRun API has deterministic coverage for PostgreSQL World, Host
+JWT authentication, structured output, event cursors, idempotency, isolation,
+and bounded cancellation reconciliation. The Eve 0.31.1 migration requires a
+fresh deployed production conformance run and real-Provider sandbox/preview
+evidence before release; unit and local build evidence do not waive the
+remaining gates above.

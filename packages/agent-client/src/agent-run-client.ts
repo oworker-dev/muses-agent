@@ -149,9 +149,6 @@ export class AgentClientHttpError extends Error {
   }
 }
 
-/** @deprecated Use AgentClientHttpError. */
-export { AgentClientHttpError as AgentHostHttpError };
-
 function normalizeBaseUrl(value: string): string {
   const normalized = value.trim().replace(/\/+$/, "");
   if (!normalized) throw new Error("Agent service base URL is required.");

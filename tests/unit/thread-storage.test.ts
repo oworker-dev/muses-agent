@@ -13,7 +13,7 @@ test("compacts legacy cumulative deltas without changing the absolute stream cur
       stepIndex: 0,
       turnId: "turn_0",
     },
-    meta: { at },
+    meta: { at, id: `evt_${index}` },
     type: "message.appended",
   }));
   const collection = parseThreadCollection({
@@ -37,14 +37,15 @@ test("compacts legacy cumulative deltas without changing the absolute stream cur
 
 test("preserves non-delta ordering barriers while compacting adjacent cumulative deltas", () => {
   const at = new Date().toISOString();
+  let sequence = 0;
   const appended = (messageSoFar: string) => ({
     data: { messageDelta: "x", messageSoFar, sequence: 0, stepIndex: 0, turnId: "turn_0" },
-    meta: { at },
+    meta: { at, id: `evt_append_${sequence++}` },
     type: "message.appended",
   }) as const;
   const barrier = {
     data: { sequence: 0, stepIndex: 1, turnId: "turn_0" },
-    meta: { at },
+    meta: { at, id: "evt_barrier" },
     type: "step.started",
   } as const;
 

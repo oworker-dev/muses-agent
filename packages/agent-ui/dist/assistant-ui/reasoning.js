@@ -3,7 +3,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, } from "react";
 import { cva } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
-import { useScrollLock, useAuiState, } from "@assistant-ui/react";
+import { useScrollLock, } from "@assistant-ui/react";
 import { MarkdownText } from "./markdown-text.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, } from "../ui/collapsible.js";
 import { cn } from "../utils.js";
@@ -58,9 +58,9 @@ function ReasoningFade({ side = "bottom", className, ...props }) {
     return (_jsx("div", { "data-slot": "reasoning-fade", className: cn("aui-reasoning-fade pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8", "bg-[linear-gradient(to_top,var(--color-background),transparent)]", "group-data-[variant=muted]/reasoning-root:bg-[linear-gradient(to_top,color-mix(in_oklab,var(--color-muted)_50%,var(--color-background)),transparent)]", "fade-in-0 animate-in", "duration-(--animation-duration)", className), ...props }));
 }
 function ReasoningTrigger({ active, duration, label = "Reasoning", className, ...props }) {
-    const durationText = duration !== undefined ? ` (${duration}s)` : "";
+    const durationText = duration !== undefined && duration > 0 ? ` ${duration}s` : "";
     const displayLabel = typeof label === "string" ? `${label}${durationText}` : label;
-    return (_jsxs(CollapsibleTrigger, { "data-slot": "reasoning-trigger", className: cn("aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]", className), ...props, children: [_jsxs("span", { "data-slot": "reasoning-trigger-label", className: "aui-reasoning-trigger-label-wrapper relative inline-block whitespace-nowrap leading-none tabular-nums", children: [_jsx("span", { children: displayLabel }), active ? (_jsx("span", { "aria-hidden": true, "data-slot": "reasoning-trigger-shimmer", className: "aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none", children: displayLabel })) : null] }), _jsx(ChevronDownIcon, { "data-slot": "reasoning-trigger-chevron", className: cn("aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0", "transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none", "-rotate-90", "group-data-open/trigger:rotate-0", "group-data-panel-open/trigger:rotate-0") })] }));
+    return (_jsxs(CollapsibleTrigger, { "data-slot": "reasoning-trigger", className: cn("aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]", className), ...props, children: [_jsx("span", { "data-slot": "reasoning-trigger-label", className: cn("aui-reasoning-trigger-label-wrapper relative inline-block whitespace-nowrap leading-none tabular-nums", active && "shimmer motion-reduce:animate-none"), children: _jsx("span", { children: displayLabel }) }), _jsx(ChevronDownIcon, { "data-slot": "reasoning-trigger-chevron", className: cn("aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0", "transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none", "-rotate-90", "group-data-open/trigger:rotate-0", "group-data-panel-open/trigger:rotate-0") })] }));
 }
 function ReasoningContent({ className, children, ...props }) {
     const isPreview = useContext(ReasoningPreviewContext);
@@ -109,18 +109,6 @@ function ReasoningText({ className, children, ...props }) {
     return (_jsx("div", { ref: scrollRef, "data-slot": "reasoning-text", className: cn("aui-reasoning-text relative z-0 max-h-64 overflow-y-auto ps-6 pt-2 pb-2 leading-relaxed text-pretty", "transform-gpu transition-[transform,opacity] ease-[cubic-bezier(0.32,0.72,0,1)]", "motion-reduce:animate-none", "group-data-open/collapsible-content:animate-in", "group-data-closed/collapsible-content:animate-out", "group-data-open/collapsible-content:fade-in-0", "group-data-closed/collapsible-content:fade-out-0", "group-data-open/collapsible-content:slide-in-from-top-4", "group-data-closed/collapsible-content:slide-out-to-top-4", "group-data-open/collapsible-content:blur-in-[2px]", "group-data-closed/collapsible-content:blur-out-[2px]", "group-data-open/collapsible-content:duration-(--animation-duration)", "group-data-closed/collapsible-content:duration-(--animation-duration)", className), ...props, children: _jsx("div", { ref: contentRef, className: "aui-reasoning-text-content space-y-4", children: children }) }));
 }
 const ReasoningImpl = () => _jsx(MarkdownText, {});
-const ReasoningGroupImpl = ({ children, startIndex, endIndex, }) => {
-    const isReasoningStreaming = useAuiState((s) => {
-        if (s.message.status?.type !== "running")
-            return false;
-        for (let index = startIndex; index <= endIndex; index++) {
-            if (s.message.parts[index]?.status.type === "running")
-                return true;
-        }
-        return false;
-    });
-    return (_jsxs(ReasoningRoot, { streaming: isReasoningStreaming, children: [_jsx(ReasoningTrigger, { active: isReasoningStreaming }), _jsx(ReasoningContent, { "aria-busy": isReasoningStreaming, children: _jsx(ReasoningText, { children: children }) })] }));
-};
 const Reasoning = memo(ReasoningImpl);
 Reasoning.displayName = "Reasoning";
 Reasoning.Root = ReasoningRoot;
@@ -128,7 +116,5 @@ Reasoning.Trigger = ReasoningTrigger;
 Reasoning.Content = ReasoningContent;
 Reasoning.Text = ReasoningText;
 Reasoning.Fade = ReasoningFade;
-const ReasoningGroup = memo(ReasoningGroupImpl);
-ReasoningGroup.displayName = "ReasoningGroup";
-export { Reasoning, ReasoningGroup, ReasoningRoot, ReasoningTrigger, ReasoningContent, ReasoningText, ReasoningFade, reasoningVariants, };
+export { Reasoning, ReasoningRoot, ReasoningTrigger, ReasoningContent, ReasoningText, ReasoningFade, reasoningVariants, };
 //# sourceMappingURL=reasoning.js.map

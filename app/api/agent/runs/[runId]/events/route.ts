@@ -40,7 +40,7 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
     return Response.json(
       {
         events: result.events,
-        nextCursor: result.record.eventCount,
+        nextCursor: result.nextCursor,
         ok: true,
         run: toAgentRunSnapshot(result.record),
       },

@@ -1,10 +1,12 @@
 "use client";
 
-import { ClientError, type HandleMessageStreamEvent } from "eve/client";
+import { ClientError, type ClientSession, type MessageStreamEvent } from "eve/client";
 import { AlertCircleIcon, ArrowLeftIcon, MenuIcon, PanelLeftCloseIcon, PanelLeftIcon, RotateCcwIcon, ServerOffIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
-import { createAgentSession } from "./agent-client.js";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../ui/resizable.js";
+import { usePanelRef } from "react-resizable-panels";
+import { attachAgentSession, createAgentSession } from "./agent-client.js";
 import { AgentChildSessionView } from "./agent-child-session.js";
 import { AgentSettingsDialog } from "./agent-settings-dialog.js";
 import { AgentSidebar } from "./agent-sidebar.js";
@@ -64,7 +66,7 @@ export function AgentWorkspace({
   readonly mailbox?: AgentWorkspaceMailbox;
   readonly models: readonly AgentModelOption[];
   readonly mentions?: readonly import("./contracts.js").AgentPromptMenuItem[];
-  readonly onEvent?: (event: HandleMessageStreamEvent) => void;
+  readonly onEvent?: (event: MessageStreamEvent) => void;
   readonly onDeleteThread?: (thread: AgentThread) => void | Promise<void>;
   readonly onActiveSubagentChange?: (threadId: string, sessionId?: string) => void;
   readonly onActiveThreadChange?: (threadId?: string) => void;
@@ -93,6 +95,7 @@ export function AgentWorkspace({
   const [recoveringIds, setRecoveringIds] = useState<Set<string>>(new Set());
   const [recoveryErrors, setRecoveryErrors] = useState<Map<string, string>>(new Map());
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [desktopLayout, setDesktopLayout] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deletionIssue, setDeletionIssue] = useState(false);
   const [deletingThreadIds, setDeletingThreadIds] = useState<Set<string>>(new Set());
@@ -105,6 +108,24 @@ export function AgentWorkspace({
   const storageSaveTimer = useRef<number | undefined>(undefined);
   const pendingCollection = useRef<AgentThreadCollection | undefined>(undefined);
   const messages = messagesFor(locale);
+  const sidebarPanelRef = usePanelRef();
+
+  useEffect(() => {
+    if (!desktopLayout || !sidebarPanelRef.current) return;
+    if (sidebarOpen) sidebarPanelRef.current.expand();
+    else sidebarPanelRef.current.collapse();
+  }, [desktopLayout, sidebarOpen, sidebarPanelRef]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const synchronizeLayout = () => {
+      setDesktopLayout(media.matches);
+      setSidebarOpen(media.matches);
+    };
+    synchronizeLayout();
+    media.addEventListener("change", synchronizeLayout);
+    return () => media.removeEventListener("change", synchronizeLayout);
+  }, []);
 
   useEffect(() => {
     threadsRef.current = threads;
@@ -235,13 +256,22 @@ export function AgentWorkspace({
   }, []);
 
   const createThread = useCallback(() => {
+    const active = activeThreadId ? threadsRef.current.find((thread) => thread.id === activeThreadId) : undefined;
+    // Keep one draft placeholder. A repeated click while the user is already
+    // on an untouched session should focus that same draft instead of filling
+    // the recent-session list with unusable empty rows.
+    if (active && ephemeralThreadIds.has(active.id) && isEmptyDraftThread(active)) {
+      setActiveSubagentSessionId(undefined);
+      if (!window.matchMedia("(min-width: 1024px)").matches) setSidebarOpen(false);
+      return;
+    }
     const thread = createAgentThread(Date.now(), messages.newTask, stableDefaults);
     setThreads((current) => [thread, ...current]);
     setActiveThreadId(thread.id);
     setEphemeralThreadIds((current) => new Set(current).add(thread.id));
     setActiveSubagentSessionId(undefined);
     if (!window.matchMedia("(min-width: 1024px)").matches) setSidebarOpen(false);
-  }, [messages.newTask, stableDefaults]);
+  }, [activeThreadId, ephemeralThreadIds, messages.newTask, stableDefaults]);
 
   const deleteThread = useCallback(async (threadId: string) => {
     const thread = threads.find((item) => item.id === threadId);
@@ -330,13 +360,14 @@ export function AgentWorkspace({
     recoveryControllers.current.set(thread.id, controller);
 
     const recoveredCursor = thread.session.streamIndex;
-    const session = createAgentSession(client, thread.preferences, { ...thread.session, streamIndex: recoveredCursor });
+    const connection = createAgentSession(client, thread.preferences, { ...thread.session, streamIndex: recoveredCursor });
+    const session = attachAgentSession(connection, connection.initialSession);
+    if (!session) return;
     let cursor = recoveredCursor;
     let events = [...thread.events];
     let checkedTailBoundary = false;
     let pendingTurn = thread.pendingTurn;
     let queuedTurns = thread.queuedTurns;
-    let recoveredContinuationToken = thread.session.continuationToken;
     let settled = false;
 
     const refreshMailboxQueue = async () => {
@@ -387,7 +418,6 @@ export function AgentWorkspace({
             cursor += 1;
             consumed += 1;
             onEvent?.(event);
-            if (event.type === "session.waiting") recoveredContinuationToken = event.data.continuationToken;
             if (event.type === "message.received") {
               const wasPendingTurn = Boolean(pendingTurn);
               pendingTurn = undefined;
@@ -418,15 +448,12 @@ export function AgentWorkspace({
             const missingBoundary = await readTailBoundary(session, controller.signal);
             if (missingBoundary) {
               events = [...appendThreadEvent(events, missingBoundary)];
-              recoveredContinuationToken = missingBoundary.type === "session.waiting"
-                ? missingBoundary.data.continuationToken
-                : session.state.continuationToken;
               await refreshMailboxQueue();
               updateThread(thread.id, {
                 events: [...events],
                 pendingTurn,
                 queuedTurns,
-                session: { ...session.state, continuationToken: recoveredContinuationToken, streamIndex: cursor },
+                session: { ...session.state, streamIndex: cursor },
                 status: statusFromEvents(events),
               });
               settled = missingBoundary.type !== "session.waiting" || !hasPendingServerQueue();
@@ -447,7 +474,7 @@ export function AgentWorkspace({
         events: compactThreadEvents(events),
         pendingTurn,
         queuedTurns,
-        session: { ...session.state, continuationToken: recoveredContinuationToken ?? session.state.continuationToken, streamIndex: cursor },
+        session: { ...session.state, streamIndex: cursor },
         status: statusFromEvents(events),
       });
     } catch (error) {
@@ -488,10 +515,18 @@ export function AgentWorkspace({
   if (!isHydrated || !activeThread) return <div className="flex h-dvh items-center justify-center bg-background text-muted-foreground">{messages.loading}</div>;
 
   return (
-    <div className="open-agent-ui flex h-dvh overflow-hidden bg-background text-foreground">
-      <AgentSidebar activeThreadId={activeThread.id} brand={productName} deletingThreadIds={deletingThreadIds} hostFooter={hostSlots?.sidebarFooter} locale={locale} messages={messages} onClose={() => setSidebarOpen(false)} onDelete={deleteThread} onNew={createThread} onRename={renameThread} onSelect={selectThread} onSettings={() => setSettingsOpen(true)} open={sidebarOpen} threads={threads} />
-      <section className="flex min-w-0 flex-1 flex-col bg-card">
-        <header className="flex h-13 shrink-0 items-center justify-between border-b border-border/70 px-3 sm:px-4">
+    <div className="open-agent-ui relative h-dvh overflow-hidden bg-sidebar text-foreground">
+      {!desktopLayout ? <AgentSidebar activeThreadId={activeThread.id} brand={productName} deletingThreadIds={deletingThreadIds} hostFooter={hostSlots?.sidebarFooter} locale={locale} messages={messages} onClose={() => setSidebarOpen(false)} onDelete={deleteThread} onNew={createThread} onRename={renameThread} onSelect={selectThread} onSettings={() => setSettingsOpen(true)} open={sidebarOpen} threads={threads} variant="mobile" /> : null}
+      <ResizablePanelGroup className="h-full" orientation="horizontal">
+        {desktopLayout ? (
+          <ResizablePanel className="block" collapsedSize="0px" collapsible defaultSize="252px" id="agent-sidebar" maxSize="420px" minSize="220px" panelRef={sidebarPanelRef}>
+            <AgentSidebar activeThreadId={activeThread.id} brand={productName} deletingThreadIds={deletingThreadIds} hostFooter={hostSlots?.sidebarFooter} locale={locale} messages={messages} onClose={() => setSidebarOpen(false)} onDelete={deleteThread} onNew={createThread} onRename={renameThread} onSelect={selectThread} onSettings={() => setSettingsOpen(true)} open={sidebarOpen} threads={threads} variant="desktop" />
+          </ResizablePanel>
+        ) : null}
+        {desktopLayout ? <ResizableHandle className="flex bg-transparent after:w-2" /> : null}
+        <ResizablePanel className="min-w-0" defaultSize="100%" id="agent-workbench" minSize="0px">
+      <section className="flex h-full min-w-0 flex-col overflow-hidden bg-card lg:mt-2 lg:rounded-tl-2xl lg:shadow-[-10px_-8px_32px_-18px_rgba(15,23,42,0.38)]" data-slot="agent-workbench">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border/70 px-3 lg:h-13 lg:px-4">
           <div className="flex min-w-0 items-center gap-2">
             <Button aria-label={messages.openNavigation} className="lg:hidden" onClick={() => setSidebarOpen(true)} size="icon-sm" variant="ghost"><MenuIcon className="size-4" /></Button>
             <Button aria-label={messages.toggleNavigation} className="hidden lg:inline-flex" onClick={() => setSidebarOpen((open) => !open)} size="icon-sm" variant="ghost">{sidebarOpen ? <PanelLeftCloseIcon className="size-4" /> : <PanelLeftIcon className="size-4" />}</Button>
@@ -567,7 +602,7 @@ export function AgentWorkspace({
                 ? `${storageKey}:draft:new`
                 : `${storageKey}:draft:${activeThread.id}`}
               isRecovering={activeIsRecovering}
-              key={`${activeThread.id}:${activeIsRecovering ? "recovering" : "ready"}`}
+              key={`${activeThread.id}:${activeThread.revision ?? 0}:${activeIsRecovering ? "recovering" : "ready"}`}
               locale={locale}
               mailbox={mailbox}
               mentions={mentions}
@@ -583,13 +618,15 @@ export function AgentWorkspace({
           </div>
         )}
       </section>
+        </ResizablePanel>
+      </ResizablePanelGroup>
       <AgentSettingsDialog extensions={extensions} locale={locale} messages={messages} onLocaleChange={setLocale} onOpenChange={setSettingsOpen} open={settingsOpen} />
     </div>
   );
 }
 
 function findSubagentSession(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   sessionId: string,
   locale: AgentLocale,
 ): { readonly label: string; readonly task?: string } | undefined {
@@ -631,9 +668,9 @@ const RECOVERY_POLL_INTERVAL_MS = 1_500;
 const RECOVERY_TAIL_LOOKUP_TIMEOUT_MS = 1_500;
 
 async function readTailBoundary(
-  session: ReturnType<typeof createAgentSession>,
+  session: ClientSession,
   parentSignal: AbortSignal,
-): Promise<HandleMessageStreamEvent | undefined> {
+): Promise<MessageStreamEvent | undefined> {
   const controller = new AbortController();
   const abort = () => controller.abort();
   parentSignal.addEventListener("abort", abort, { once: true });
@@ -668,11 +705,11 @@ function waitForRecoveryPoll(signal: AbortSignal): Promise<void> {
   });
 }
 
-function isRecoveryBoundary(event: HandleMessageStreamEvent): boolean {
+function isRecoveryBoundary(event: MessageStreamEvent): boolean {
   return event.type === "session.waiting" || event.type === "session.completed" || event.type === "session.failed";
 }
 
-function statusFromEvents(events: readonly HandleMessageStreamEvent[]): AgentThread["status"] {
+function statusFromEvents(events: readonly MessageStreamEvent[]): AgentThread["status"] {
   const last = events.at(-1);
   if (!last) return "ready";
   if (last.type === "session.failed") return "error";
@@ -755,6 +792,13 @@ function threadNeedsRecovery(thread: AgentThread): boolean {
   )) return true;
   const lastEvent = thread.events.at(-1);
   return !lastEvent || !isRecoveryBoundary(lastEvent);
+}
+
+function isEmptyDraftThread(thread: AgentThread): boolean {
+  return thread.events.length === 0 &&
+    thread.queuedTurns.length === 0 &&
+    !thread.pendingTurn &&
+    !thread.session.sessionId;
 }
 
 function sameQueuedTurns(

@@ -1,6 +1,6 @@
 "use client";
 
-import type { HandleMessageStreamEvent, PrepareSend } from "eve/client";
+import type { MessageStreamEvent, PrepareSend } from "eve/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AgentWorkspace,
@@ -17,7 +17,7 @@ import {
   parseAgentEmbedHostMessage,
   type AgentEmbedConfigureMessage,
   type AgentEmbedEvent,
-} from "@/contracts/agent-embed";
+} from "@oworker/open-agent-contracts/embed";
 
 export function AgentEmbed({ allowedOrigins, runtimeStatus }: { readonly allowedOrigins: readonly string[]; readonly runtimeStatus: AgentRuntimeStatus }) {
   const [configuration, setConfiguration] = useState<AgentEmbedConfigureMessage>();
@@ -111,23 +111,19 @@ export function AgentEmbed({ allowedOrigins, runtimeStatus }: { readonly allowed
     getAccessToken: () => accessTokenRef.current,
   }) : undefined, [configuration]);
 
-  const onEvent = useCallback((event: HandleMessageStreamEvent) => {
+  const onEvent = useCallback((event: MessageStreamEvent) => {
     const projected = projectEmbedEvent(event);
     if (projected) post(projected);
   }, [post]);
 
   const onDeleteThread = useCallback(async (thread: AgentThread) => {
     const sessionId = thread.session.sessionId;
-    const continuationToken = thread.session.continuationToken;
     if (!sessionId) return;
-    if (!continuationToken) throw new Error("The durable session cannot be deleted without its continuation token.");
     const response = await fetch(
       `${configuration?.serviceUrl.replace(/\/$/, "")}/api/agent/sessions/${encodeURIComponent(sessionId)}`,
       {
-        body: JSON.stringify({ continuationToken }),
         headers: {
           authorization: `Bearer ${accessTokenRef.current}`,
-          "content-type": "application/json",
         },
         method: "DELETE",
         redirect: "error",
@@ -190,7 +186,7 @@ function encodeBase64Url(value: unknown): string {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
-function projectEmbedEvent(event: HandleMessageStreamEvent): AgentEmbedEvent | undefined {
+function projectEmbedEvent(event: MessageStreamEvent): AgentEmbedEvent | undefined {
   if (event.type === "turn.started") {
     return { type: "agent.embed.turn-started", contractVersion: AGENT_EMBED_CONTRACT_VERSION, turnId: event.data.turnId };
   }

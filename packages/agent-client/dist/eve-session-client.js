@@ -2,7 +2,7 @@ import { Client, } from "eve/client";
 import { AGENT_SESSION_CONTRACT_VERSION, } from "@oworker/open-agent-contracts/agent-session";
 export const EVE_AGENT_SESSION_ADAPTER_VERSION = "0.1.0-alpha.9";
 /**
- * Default interactive-session adapter for Eve 0.27.x.
+ * Default interactive-session adapter for Eve 0.31.x.
  *
  * The returned surface contains no Eve classes or event types. Hosts persist
  * the AgentSession cursor and can replace this adapter without changing UI
@@ -13,29 +13,57 @@ export function createEveAgentSessionClient(options) {
         auth: { bearer: options.getAccessToken },
         headers: options.headers,
         host: normalizeBaseUrl(options.baseUrl),
-        preserveCompletedSessions: true,
         redirect: options.redirect ?? "error",
     });
     return {
         session(cursor) {
-            return new EveAgentSession(client.session(toEveCursor(cursor)));
+            return new EveAgentSession(client, cursor);
         },
     };
 }
 class EveAgentSession {
+    client;
     sessionHandle;
-    constructor(sessionHandle) {
-        this.sessionHandle = sessionHandle;
+    constructor(client, cursor) {
+        this.client = client;
+        validateCursor(cursor);
+        if (cursor?.sessionId) {
+            this.sessionHandle = client.sessions.attach(cursor.sessionId, {
+                streamIndex: cursor.eventCursor,
+            });
+        }
     }
     get cursor() {
-        return fromEveCursor(this.sessionHandle.state);
+        return this.sessionHandle
+            ? fromEveCursor(this.sessionHandle.state)
+            : { eventCursor: 0 };
     }
     async send(input) {
         const startCursor = this.cursor.eventCursor;
-        const response = await this.sessionHandle.send(toEveSendInput(input));
+        const payload = toEveSendInput(input);
+        let response;
+        if (!this.sessionHandle) {
+            if ("inputResponses" in payload) {
+                throw new Error("An active Agent session is required to answer an input request.");
+            }
+            const created = await this.client.sessions.create({
+                message: toEveMessage(payload.message),
+                ...payload.options,
+            });
+            this.sessionHandle = created.session;
+            response = created.response;
+        }
+        else if ("inputResponses" in payload) {
+            response = await this.sessionHandle.respond(payload.inputResponses, payload.options);
+        }
+        else {
+            response = await this.sessionHandle.send(toEveMessage(payload.message), payload.options);
+        }
         return new EveAgentSessionTurn(response, startCursor);
     }
     async *stream(options) {
+        if (!this.sessionHandle)
+            return;
         let cursor = options?.after ?? this.cursor.eventCursor;
         if (!Number.isSafeInteger(cursor) || cursor < 0) {
             throw new RangeError("Agent session event cursor must be a non-negative safe integer.");
@@ -50,22 +78,25 @@ class EveAgentSession {
         }
     }
     async cancel(options) {
-        return this.sessionHandle.cancel(options);
+        return this.sessionHandle?.cancel(options) ?? { status: "no_active_turn" };
     }
     async reset() {
-        return this.sessionHandle.reset();
+        if (!this.sessionHandle)
+            return { status: "no_active_session" };
+        const result = await this.sessionHandle.reset();
+        if (result.status === "reset")
+            this.sessionHandle = undefined;
+        return result;
     }
 }
 class EveAgentSessionTurn {
     response;
     startCursor;
-    continuationToken;
     sessionId;
     consumed = false;
     constructor(response, startCursor) {
         this.response = response;
         this.startCursor = startCursor;
-        this.continuationToken = response.continuationToken;
         this.sessionId = response.sessionId;
     }
     async result() {
@@ -95,29 +126,38 @@ class EveAgentSessionTurn {
             throw new Error("AgentSessionTurn has already been consumed.");
     }
 }
-function toEveCursor(cursor) {
+function validateCursor(cursor) {
     if (!cursor)
         return undefined;
     if (!Number.isSafeInteger(cursor.eventCursor) || cursor.eventCursor < 0) {
         throw new RangeError("Agent session event cursor must be a non-negative safe integer.");
     }
-    return {
-        ...(cursor.continuationToken ? { continuationToken: cursor.continuationToken } : {}),
-        ...(cursor.sessionId ? { sessionId: cursor.sessionId } : {}),
-        streamIndex: cursor.eventCursor,
-    };
 }
 function fromEveCursor(cursor) {
     return {
-        ...(cursor.continuationToken ? { continuationToken: cursor.continuationToken } : {}),
-        ...(cursor.sessionId ? { sessionId: cursor.sessionId } : {}),
+        sessionId: cursor.sessionId,
         eventCursor: cursor.streamIndex,
     };
 }
 function toEveSendInput(input) {
     if (typeof input === "string")
-        return input;
-    return input;
+        return { message: input };
+    const options = {
+        ...(input.clientContext === undefined ? {} : { clientContext: input.clientContext }),
+        ...(input.headers === undefined ? {} : { headers: input.headers }),
+        ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+    };
+    if (input.inputResponses)
+        return { inputResponses: input.inputResponses, options };
+    if (input.message === undefined)
+        throw new Error("Agent session input requires a message or input response.");
+    return { message: input.message, options };
+}
+function toEveMessage(message) {
+    return typeof message === "string"
+        ? message
+        : [...message];
 }
 function projectSessionEvent(event, cursor) {
     const candidate = event;

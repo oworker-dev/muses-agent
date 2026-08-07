@@ -69,17 +69,13 @@ test("dispatcher waits for session.waiting before delivering", async () => {
 
 test("dispatcher admits exactly one message at a waiting boundary", async () => {
   const store = await queuedStore();
-  const runtime = new FakeMailboxRuntime({
-    continuationToken: "continue-current",
-    state: "waiting",
-  });
+  const runtime = new FakeMailboxRuntime({ state: "waiting" });
   const result = await dispatchNextAgentMailboxMessage({ runtime, store });
 
   assert.equal(result.status, "accepted");
   assert.equal(store.items[0]?.status, "accepted");
   assert.deepEqual(runtime.deliveries, [{
     clientMessageId: "message-123",
-    continuationToken: "continue-current",
     itemId: "mail-1",
     message: "Continue the task",
     sessionId: "session-1",
@@ -88,7 +84,7 @@ test("dispatcher admits exactly one message at a waiting boundary", async () => 
 
 test("ambiguous admission is not automatically retried", async () => {
   const store = await queuedStore();
-  const runtime = new FakeMailboxRuntime({ continuationToken: "continue-current", state: "waiting" });
+  const runtime = new FakeMailboxRuntime({ state: "waiting" });
   runtime.deliveryError = new AgentMailboxAdmissionError(
     "ambiguous",
     "The request may have reached Eve before the connection closed.",
@@ -123,7 +119,7 @@ test("a durable message.received commit wins over a lost admission response", as
   const store = await queuedStore();
   const runtime: AgentMailboxRuntime = {
     async inspect() {
-      return { continuationToken: "continue-current", state: "waiting" };
+      return { state: "waiting" };
     },
     async deliver(input) {
       await store.commit(input.itemId, input.sessionId);
@@ -140,7 +136,7 @@ test("a durable message.received commit wins over a lost admission response", as
 
 test("a rejected admission fails without claiming it was accepted", async () => {
   const store = await queuedStore();
-  const runtime = new FakeMailboxRuntime({ continuationToken: "continue-current", state: "waiting" });
+  const runtime = new FakeMailboxRuntime({ state: "waiting" });
   runtime.deliveryError = new AgentMailboxAdmissionError("rejected", "The session is terminal.");
   const result = await dispatchNextAgentMailboxMessage({ runtime, store });
 
@@ -164,7 +160,6 @@ class FakeMailboxRuntime implements AgentMailboxRuntime {
   boundary: AgentMailboxBoundary;
   deliveries: Array<{
     clientMessageId: string;
-    continuationToken: string;
     itemId: string;
     message: string;
     sessionId: string;
@@ -182,7 +177,6 @@ class FakeMailboxRuntime implements AgentMailboxRuntime {
   async deliver(input: Parameters<AgentMailboxRuntime["deliver"]>[0]) {
     this.deliveries.push({
       clientMessageId: input.clientMessageId,
-      continuationToken: input.continuationToken,
       itemId: input.itemId,
       message: input.payload.message,
       sessionId: input.sessionId,

@@ -34,7 +34,6 @@
     "check": "tsc --noEmit -p tsconfig.build.json"
   },
   "dependencies": {
-    "@assistant-ui/eve": "^0.0.8",
     "@assistant-ui/react": "^0.15.5",
     "@assistant-ui/react-ai-sdk": "^1.4.4",
     "@assistant-ui/react-lexical": "^0.2.7",
@@ -80,7 +79,7 @@
   },
   "peerDependencies": {
     "ai": ">=7.0.0 <8.0.0",
-    "eve": ">=0.27.8 <0.28.0",
+    "eve": ">=0.31.1 <0.32.0",
     "react": ">=19.2.0 <20.0.0",
     "react-dom": ">=19.2.0 <20.0.0"
   },

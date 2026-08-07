@@ -28,6 +28,5 @@ declare const Reasoning: ReasoningMessagePartComponent & {
     Text: typeof ReasoningText;
     Fade: typeof ReasoningFade;
 };
-declare const ReasoningGroup: import("react").NamedExoticComponent<import("@assistant-ui/react").ReasoningGroupProps>;
-export { Reasoning, ReasoningGroup, ReasoningRoot, ReasoningTrigger, ReasoningContent, ReasoningText, ReasoningFade, reasoningVariants, };
+export { Reasoning, ReasoningRoot, ReasoningTrigger, ReasoningContent, ReasoningText, ReasoningFade, reasoningVariants, };
 //# sourceMappingURL=reasoning.d.ts.map

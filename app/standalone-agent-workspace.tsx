@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import {
   AgentWorkspace,
+  browserThreadStorage,
   createHttpAgentMailbox,
   createHttpAgentThreadStorage,
   type AgentExtensionInfo,
@@ -23,6 +24,7 @@ type StandaloneAgentWorkspaceProps = {
   readonly models: readonly AgentModelOption[];
   readonly reasoningLevels: readonly string[];
   readonly runtimeStatus: AgentRuntimeStatus;
+  readonly storageMode: "browser" | "server";
 };
 
 export function StandaloneAgentWorkspace({
@@ -35,16 +37,20 @@ export function StandaloneAgentWorkspace({
   models,
   reasoningLevels,
   runtimeStatus,
+  storageMode,
 }: StandaloneAgentWorkspaceProps) {
   const pathname = usePathname();
-  const threadStorage = useMemo(
+  const httpThreadStorage = useMemo(
     () => createHttpAgentThreadStorage({ endpoint: "/api/standalone/thread-collections" }),
     [],
   );
   const mailbox = useMemo(
-    () => createHttpAgentMailbox({ endpoint: "/api/standalone/mailbox" }),
-    [],
+    () => storageMode === "server"
+      ? createHttpAgentMailbox({ endpoint: "/api/standalone/mailbox" })
+      : undefined,
+    [storageMode],
   );
+  const threadStorage = storageMode === "server" ? httpThreadStorage : browserThreadStorage;
   const handleActiveThreadChange = useCallback((threadId?: string) => {
     const target = threadId ? `/threads/${encodeURIComponent(threadId)}` : "/";
     if (window.location.pathname !== target) window.history.replaceState(null, "", target);

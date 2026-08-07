@@ -11,7 +11,6 @@ import {
   CheckIcon,
   CheckCircleIcon,
   ChevronDownIcon,
-  CirclePauseIcon,
   CircleStopIcon,
   CopyIcon,
   ExternalLinkIcon,
@@ -27,8 +26,9 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import { StaticMarkdownText } from "../assistant-ui/markdown-text.js";
+import { copyText } from "../assistant-ui/copy-text.js";
 import {
   ReasoningContent,
   ReasoningRoot,
@@ -96,7 +96,7 @@ export function AgentMessage({
   showCopyAction = true,
 }: {
   readonly canRespond: boolean;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly fallbackStartedAt?: number;
   readonly isStreaming: boolean;
   readonly locale: AgentLocale;
@@ -106,11 +106,6 @@ export function AgentMessage({
   readonly showCopyAction?: boolean;
 }) {
   const task = presentAgentTurn(message, events);
-  const lastTextIndex = message.parts.reduce(
-    (last, part, index) => (part.type === "text" ? index : last),
-    -1,
-  );
-
   const responseText = task?.finalPart?.text ?? (task ? undefined : lastText(message.parts));
 
   return (
@@ -121,7 +116,15 @@ export function AgentMessage({
       <MessageContent className={message.role === "assistant" ? "w-full" : undefined}>
         {task ? (
           <>
-            <ExecutionGroup fallbackStartedAt={fallbackStartedAt} locale={locale} task={task}>
+            <ExecutionGroup
+              collapseWhenSettled={Boolean(
+                task.finalPart?.text.trim() ||
+                hasLaterFinalDelivery(events, message.metadata?.turnId),
+              )}
+              fallbackStartedAt={fallbackStartedAt}
+              locale={locale}
+              task={task}
+            >
               <ProcessParts
                 canRespond={canRespond}
                 events={events}
@@ -145,7 +148,6 @@ export function AgentMessage({
                     onInputResponses={onInputResponses}
                     onOpenSubagent={onOpenSubagent}
                     part={part}
-                    showCaret={false}
                     turnId={message.metadata?.turnId}
                   />
                 </div>
@@ -160,7 +162,6 @@ export function AgentMessage({
                 onInputResponses={onInputResponses}
                 onOpenSubagent={onOpenSubagent}
                 part={task.finalPart}
-                showCaret={isStreaming && task.finalPart.state === "streaming"}
                 turnId={message.metadata?.turnId}
               />
             ) : null}
@@ -175,7 +176,6 @@ export function AgentMessage({
             onInputResponses={onInputResponses}
             onOpenSubagent={onOpenSubagent}
             part={part}
-            showCaret={isStreaming && message.role === "assistant" && index === lastTextIndex}
             turnId={message.metadata?.turnId}
           />
         ))}
@@ -195,27 +195,25 @@ function AgentMessagePart({
   onOpenSubagent,
   onInputResponses,
   part,
-  showCaret,
   turnId,
 }: {
   readonly canRespond: boolean;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly inActiveExecution: boolean;
   readonly locale: AgentLocale;
   readonly onOpenSubagent?: (sessionId: string) => void;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
-  readonly showCaret: boolean;
   readonly turnId?: string;
 }) {
   switch (part.type) {
     case "step-start":
       return null;
     case "text":
+      if (!part.text.trim()) return null;
       return (
         <div className="relative break-words">
           <StaticMarkdownText text={part.text} />
-          {showCaret ? <span className="ml-1 inline-block animate-pulse text-muted-foreground">|</span> : null}
         </div>
       );
     case "reasoning": {
@@ -242,7 +240,7 @@ function ProcessParts({
   turnId,
 }: {
   readonly canRespond: boolean;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly inActiveExecution: boolean;
   readonly locale: AgentLocale;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
@@ -265,7 +263,6 @@ function ProcessParts({
           onInputResponses={onInputResponses}
           onOpenSubagent={onOpenSubagent}
           part={part}
-          showCaret={false}
           turnId={turnId}
         />,
       );
@@ -308,7 +305,6 @@ function ProcessParts({
               onInputResponses={onInputResponses}
               onOpenSubagent={onOpenSubagent}
               part={toolPart}
-              showCaret={false}
               turnId={turnId}
             />
           ))}
@@ -330,7 +326,7 @@ function ToolPart({
   part,
 }: {
   readonly canRespond: boolean;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly inActiveExecution: boolean;
   readonly locale: AgentLocale;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
@@ -341,6 +337,7 @@ function ToolPart({
   const defaultOpen = part.state === "approval-requested" ||
     Boolean(part.toolMetadata?.eve?.inputRequest && !part.toolMetadata.eve.inputResponse);
   const Icon = toolIcon(part);
+  const statusLabel = isFileMutationTool(part) ? undefined : toolStatusLabel(locale, part.state);
 
   return (
     <ToolFallbackRoot className="my-0" defaultOpen={defaultOpen}>
@@ -355,9 +352,11 @@ function ToolPart({
           <Icon className="size-4 shrink-0" />
         )}
         <span className="truncate">{toolTitle(locale, part)}</span>
-        <span className={cn("shrink-0 text-xs", part.state === "output-error" && "text-destructive")}>
-          {toolStatusLabel(locale, part.state)}
-        </span>
+        {statusLabel ? (
+          <span className={cn("shrink-0 text-xs", part.state === "output-error" && "text-destructive")}>
+            {statusLabel}
+          </span>
+        ) : null}
         <ChevronDownIcon className="size-3.5 shrink-0 -rotate-90 transition-transform group-data-[state=open]/trigger:rotate-0" />
       </CollapsibleTrigger>
       <ToolFallbackContent>
@@ -375,7 +374,7 @@ function KnownToolContent({
   onOpenSubagent,
   part,
 }: {
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly locale: AgentLocale;
   readonly onOpenSubagent?: (sessionId: string) => void;
   readonly part: EveDynamicToolPart;
@@ -392,18 +391,18 @@ function KnownToolContent({
 
   if (["apply_patch", "patch_file", "write_file", "edit_file"].includes(normalized)) {
     if (patch) {
-      return <div data-tool-view="diff"><DiffViewer contentClassName="max-h-[28rem] overflow-auto" patch={patch} showIcon size="sm" variant="ghost" /></div>;
+      return <div data-tool-view="diff"><DiffViewer contentClassName="max-h-72 overflow-auto" patch={patch} showIcon size="sm" variant="muted" /></div>;
     }
     if (fileChange) {
       return (
         <div data-tool-view="diff">
           <DiffViewer
-            contentClassName="max-h-[28rem] overflow-auto"
+            contentClassName="max-h-72 overflow-auto"
             newFile={{ content: fileChange.newContent, name: fileChange.path }}
             oldFile={{ content: fileChange.oldContent, name: fileChange.path }}
             showIcon
             size="sm"
-            variant="ghost"
+            variant="muted"
           />
         </div>
       );
@@ -421,9 +420,9 @@ function KnownToolContent({
     const path = firstString(input, ["path", "file", "filename"]);
     const result = readableOutput(output);
     return (
-      <div className="space-y-1.5 text-xs">
-        {path ? <p className="truncate font-mono text-muted-foreground">{path}</p> : null}
-        {result ? <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-foreground">{result}</pre> : null}
+      <div className="overflow-hidden rounded-md bg-muted/50 text-xs" data-tool-view="file-read">
+        {path ? <p className="truncate border-b border-border/40 px-3 py-2 font-mono text-muted-foreground">{path}</p> : null}
+        {result ? <pre className="max-h-72 overflow-auto whitespace-pre px-3 py-2.5 font-mono text-foreground">{result}</pre> : null}
       </div>
     );
   }
@@ -447,9 +446,30 @@ function KnownToolContent({
     const query = firstString(input, ["query", "pattern", "glob", "path"]);
     const result = readableOutput(output);
     return (
-      <div className="space-y-1.5 text-xs">
-        {query ? <p className="font-mono text-muted-foreground">{query}</p> : null}
-        {result ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-foreground">{result}</pre> : null}
+      <div className="overflow-hidden rounded-md bg-muted/50 text-xs" data-tool-view="search">
+        {query ? <p className="border-b border-border/40 px-3 py-2 font-mono text-muted-foreground">{query}</p> : null}
+        {result ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 text-foreground">{result}</pre> : null}
+      </div>
+    );
+  }
+
+  if (["web_fetch", "fetch_url"].includes(normalized)) {
+    const record = asRecord(output);
+    const contentType = firstString(record, ["contentType", "content_type"]);
+    const url = firstString(record, ["url"]) ?? firstString(input, ["url"]);
+    const binary = record?.binary === true;
+    const content = firstString(record, ["content"]);
+    return (
+      <div className="overflow-hidden rounded-md bg-muted/50 text-xs" data-tool-view="web-fetch">
+        {url ? <p className="truncate border-b border-border/40 px-3 py-2 text-muted-foreground">{url}</p> : null}
+        {binary ? (
+          <p className="px-3 py-2.5 text-muted-foreground">
+            {localize(locale, "Binary response kept out of text context", "二进制响应未进入文本上下文")}
+            {contentType ? ` · ${contentType}` : ""}
+          </p>
+        ) : content ? (
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 text-foreground">{content}</pre>
+        ) : null}
       </div>
     );
   }
@@ -513,6 +533,7 @@ function toolIcon(part: EveDynamicToolPart): React.ComponentType<{ className?: s
   if (["bash", "shell", "terminal", "exec_command"].includes(normalized)) return TerminalIcon;
   if (["read_file", "read", "view_file", "glob", "find_files"].includes(normalized)) return FileSearchIcon;
   if (["grep", "search_files", "web_search", "search_web", "search"].includes(normalized)) return SearchIcon;
+  if (["web_fetch", "fetch_url"].includes(normalized)) return ExternalLinkIcon;
   if (["todo", "todo_write", "update_plan"].includes(normalized)) return ListChecksIcon;
   if (["write_file", "edit_file", "apply_patch", "patch_file", "publish_artifact", "artifact_publish"].includes(normalized)) return FileIcon;
   if (["record_checkpoint", "checkpoint"].includes(normalized)) return CheckCircleIcon;
@@ -527,13 +548,78 @@ function normalizeToolName(toolName: string): string {
   return toolName.toLocaleLowerCase().replaceAll("-", "_");
 }
 
+function isFileMutationTool(part: EveDynamicToolPart): boolean {
+  return ["apply_patch", "patch_file", "write_file", "edit_file"].includes(
+    normalizeToolName(part.toolName),
+  );
+}
+
+type FileMutationSummary = {
+  readonly additions: number;
+  readonly deletions: number;
+  readonly operation: "create" | "delete" | "edit";
+  readonly path?: string;
+};
+
+function fileMutationSummary(part: EveDynamicToolPart): FileMutationSummary {
+  const patch = toolPatch(part);
+  const change = toolFileChange(part);
+  const patchPath = patch ? patchFilePath(patch) : undefined;
+  const path = change?.path ?? patchPath;
+  const patchStats = patch ? patchLineStats(patch) : undefined;
+  const additions = patchStats?.additions ?? countContentLines(change?.newContent);
+  const deletions = patchStats?.deletions ?? countContentLines(change?.oldContent);
+  const operation = patch?.includes("--- /dev/null") || (change && change.oldContent.length === 0)
+    ? "create"
+    : patch?.includes("+++ /dev/null") || (change && change.newContent.length === 0)
+      ? "delete"
+      : "edit";
+  return { additions, deletions, operation, ...(path ? { path } : {}) };
+}
+
+function fileMutationTitle(locale: AgentLocale, part: EveDynamicToolPart): string {
+  const running = !isToolTerminal(part.state);
+  const summary = fileMutationSummary(part);
+  const action = summary.operation === "create"
+    ? running ? localize(locale, "Creating", "正在创建") : localize(locale, "Created", "已创建")
+    : summary.operation === "delete"
+      ? running ? localize(locale, "Deleting", "正在删除") : localize(locale, "Deleted", "已删除")
+      : running ? localize(locale, "Editing", "正在编辑") : localize(locale, "Edited", "已编辑");
+  const stats = [
+    summary.additions > 0 ? `+${summary.additions}` : undefined,
+    summary.deletions > 0 ? `-${summary.deletions}` : undefined,
+  ].filter(Boolean).join(" ");
+  return [action, summary.path, stats].filter(Boolean).join(" ");
+}
+
+function patchFilePath(patch: string): string | undefined {
+  const match = patch.match(/^\+\+\+\s+(?:b\/)?(.+)$/m) ?? patch.match(/^---\s+(?:a\/)?(.+)$/m);
+  const path = match?.[1]?.trim();
+  return path && path !== "/dev/null" ? path : undefined;
+}
+
+function patchLineStats(patch: string): { readonly additions: number; readonly deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
+    if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+  }
+  return { additions, deletions };
+}
+
+function countContentLines(value: string | undefined): number {
+  if (!value) return 0;
+  return value.endsWith("\n") ? value.slice(0, -1).split("\n").length : value.split("\n").length;
+}
+
 function ReasoningPart({
   events,
   locale,
   part,
   turnId,
 }: {
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly locale: AgentLocale;
   readonly part: Extract<EveMessagePart, { type: "reasoning" }>;
   readonly turnId?: string;
@@ -545,7 +631,7 @@ function ReasoningPart({
     <ReasoningRoot className="mb-1" defaultOpen={streaming} streaming={streaming} variant="ghost">
       <ReasoningTrigger
         active={streaming}
-        duration={timing.startedAt ? durationSeconds : undefined}
+        duration={!streaming && timing.startedAt && durationSeconds > 0 ? durationSeconds : undefined}
         label={streaming
           ? reasoningSummary(part.text) ?? localize(locale, "Thinking", "正在思考")
           : localize(locale, "Reasoning complete", "思考完成")}
@@ -568,7 +654,7 @@ function reasoningSummary(text: string): string | undefined {
 }
 
 function reasoningTiming(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   turnId: string | undefined,
   stepIndex: number | undefined,
 ): { readonly endedAt?: number; readonly startedAt?: number } {
@@ -585,7 +671,7 @@ function reasoningTiming(
   };
 }
 
-function eventTime(event: HandleMessageStreamEvent | undefined): number | undefined {
+function eventTime(event: MessageStreamEvent | undefined): number | undefined {
   const at = event?.meta?.at;
   if (!at) return undefined;
   const parsed = Date.parse(at);
@@ -664,15 +750,19 @@ function ShellToolContent({
   const exitCode = shellExitCode(output);
   const copyCommand = async () => {
     if (!command) return;
-    await navigator.clipboard.writeText(command);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1_500);
+    try {
+      await copyText(command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1_500);
+    } catch {
+      setCopied(false);
+    }
   };
   return (
-    <div className="overflow-hidden rounded-md bg-muted/55 font-mono text-xs" data-tool-view="terminal">
-      <div className="flex min-h-9 items-center gap-2 px-3 py-2">
+    <div className="overflow-hidden rounded-md bg-muted/50 font-mono text-xs" data-tool-view="terminal">
+      <div className="flex min-h-9 items-start gap-2 px-3 py-2.5">
         <TerminalIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words text-foreground">{command ?? localize(locale, "Shell command", "终端命令")}</pre>
+        <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre text-foreground">{command ?? localize(locale, "Shell command", "终端命令")}</pre>
         {running ? (
           <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
         ) : exitCode !== undefined ? (
@@ -685,7 +775,7 @@ function ShellToolContent({
         ) : null}
       </div>
       {result ? (
-        <pre className="max-h-80 overflow-auto border-t border-border/50 px-3 py-2.5 whitespace-pre-wrap break-words text-muted-foreground">{result}</pre>
+        <pre className="max-h-72 overflow-auto border-t border-border/40 bg-background/40 px-3 py-2.5 whitespace-pre text-muted-foreground">{result}</pre>
       ) : !running && output !== undefined ? (
         <p className="border-t border-border/50 px-3 py-2 font-sans text-muted-foreground">{localize(locale, "Command completed with no output.", "命令已完成，没有输出。")}</p>
       ) : null}
@@ -760,7 +850,7 @@ function SubagentProgress({
   onOpenSubagent,
   part,
 }: {
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly locale: AgentLocale;
   readonly onOpenSubagent?: (sessionId: string) => void;
   readonly part: EveDynamicToolPart;
@@ -834,55 +924,71 @@ function SubagentProgress({
 
 function ExecutionGroup({
   children,
+  collapseWhenSettled,
   fallbackStartedAt,
   locale,
   task,
 }: {
   readonly children: React.ReactNode;
+  readonly collapseWhenSettled: boolean;
   readonly fallbackStartedAt?: number;
   readonly locale: AgentLocale;
   readonly task: AgentTurnPresentation;
 }) {
   const isActive = task.status === "running" || task.status === "waiting";
-  const [open, setOpen] = useState(isActive);
+  const hasFinalDelivery = task.status === "completed" && collapseWhenSettled;
+  const [open, setOpen] = useState(!hasFinalDelivery);
   const previousStatus = useRef(task.status);
+  const previousFinalDelivery = useRef(hasFinalDelivery);
   const startedAt = task.startedAt ?? fallbackStartedAt;
   const elapsedSeconds = useElapsedSeconds(startedAt, task.endedAt);
 
   useEffect(() => {
     const wasActive = previousStatus.current === "running" || previousStatus.current === "waiting";
+    const finalDeliveryArrived = !previousFinalDelivery.current && hasFinalDelivery;
     if (task.status === "waiting") setOpen(true);
-    else if (wasActive && !isActive) setOpen(false);
+    else if (finalDeliveryArrived || wasActive && hasFinalDelivery) setOpen(false);
+    else if (wasActive && !isActive) setOpen(true);
     previousStatus.current = task.status;
-  }, [isActive, task.status]);
+    previousFinalDelivery.current = hasFinalDelivery;
+  }, [hasFinalDelivery, isActive, task.status]);
 
   return (
     <Collapsible className="group/execution w-full" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger asChild>
         <button
-          className="flex w-full items-center gap-2 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="flex w-full items-center gap-1.5 border-b border-border/60 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
           type="button"
         >
-          {task.status === "running" ? (
-            <LoaderCircleIcon className="size-4 shrink-0 animate-spin" />
-          ) : task.status === "waiting" ? (
-            <CirclePauseIcon className="size-4 shrink-0 text-amber-600 dark:text-amber-300" />
-          ) : task.status === "completed" ? (
-            <CheckCircleIcon className="size-4 shrink-0" />
-          ) : (
-            <XCircleIcon className="size-4 shrink-0" />
-          )}
           <span>{executionLabel(locale, task.status)}</span>
-          {startedAt ? <span className="tabular-nums">{formatDuration(elapsedSeconds)}</span> : null}
+          {startedAt && elapsedSeconds > 0 ? <span className="tabular-nums">{formatDuration(elapsedSeconds)}</span> : null}
           <ChevronDownIcon className="size-3.5 transition-transform group-data-[state=open]/execution:rotate-180" />
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in">
-        <div className="mt-2 space-y-3 border-t border-border/60 pt-3">
+        <div className="mt-2 space-y-3 pt-2">
           {children}
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+function hasLaterFinalDelivery(
+  events: readonly MessageStreamEvent[],
+  turnId: string | undefined,
+): boolean {
+  if (!turnId) return false;
+  const turnEnd = events.findIndex((event) =>
+    (event.type === "turn.completed" || event.type === "turn.cancelled" || event.type === "turn.failed") &&
+    event.data.turnId === turnId,
+  );
+  if (turnEnd < 0) return false;
+  return events.slice(turnEnd + 1).some((event) =>
+    event.type === "message.completed" &&
+    event.data.finishReason === "stop" &&
+    typeof event.data.message === "string" &&
+    event.data.message.trim().length > 0,
   );
 }
 
@@ -892,7 +998,7 @@ function CopyResponseAction({ locale, text }: { readonly locale: AgentLocale; re
   useEffect(() => () => window.clearTimeout(timeout.current), []);
 
   return (
-    <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+    <MessageActions>
       <MessageAction
         label={localize(locale, "Copy response", "复制回复")}
         onClick={() => {
@@ -939,22 +1045,6 @@ function formatDuration(totalSeconds: number): string {
 function lastText(parts: readonly EveMessagePart[]): string | undefined {
   const part = [...parts].reverse().find((candidate) => candidate.type === "text");
   return part?.type === "text" ? part.text : undefined;
-}
-
-async function copyText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  textarea.remove();
-  if (!copied) throw new Error("Clipboard access is unavailable.");
 }
 
 function AttachmentPart({ locale, part }: { readonly locale: AgentLocale; readonly part: EveFilePart }) {
@@ -1178,16 +1268,17 @@ function toolTitle(locale: AgentLocale, part: EveDynamicToolPart): string {
   if (kind === "subagent-call") return localize(locale, "Sub-agent", "子代理");
 
   const normalized = part.toolName.toLocaleLowerCase().replaceAll("-", "_");
+  if (isFileMutationTool(part)) return fileMutationTitle(locale, part);
   if (["bash", "shell", "terminal", "exec_command"].includes(normalized)) return localize(locale, "Terminal command", "终端命令");
   if (["publish_preview", "website_preview"].includes(normalized)) return localize(locale, "Published preview", "发布网站预览");
   if (["publish_artifact", "artifact_publish"].includes(normalized)) return localize(locale, "Published artifact", "发布产物");
   if (["record_checkpoint", "checkpoint"].includes(normalized)) return localize(locale, "Saved checkpoint", "保存检查点");
   if (["read_file", "read", "view_file"].includes(normalized)) return localize(locale, "Read file", "读取文件");
-  if (["write_file", "edit_file", "apply_patch", "patch_file"].includes(normalized)) return localize(locale, "Edited files", "编辑文件");
   if (["glob", "find_files"].includes(normalized)) return localize(locale, "Found files", "查找文件");
   if (["grep", "search_files"].includes(normalized)) return localize(locale, "Searched files", "搜索文件");
   if (["todo", "todo_write", "update_plan"].includes(normalized)) return localize(locale, "Updated tasks", "更新任务列表");
   if (["web_search", "search_web", "search"].includes(normalized)) return localize(locale, "Searched the web", "搜索网页");
+  if (["web_fetch", "fetch_url"].includes(normalized)) return localize(locale, "Fetched webpage", "读取网页");
   return part.toolName.replaceAll("_", " ");
 }
 

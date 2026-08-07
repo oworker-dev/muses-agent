@@ -14,9 +14,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import {
   useScrollLock,
-  useAuiState,
   type ReasoningMessagePartComponent,
-  type ReasoningGroupComponent,
 } from "@assistant-ui/react";
 import { MarkdownText } from "./markdown-text.js";
 import {
@@ -180,7 +178,7 @@ function ReasoningTrigger({
   duration?: number;
   label?: React.ReactNode;
 }) {
-  const durationText = duration !== undefined ? ` (${duration}s)` : "";
+  const durationText = duration !== undefined && duration > 0 ? ` ${duration}s` : "";
   const displayLabel = typeof label === "string" ? `${label}${durationText}` : label;
 
   return (
@@ -194,18 +192,12 @@ function ReasoningTrigger({
     >
       <span
         data-slot="reasoning-trigger-label"
-        className="aui-reasoning-trigger-label-wrapper relative inline-block whitespace-nowrap leading-none tabular-nums"
+        className={cn(
+          "aui-reasoning-trigger-label-wrapper relative inline-block whitespace-nowrap leading-none tabular-nums",
+          active && "shimmer motion-reduce:animate-none",
+        )}
       >
         <span>{displayLabel}</span>
-        {active ? (
-          <span
-            aria-hidden
-            data-slot="reasoning-trigger-shimmer"
-            className="aui-reasoning-trigger-shimmer shimmer pointer-events-none absolute inset-0 motion-reduce:animate-none"
-          >
-            {displayLabel}
-          </span>
-        ) : null}
       </span>
       <ChevronDownIcon
         data-slot="reasoning-trigger-chevron"
@@ -335,29 +327,6 @@ function ReasoningText({
 
 const ReasoningImpl: ReasoningMessagePartComponent = () => <MarkdownText />;
 
-const ReasoningGroupImpl: ReasoningGroupComponent = ({
-  children,
-  startIndex,
-  endIndex,
-}) => {
-  const isReasoningStreaming = useAuiState((s) => {
-    if (s.message.status?.type !== "running") return false;
-    for (let index = startIndex; index <= endIndex; index++) {
-      if (s.message.parts[index]?.status.type === "running") return true;
-    }
-    return false;
-  });
-
-  return (
-    <ReasoningRoot streaming={isReasoningStreaming}>
-      <ReasoningTrigger active={isReasoningStreaming} />
-      <ReasoningContent aria-busy={isReasoningStreaming}>
-        <ReasoningText>{children}</ReasoningText>
-      </ReasoningContent>
-    </ReasoningRoot>
-  );
-};
-
 const Reasoning = memo(
   ReasoningImpl,
 ) as unknown as ReasoningMessagePartComponent & {
@@ -375,19 +344,8 @@ Reasoning.Content = ReasoningContent;
 Reasoning.Text = ReasoningText;
 Reasoning.Fade = ReasoningFade;
 
-/**
- * @deprecated This wrapper targets the legacy `components.ReasoningGroup`
- * prop on `<MessagePrimitive.Parts>`. Use `<MessagePrimitive.GroupedParts>`
- * with a `groupBy` returning `"group-reasoning"` and compose `ReasoningRoot`
- * / `ReasoningTrigger` / `ReasoningContent` / `ReasoningText` directly.
- * See `thread.tsx` for an example.
- */
-const ReasoningGroup = memo(ReasoningGroupImpl);
-ReasoningGroup.displayName = "ReasoningGroup";
-
 export {
   Reasoning,
-  ReasoningGroup,
   ReasoningRoot,
   ReasoningTrigger,
   ReasoningContent,

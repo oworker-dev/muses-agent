@@ -1,1 +1,1 @@
-{"version":3,"file":"agent-activity-state.js","sourceRoot":"","sources":["../../src/agent-workspace/agent-activity-state.ts"],"names":[],"mappings":"AAGA,MAAM,UAAU,aAAa,CAC3B,OAA4C,EAC5C,QAAuB,EACvB,QAIC;IAED,OAAO,QAAQ,CAAC,QAAQ,CAAC;AAC3B,CAAC"}
+{"version":3,"file":"agent-activity-state.js","sourceRoot":"","sources":["../../src/agent-workspace/agent-activity-state.ts"],"names":[],"mappings":"AAGA,MAAM,UAAU,aAAa,CAC3B,OAAsC,EACtC,QAAuB,EACvB,QAIC;IAED,OAAO,QAAQ,CAAC,QAAQ,CAAC;AAC3B,CAAC"}

@@ -82,6 +82,10 @@ export function unresolvedInputRequests(events) {
 export function hasUnresolvedInputRequests(events) {
     return unresolvedInputRequests(events).length > 0;
 }
+export function eventsBeforeLastUserTurn(events) {
+    const lastUserTurnIndex = events.findLastIndex((event) => event.type === "message.received");
+    return lastUserTurnIndex < 0 ? [] : events.slice(0, lastUserTurnIndex);
+}
 export function presentSubagentCall(events, callId) {
     const started = events.find((event) => event.type === "subagent.called" && event.data.callId === callId);
     const completed = [...events].reverse().find((event) => event.type === "subagent.completed" && event.data.callId === callId);
@@ -174,6 +178,7 @@ function toProxiedInputPart(request) {
                 inputRequest: {
                     allowFreeform: request.allowFreeform,
                     display: request.display,
+                    kind: request.kind,
                     options: request.options,
                     prompt: request.prompt,
                     requestId: request.requestId,

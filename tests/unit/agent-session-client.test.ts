@@ -13,7 +13,7 @@ test("Eve session adapter exposes a host-neutral durable cursor and events", asy
     const path = new URL(url).pathname;
     if (init?.method === "POST" && path === "/eve/v1/session") {
       return Response.json(
-        { continuationToken: "continue-1", sessionId: "session-1" },
+        { sessionId: "session-1" },
         { headers: { "x-eve-session-id": "session-1" }, status: 202 },
       );
     }
@@ -26,13 +26,13 @@ test("Eve session adapter exposes a host-neutral durable cursor and events", asy
           data: { finishReason: "stop", message: "Done", sequence: 1, stepIndex: 0, turnId: "turn-1" },
         },
         { type: "turn.completed", data: { sequence: 1, turnId: "turn-1" } },
-        { type: "session.waiting", data: { continuationToken: "continue-2", wait: "next-user-message" } },
+        { type: "session.waiting", data: { wait: "next-user-message" } },
       ]);
     }
     if (init?.method === "POST" && path === "/eve/v1/session/session-1/cancel") {
       return Response.json({ ok: true, sessionId: "session-1", status: "accepted" });
     }
-    if (init?.method === "POST" && path === "/eve/v1/session/reset") {
+    if (init?.method === "POST" && path === "/eve/v1/session/session-1/reset") {
       return Response.json({ ok: true, previousSessionId: "session-1", status: "reset" });
     }
     return new Response("not found", { status: 404 });
@@ -51,7 +51,6 @@ test("Eve session adapter exposes a host-neutral durable cursor and events", asy
     assert.equal(result.status, "waiting");
     assert.deepEqual(result.events.map((event) => event.cursor), [1, 2, 3, 4, 5]);
     assert.deepEqual(session.cursor, {
-      continuationToken: "continue-2",
       eventCursor: 5,
       sessionId: "session-1",
     });

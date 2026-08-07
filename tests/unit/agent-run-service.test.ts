@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ClientError, type HandleMessageStreamEvent } from "eve/client";
+import { ClientError, type MessageStreamEvent } from "eve/client";
 
 import {
   DEFAULT_AGENT_PROFILE,
   type AgentRunPolicy,
-} from "../../contracts/agent-run.ts";
+} from "@oworker/open-agent-contracts/agent-run";
 import type {
   AgentRunProjection,
   AgentRunRecord,
@@ -169,7 +169,100 @@ test("projects usage, result, status, and incremental event cursors", async () =
   assert.ok(result);
   assert.equal(result.events.length, events.length - 2);
   assert.equal(result.events[0]?.sequence, 3);
+  assert.equal(result.nextCursor, events.length);
   assert.equal(result.record.eventCount, events.length);
+  assert.deepEqual(runtime.calls.readStartIndexes, [0, 2]);
+});
+
+test("synchronizes long AgentRuns in bounded cursor pages", async () => {
+  const events = longCompletedEvents(405);
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-long", message: "Run for a while" }),
+    runtime,
+    store,
+  });
+
+  const first = await inspectAgentRun({
+    accessToken: "token",
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(first?.eventCount, 200);
+  assert.equal(first?.status, "running");
+
+  const second = await inspectAgentRun({
+    accessToken: "token",
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  const completed = await inspectAgentRun({
+    accessToken: "token",
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(second?.eventCount, 400);
+  assert.equal(completed?.eventCount, events.length);
+  assert.equal(completed?.status, "completed");
+  assert.deepEqual(runtime.calls.readStartIndexes, [0, 200, 400]);
+
+  const firstPage = await readAgentRunEvents({
+    accessToken: "token",
+    after: 0,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  const secondPage = await readAgentRunEvents({
+    accessToken: "token",
+    after: firstPage!.nextCursor,
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(firstPage?.events.length, 200);
+  assert.equal(firstPage?.nextCursor, 200);
+  assert.equal(secondPage?.events[0]?.sequence, 201);
+  assert.equal(secondPage?.nextCursor, 400);
+});
+
+test("does not let an older AgentRun projection overwrite a newer cursor", async () => {
+  const store = new MemoryAgentRunStore();
+  const runtime = fakeRuntime({ events: longCompletedEvents(205) });
+  const started = await startAgentRun({
+    accessToken: "token",
+    identity: user,
+    request: parseRequest({ idempotencyKey: "request-stale-projection", message: "Run" }),
+    runtime,
+    store,
+  });
+  const first = await inspectAgentRun({
+    accessToken: "token",
+    identity: user,
+    runId: started.record.runId,
+    runtime,
+    store,
+  });
+  assert.equal(first?.eventCount, 200);
+
+  const stale = await store.updateProjection(started.record.runId, {
+    eventCount: 10,
+    status: "running",
+    usage: emptyUsage(),
+  });
+  assert.equal(stale.eventCount, 200);
+  assert.deepEqual(stale.usage, first?.usage);
 });
 
 test("cancellation is idempotent and reaches Eve only once", async () => {
@@ -437,20 +530,21 @@ function parseRequest(input: {
   return parsed.value;
 }
 
-function runningEvents(): readonly HandleMessageStreamEvent[] {
+function runningEvents(): readonly MessageStreamEvent[] {
   return [
-    { type: "session.started", data: {} },
-    { type: "turn.started", data: { sequence: 1, turnId: "turn-1" } },
+    { type: "session.started", data: {}, meta: eventMeta(1) },
+    { type: "turn.started", data: { sequence: 1, turnId: "turn-1" }, meta: eventMeta(2) },
   ];
 }
 
-function completedEvents(): readonly HandleMessageStreamEvent[] {
+function completedEvents(): readonly MessageStreamEvent[] {
   return [
-    { type: "session.started", data: {} },
-    { type: "turn.started", data: { sequence: 1, turnId: "turn-1" } },
+    { type: "session.started", data: {}, meta: eventMeta(1) },
+    { type: "turn.started", data: { sequence: 1, turnId: "turn-1" }, meta: eventMeta(2) },
     {
       type: "message.completed",
       data: { finishReason: "stop", message: "Done", sequence: 2, stepIndex: 0, turnId: "turn-1" },
+      meta: eventMeta(3),
     },
     {
       type: "step.completed",
@@ -467,18 +561,53 @@ function completedEvents(): readonly HandleMessageStreamEvent[] {
           outputTokens: 8,
         },
       },
+      meta: eventMeta(4),
     },
-    { type: "turn.completed", data: { sequence: 4, turnId: "turn-1" } },
-    { type: "session.waiting", data: { continuationToken: "continue-1", wait: "next-user-message" } },
+    { type: "turn.completed", data: { sequence: 4, turnId: "turn-1" }, meta: eventMeta(5) },
+    waitingEvent(6),
   ];
 }
 
-function cancelledEvents(): readonly HandleMessageStreamEvent[] {
+function cancelledEvents(): readonly MessageStreamEvent[] {
   return [
     ...runningEvents(),
-    { type: "turn.cancelled", data: { sequence: 2, turnId: "turn-1" } },
-    { type: "session.waiting", data: { continuationToken: "continue-1", wait: "next-user-message" } },
+    { type: "turn.cancelled", data: { sequence: 2, turnId: "turn-1" }, meta: eventMeta(3) },
+    waitingEvent(4),
   ];
+}
+
+function longCompletedEvents(count: number): readonly MessageStreamEvent[] {
+  const events: MessageStreamEvent[] = [
+    { type: "session.started", data: {}, meta: eventMeta(1) },
+    { type: "turn.started", data: { sequence: 0, turnId: "turn-long" }, meta: eventMeta(2) },
+  ];
+  while (events.length < count - 2) {
+    const sequence = events.length + 1;
+    events.push({
+      type: "message.appended",
+      data: {
+        messageDelta: "x",
+        messageSoFar: "x".repeat(sequence),
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-long",
+      },
+      meta: eventMeta(sequence),
+    });
+  }
+  events.push({
+    type: "message.completed",
+    data: {
+      finishReason: "stop",
+      message: "Done",
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn-long",
+    },
+    meta: eventMeta(count - 1),
+  });
+  events.push(waitingEvent(count));
+  return events;
 }
 
 const immediateCancellation = {
@@ -490,10 +619,18 @@ const immediateCancellation = {
 function fakeRuntime(options: {
   readonly cancelError?: Error;
   readonly cancelStatus?: "accepted" | "no_active_turn";
-  readonly events?: readonly HandleMessageStreamEvent[];
+  readonly events?: readonly MessageStreamEvent[];
   readonly startError?: Error;
-} = {}): AgentRunRuntime & { readonly calls: { cancel: number; read: number; reset: number; start: number } } {
-  const calls = { cancel: 0, read: 0, reset: 0, start: 0 };
+} = {}): AgentRunRuntime & {
+  readonly calls: {
+    cancel: number;
+    read: number;
+    readStartIndexes: number[];
+    reset: number;
+    start: number;
+  };
+} {
+  const calls = { cancel: 0, read: 0, readStartIndexes: [] as number[], reset: 0, start: 0 };
   return {
     async cancel() {
       calls.cancel += 1;
@@ -501,9 +638,10 @@ function fakeRuntime(options: {
       return options.cancelStatus ?? "accepted";
     },
     calls,
-    async readEvents() {
+    async readEvents(_runId, _correlationId, _sessionId, _accessToken, startIndex = 0, limit = 200) {
       calls.read += 1;
-      return options.events ?? runningEvents();
+      calls.readStartIndexes.push(startIndex);
+      return (options.events ?? runningEvents()).slice(startIndex, startIndex + limit);
     },
     async reset() {
       calls.reset += 1;
@@ -512,9 +650,21 @@ function fakeRuntime(options: {
     async start() {
       calls.start += 1;
       if (options.startError) throw options.startError;
-      return { continuationToken: "continue-1", sessionId: `session-${calls.start}` };
+      return { sessionId: `session-${calls.start}` };
     },
   };
+}
+
+function eventMeta(sequence: number) {
+  return { at: new Date(sequence * 1_000).toISOString(), id: `evt_test_${sequence}` };
+}
+
+function waitingEvent(sequence: number): MessageStreamEvent {
+  return {
+    type: "session.waiting",
+    data: { wait: "next-user-message" },
+    meta: eventMeta(sequence),
+  } as unknown as MessageStreamEvent;
 }
 
 class MemoryAgentRunStore implements AgentRunStore {
@@ -556,9 +706,8 @@ class MemoryAgentRunStore implements AgentRunStore {
     return { record, status: "reserved" };
   }
 
-  async attachSession(runId: string, sessionId: string, continuationToken?: string) {
+  async attachSession(runId: string, sessionId: string) {
     return this.update(runId, {
-      ...(continuationToken ? { continuationToken } : {}),
       sessionId,
       status: "running",
     });
@@ -599,6 +748,7 @@ class MemoryAgentRunStore implements AgentRunStore {
 
   async updateProjection(runId: string, projection: AgentRunProjection) {
     const current = this.require(runId);
+    if (current.eventCount > projection.eventCount) return current;
     const cancellationPending = Boolean(current.cancellationRequestedAt);
     const status = isTerminal(current.status)
       ? current.status

@@ -43,22 +43,25 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("wide workspace supports navigation, search, settings, and multiple threads", async ({ page }) => {
+test("wide workspace supports navigation, search, settings, and a single draft session", async ({ page }) => {
   await page.setViewportSize({ height: 900, width: 1440 });
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "What should we work on?" })).toBeVisible();
-  await expect(page.locator("aside").getByRole("button", { name: "New task", exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
+  await expect(page.locator("aside").getByRole("button", { name: "New session", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeVisible();
+  await expect(page.getByText(/Changes could not be saved|当前更改暂未保存/)).toHaveCount(0);
+  await expect(page.locator('[data-slot="model-selector-value"]')).toHaveCSS("font-size", "12px");
+  await expect(page.locator('[data-slot="agent-workbench"]')).toHaveCSS("border-top-left-radius", "16px");
   await expect(page).toHaveURL(/\/$/);
 
-  await page.locator("aside").getByRole("button", { name: "New task", exact: true }).first().click();
-  await expect(page.locator("aside").getByText("New task", { exact: true })).toHaveCount(3);
+  await page.locator("aside").getByRole("button", { name: "New session", exact: true }).first().click();
+  await expect(page.locator("aside").getByText("New session", { exact: true })).toHaveCount(2);
   await expect(page.locator('aside [aria-current="page"]')).toHaveCount(1);
 
-  await page.getByRole("button", { name: "Search tasks" }).click();
-  await page.getByPlaceholder("Search task history").fill("missing task");
-  await expect(page.getByText("No matching tasks")).toBeVisible();
+  await page.getByRole("button", { name: "Search sessions" }).click();
+  await page.getByPlaceholder("Search session history").fill("missing session");
+  await expect(page.getByText("No matching sessions")).toBeVisible();
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
@@ -67,9 +70,9 @@ test("wide workspace supports navigation, search, settings, and multiple threads
   await page.getByRole("button", { name: "简体中文" }).click();
   await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("textbox", { name: "描述一个任务" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "做点什么" })).toBeVisible();
 
-  const composer = page.getByRole("textbox", { name: "描述一个任务" });
+  const composer = page.getByRole("textbox", { name: "做点什么" });
   await composer.click();
   await composer.press("/");
   await expect(page.getByText("技能与命令", { exact: true })).toHaveCount(0);
@@ -89,7 +92,7 @@ test("composer clears immediately while a turn is still being accepted", async (
   await page.route("**/eve/v1/session", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "slow-token", sessionId: "slow-session" }),
+      body: JSON.stringify({ sessionId: "slow-session" }),
       contentType: "application/json",
       status: 200,
     });
@@ -102,7 +105,7 @@ test("composer clears immediately while a turn is still being accepted", async (
     });
   });
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("A delayed request");
   await composer.press("Enter");
   await expect(composer).toHaveText("", { timeout: 300 });
@@ -113,13 +116,13 @@ test("composer clears immediately while a turn is still being accepted", async (
 
 test("root stays clean and an unsent draft survives refresh", async ({ page }) => {
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await expect(page).toHaveURL(/\/$/);
   await composer.fill("Keep this draft across refresh");
   await page.waitForTimeout(350);
   await page.reload();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toHaveText("Keep this draft across refresh");
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toHaveText("Keep this draft across refresh");
 });
 
 test("composer exposes assistant-ui attachments, permissions, and safe trigger selection", async ({ page }) => {
@@ -140,7 +143,7 @@ test("composer exposes assistant-ui attachments, permissions, and safe trigger s
   await expect(page.getByText("Run sandbox workspace operations without approval; external sensitive actions remain gated.")).toBeVisible();
   await page.keyboard.press("Escape");
 
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("@");
   await expect(page.getByText("Workspace context")).toBeVisible();
   await composer.press("Enter");
@@ -151,7 +154,7 @@ test("composer exposes assistant-ui attachments, permissions, and safe trigger s
 test("a collection conflict reloads, merges, and retries without a permanent warning", async ({ page }) => {
   const sessionId = "storage-conflict-session";
   await page.route("**/eve/v1/session", (route) => route.fulfill({
-    body: JSON.stringify({ continuationToken: "storage-conflict-token", sessionId }),
+    body: JSON.stringify({ sessionId }),
     contentType: "application/json",
     status: 200,
   }));
@@ -164,7 +167,7 @@ test("a collection conflict reloads, merges, and retries without a permanent war
   await page.waitForTimeout(350);
   const store = threadStores.get(page)!;
   store.conflictsRemaining = 1;
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Persist after conflict");
   await composer.press("Enter");
   await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
@@ -176,15 +179,26 @@ test("small workspace keeps the conversation focused and opens navigation on dem
   await page.setViewportSize({ height: 969, width: 600 });
   await page.goto("/");
 
+  const workbench = page.locator('[data-slot="agent-workbench"]');
+  await expect(workbench).toHaveCSS("border-top-left-radius", "0px");
+  await expect(workbench).toHaveCSS("border-left-width", "0px");
+  await expect(workbench).toHaveCSS("border-top-width", "0px");
+  await expect(workbench).toHaveCSS("box-shadow", "none");
+
+  const inspectSuggestion = page.getByRole("button", { name: "Inspect this workspace and summarize what matters." });
+  const implementSuggestion = page.getByRole("button", { name: "Help me plan and implement a small feature." });
+  const inspectBox = await inspectSuggestion.boundingBox();
+  const implementBox = await implementSuggestion.boundingBox();
+  expect(Math.abs((inspectBox?.y ?? 0) - (implementBox?.y ?? 0))).toBeLessThanOrEqual(1);
+
   const sidebar = page.locator("aside");
   const closedBox = await sidebar.boundingBox();
   expect(closedBox?.x).toBeLessThan(0);
   await page.getByRole("button", { name: "Open navigation" }).click();
   await expect(page.getByRole("button", { name: "Close navigation" })).toBeVisible();
-  const openBox = await sidebar.boundingBox();
-  expect(openBox?.x).toBe(0);
+  await expect.poll(async () => (await sidebar.boundingBox())?.x).toBe(0);
   await page.getByRole("button", { name: "Close navigation" }).click();
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeVisible();
 
   await page.screenshot({ fullPage: true, path: "/tmp/open-agent-small.png" });
 });
@@ -192,6 +206,9 @@ test("small workspace keeps the conversation focused and opens navigation on dem
 test("narrow mobile workspace keeps menus inside the viewport", async ({ page }) => {
   await page.setViewportSize({ height: 844, width: 390 });
   await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "Research a topic and cite the useful sources." })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Review a change and identify the highest-risk issues." })).toBeHidden();
 
   await page.getByRole("combobox", { name: "Model" }).click();
   const modelDialog = page.getByRole("dialog");
@@ -207,7 +224,7 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
   expect((effortBox?.x ?? 0) + (effortBox?.width ?? 0)).toBeLessThanOrEqual((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0));
   await page.keyboard.press("Escape");
 
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   const composerFrame = page.locator("form").filter({ has: composer });
   const composerBox = await composerFrame.boundingBox();
   expect(composerBox).not.toBeNull();
@@ -223,11 +240,54 @@ test("narrow mobile workspace keeps menus inside the viewport", async ({ page })
   await page.screenshot({ fullPage: true, path: "/tmp/open-agent-mobile.png" });
 });
 
+test.describe("touch workspace", () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test("mobile composer stays bottom-anchored after sending and context opens on tap", async ({ page }) => {
+    const sessionId = "mobile-composer-session";
+    await page.setViewportSize({ height: 844, width: 390 });
+    await page.route("**/eve/v1/session", (route) => route.fulfill({
+      body: JSON.stringify({ sessionId }),
+      contentType: "application/json",
+      status: 200,
+    }));
+    await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      await route.fulfill({
+        body: mockSuccessfulTurn("Hello", "Hello back."),
+        contentType: "application/x-ndjson",
+        status: 200,
+      });
+    });
+
+    await page.goto("/");
+    const composer = page.getByRole("textbox", { name: "Do anything" });
+    await composer.fill("Hello");
+    await composer.press("Enter");
+    await page.setViewportSize({ height: 500, width: 390 });
+
+    const composerFrame = page.locator("form").filter({ has: composer });
+    await expect(composerFrame).toBeVisible();
+    await expect.poll(async () => {
+      const box = await composerFrame.boundingBox();
+      return box ? 500 - box.y - box.height : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(20);
+
+    await page.getByRole("button", { name: "Context" }).tap();
+    await expect(page.locator('[data-slot="context-display-popover"]')).toBeVisible();
+    const contextBox = await page.getByRole("button", { name: "Context" }).boundingBox();
+    const actionBox = await page.getByRole("button", { name: /^(?:Send|Cancel)$/ }).boundingBox();
+    expect(contextBox?.height).toBeGreaterThanOrEqual(36);
+    expect(actionBox?.height).toBeGreaterThanOrEqual(36);
+  });
+
+});
+
 test("a real conversation survives refresh and continues with the latest token", async ({ page }) => {
   test.skip(process.env.RUN_AGENT_LIVE_E2E !== "1", "Requires a healthy live model provider.");
   test.setTimeout(9 * 60_000);
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
 
   await composer.fill("Reply with exactly: web agent ready");
   await composer.press("Enter");
@@ -249,7 +309,7 @@ test("tool work collapses into one timed execution cycle and keeps the final del
   const sessionId = "mock-tool-cycle-session";
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-tool-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -264,7 +324,7 @@ test("tool work collapses into one timed execution cycle and keeps the final del
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Build a website");
   await composer.press("Enter");
 
@@ -286,7 +346,7 @@ test("assistant content keeps markdown, reasoning state, and action affordances"
   const sessionId = "mock-rich-message-session";
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-rich-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -301,7 +361,7 @@ test("assistant content keeps markdown, reasoning state, and action affordances"
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Explain the result");
   await composer.press("Enter");
 
@@ -317,6 +377,99 @@ test("assistant content keeps markdown, reasoning state, and action affordances"
   await expect(page.getByRole("button", { name: "Edit message" })).toBeVisible();
 });
 
+test("editing the latest user turn waits for the clear boundary and resends on the same session", async ({ page }) => {
+  const sessionId = "mock-edit-session";
+  let streamCalls = 0;
+  let clearCalls = 0;
+  let clearBoundaryPending = false;
+  let turnCalls = 0;
+  await page.route("**/eve/v1/session", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ sessionId }),
+      contentType: "application/json",
+      headers: { "x-eve-session-id": sessionId },
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/clear`, async (route) => {
+    clearCalls += 1;
+    clearBoundaryPending = true;
+    await route.fulfill({
+      body: JSON.stringify({ ok: true, sessionId, status: "accepted" }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
+    turnCalls += 1;
+    await route.fulfill({
+      body: JSON.stringify({ sessionId }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
+    streamCalls += 1;
+    const url = new URL(route.request().url());
+    if (clearBoundaryPending && !url.searchParams.has("includeTailIndex")) {
+      clearBoundaryPending = false;
+      const at = new Date().toISOString();
+      await route.fulfill({
+        body: `${[
+          { data: { sequence: 1, sessionId, turnId: "clear_1" }, meta: { at }, type: "context.cleared" },
+          { data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+        ].map((event) => JSON.stringify(event)).join("\n")}\n`,
+        contentType: "application/x-ndjson",
+        status: 200,
+      });
+      return;
+    }
+    if (url.searchParams.get("startIndex") === "-1") {
+      const at = new Date().toISOString();
+      await route.fulfill({
+        body: `${JSON.stringify({ data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" })}\n`,
+        contentType: "application/x-ndjson",
+        status: 200,
+      });
+      return;
+    }
+    const startIndex = Number(url.searchParams.get("startIndex") ?? "0");
+    const body = startIndex === 0
+      ? mockSuccessfulTurn("Original request", "Original delivery.")
+      : mockContinuationTurn("Edited request", "Edited delivery.", 1);
+    await route.fulfill({
+      body,
+      contentType: "application/x-ndjson",
+      ...(url.searchParams.has("includeTailIndex")
+        ? { headers: { "x-eve-stream-tail-index": String(startIndex + eventsFromNdjson(body).length - 1) } }
+        : {}),
+      status: 200,
+    });
+  });
+
+  await page.goto("/");
+  const composer = page.getByRole("textbox", { name: "Do anything" });
+  await composer.fill("Original request");
+  await composer.press("Enter");
+  await expect(page.getByText("Original delivery.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toHaveCount(1);
+
+  const original = page.getByRole("log").getByText("Original request", { exact: true });
+  await original.hover();
+  await page.getByRole("button", { name: "Edit message" }).click();
+  const editInput = page.getByRole("textbox").filter({ hasText: "Original request" });
+  await expect(editInput).toBeVisible();
+  await editInput.fill("Edited request");
+  await page.getByRole("button", { name: "Send", exact: true }).first().click();
+
+  await expect(page.getByText("Edited delivery.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("log").getByText("Original delivery.", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("log").getByText("Edited request", { exact: true })).toBeVisible();
+  await expect.poll(() => clearCalls).toBe(1);
+  expect(turnCalls).toBe(1);
+  expect(streamCalls).toBeGreaterThanOrEqual(2);
+});
+
 test("file patch tools render with the assistant-ui diff viewer", async ({ page }) => {
   const sessionId = "mock-patch-viewer-session";
   const patch = [
@@ -329,7 +482,7 @@ test("file patch tools render with the assistant-ui diff viewer", async ({ page 
   ].join("\n");
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-patch-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -348,12 +501,12 @@ test("file patch tools render with the assistant-ui diff viewer", async ({ page 
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Update the application");
   await composer.press("Enter");
   await page.getByRole("button", { name: /Worked for/u }).click();
   await page.getByRole("button", { name: /(?:Ran|Running) 1 tool/u }).click();
-  await page.getByRole("button", { name: "Edited files" }).click();
+  await page.getByRole("button", { name: /Edited src\/app\.ts \+1 -1/u }).click();
 
   const diffViewer = page.locator('[data-tool-view="diff"] [data-slot="diff-viewer"]');
   await expect(diffViewer).toBeVisible();
@@ -372,7 +525,7 @@ test("a live autonomous website task survives refresh and publishes a usable pre
     "Use plain HTML, CSS, and JavaScript, validate the result, then publish it with the website preview tool.",
     "Work autonomously and finish by giving me the working preview link.",
   ].join(" ");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await page.getByRole("button", { name: "Execution mode" }).click();
   await page.getByRole("menuitemradio").filter({ hasText: "Automation" }).click();
   await composer.fill(prompt);
@@ -410,7 +563,7 @@ test("a live autonomous website task survives refresh and publishes a usable pre
   expect(previewResponses.some(({ url }) => new URL(url).pathname.endsWith(".js"))).toBeTruthy();
   expect(previewResponses.filter(({ status }) => status >= 400)).toEqual([]);
   await previewPage.close();
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
 });
 
@@ -426,22 +579,22 @@ test("a transport failure preserves the original request without inventing a con
   });
   await page.goto("/");
 
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   const original = "Build the enterprise website and publish a preview";
   await composer.fill(original);
   await composer.press("Enter");
   await expect(page.getByText("This turn failed")).toBeVisible();
   await expect(page.getByText(original, { exact: true })).toBeVisible();
-  await expect(page.getByText("Your original request is preserved in this task.")).toBeVisible();
+  await expect(page.getByText("Your original request is preserved in this session.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(0);
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeVisible();
 });
 
 test("a slow Provider does not force the live Agent stream into recovery", async ({ page }) => {
   const sessionId = "mock-slow-provider-session";
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-slow-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -457,7 +610,7 @@ test("a slow Provider does not force the live Agent stream into recovery", async
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Run a slow task");
   await composer.press("Enter");
   await expect(composer).toBeEnabled();
@@ -466,9 +619,9 @@ test("a slow Provider does not force the live Agent stream into recovery", async
   await expect(activity).toHaveText("Thinking");
   await page.waitForTimeout(8_500);
   await expect(page.getByText("Reconnecting to the active run...")).toHaveCount(0);
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeVisible();
   await expect(page.getByText("Slow task completed.", { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeEnabled();
 });
 
 test("follow-up messages queue during a run and deliver in order at the waiting boundary", async ({ page }) => {
@@ -486,7 +639,7 @@ test("follow-up messages queue during a run and deliver in order at the waiting 
 
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-follow-up-token-0", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -495,7 +648,7 @@ test("follow-up messages queue during a run and deliver in order at the waiting 
   await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
     continuationRequests += 1;
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-follow-up-token-1", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -556,7 +709,7 @@ test("follow-up messages queue during a run and deliver in order at the waiting 
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Start the long task");
   await composer.press("Enter");
   await expect(composer).toBeEnabled();
@@ -586,7 +739,7 @@ test("cancelling a queued follow-up prevents browser delivery before admission",
 
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-cancel-token-0", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -639,7 +792,7 @@ test("cancelling a queued follow-up prevents browser delivery before admission",
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Start cancellable work");
   await composer.press("Enter");
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
@@ -689,7 +842,7 @@ test("a persisted follow-up survives recovery and dispatches after the durable b
   await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
     continuationRequests += 1;
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-persisted-token-2", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       status: 200,
     });
@@ -777,7 +930,6 @@ test("two persisted follow-ups remain separate and recover in strict FIFO order"
         },
       ],
       session: {
-        continuationToken: "mock-token-1",
         sessionId,
         streamIndex: firstCursor,
       },
@@ -856,7 +1008,6 @@ test("a failed queued follow-up remains retryable without duplicating the accept
         text: "Retry the footer",
       }],
       session: {
-        continuationToken: "mock-token-1",
         sessionId,
         streamIndex: settledEvents.length,
       },
@@ -873,7 +1024,7 @@ test("a failed queued follow-up remains retryable without duplicating the accept
       return;
     }
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-retry-token-2", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       status: 200,
     });
@@ -932,7 +1083,7 @@ test("an ambiguous mailbox admission is visible but never offered as a blind ret
         submittedAt: Date.now(),
         text: "The possibly admitted footer",
       }],
-      session: { continuationToken: "mock-ambiguous-token", sessionId, streamIndex: settledEvents.length },
+      session: { sessionId, streamIndex: settledEvents.length },
       status: "ready",
       title: "Ambiguous follow-up",
       updatedAt: Date.now(),
@@ -973,7 +1124,6 @@ test("a proxied child approval stays attached to the parent task and resumes it"
       id: "child-approval-thread",
       preferences: { executionMode: "standard", modelId: "gpt-5.6-sol", reasoning: "medium" },
       session: {
-        continuationToken: "mock-child-approval-token",
         sessionId,
         streamIndex: initialEvents.length,
       },
@@ -986,7 +1136,7 @@ test("a proxied child approval stays attached to the parent task and resumes it"
   await page.route(`**/eve/v1/session/${sessionId}`, async (route) => {
     responseBody = route.request().postDataJSON();
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-resumed-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -1012,7 +1162,7 @@ test("a proxied child approval stays attached to the parent task and resumes it"
   await expect(page.getByText("A delegated task needs your approval", { exact: true })).toBeVisible();
   const approve = page.getByRole("button", { name: "Approve", exact: true });
   await expect(approve).toBeEnabled();
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeDisabled();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeDisabled();
 
   await approve.click();
   await expect.poll(() => responseBody).toMatchObject({
@@ -1029,9 +1179,9 @@ test("a proxied child approval stays attached to the parent task and resumes it"
   await page.getByRole("button", { name: /Open sub-agent session/u }).click();
   await expect(page).toHaveURL(/\/threads\/child-approval-thread\/agents\/child-css$/);
   await expect(page.getByText("Child stylesheet complete.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Back to parent task" }).click();
+  await page.getByRole("button", { name: "Back to parent session" }).click();
   await expect(page).toHaveURL(/\/threads\/child-approval-thread$/);
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeEnabled();
 });
 
 test("an original page catches up through bounded reads when live streams stop receiving durable progress", async ({ page }) => {
@@ -1046,14 +1196,14 @@ test("an original page catches up through bounded reads when live streams stop r
     { data: { finishReason: "stop", message: "Durable progress recovered.", sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "message.completed" },
     { data: { finishReason: "stop", sequence: 0, stepIndex: 0, turnId, usage: { inputTokens: 1, outputTokens: 1 } }, meta: { at }, type: "step.completed" },
     { data: { sequence: 0, turnId }, meta: { at }, type: "turn.completed" },
-    { data: { continuationToken: "mock-stalled-token", wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+    { data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
   ];
   let boundedRequests = 0;
   let liveRequests = 0;
 
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-stalled-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -1086,11 +1236,11 @@ test("an original page catches up through bounded reads when live streams stop r
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Run a durable task");
   await composer.press("Enter");
 
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeVisible();
   await expect(page.getByText("Durable progress recovered.", { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
   expect(liveRequests).toBeGreaterThanOrEqual(1);
@@ -1127,7 +1277,7 @@ test("large legacy incremental history hydrates quickly and is compacted", async
 
   const startedAt = Date.now();
   await page.goto("/threads/legacy-thread");
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeVisible({ timeout: 5_000 });
   expect(Date.now() - startedAt).toBeLessThan(5_000);
   await expect.poll(() => threadEvents(page).length).toBe(1);
 });
@@ -1142,7 +1292,7 @@ test("a persisted cursor past a missing UI boundary repairs from the durable tai
     { data: { message: "Repair this thread", parts: [{ text: "Repair this thread", type: "text" }], sequence: 0, turnId }, meta: { at }, type: "message.received" },
     { data: { sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "step.started" },
   ];
-  const waiting = { data: { continuationToken: "mock-repaired-token", wait: "next-user-message" }, meta: { at }, type: "session.waiting" };
+  const waiting = { data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" };
   const absoluteTailIndex = 7;
 
   await page.route(`**/eve/v1/session/${sessionId}/stream**`, async (route) => {
@@ -1182,7 +1332,7 @@ test("a persisted cursor past a missing UI boundary repairs from the durable tai
   await page.goto("/threads/missing-boundary-thread");
   await expect(page.getByText("Reconnecting to the active run...")).toBeHidden({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
-  await expect.poll(() => firstStoredThread(page)?.session?.continuationToken).toBe("mock-repaired-token");
+  await expect.poll(() => threadEvents(page).some((event) => isEventType(event, "session.waiting"))).toBeTruthy();
 });
 
 test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
@@ -1204,12 +1354,12 @@ test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
     { data: { finishReason: "stop", message: "Refresh recovery ready.", sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "message.completed" },
     { data: { finishReason: "stop", sequence: 0, stepIndex: 0, turnId, usage: { inputTokens: 1, outputTokens: 1 } }, meta: { at }, type: "step.completed" },
     { data: { sequence: 0, turnId }, meta: { at }, type: "turn.completed" },
-    { data: { continuationToken: "mock-refresh-token", wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+    { data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
   ];
 
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-refresh-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -1238,12 +1388,12 @@ test("an in-flight turn reconnects after a hard refresh", async ({ page }) => {
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Run through refresh");
   await composer.press("Enter");
   await expect.poll(() => threadEvents(page).some((event) => isEventType(event, "step.started"))).toBeTruthy();
   await page.reload();
-  await expect(page.getByRole("textbox", { name: "Describe a task" })).toBeEnabled();
+  await expect(page.getByRole("textbox", { name: "Do anything" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
   releaseRecovery?.();
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible({ timeout: 90_000 });
@@ -1260,7 +1410,7 @@ test("stop cancels server work and returns the thread to an interactive state", 
   });
   await page.route("**/eve/v1/session", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ continuationToken: "mock-cancel-token", sessionId }),
+      body: JSON.stringify({ sessionId }),
       contentType: "application/json",
       headers: { "x-eve-session-id": sessionId },
       status: 200,
@@ -1283,7 +1433,7 @@ test("stop cancels server work and returns the thread to an interactive state", 
       { data: { sequence: 0, turnId }, meta: { at }, type: "turn.started" },
       { data: { message: "Wait", parts: [{ text: "Wait", type: "text" }], sequence: 0, turnId }, meta: { at }, type: "message.received" },
       { data: { sequence: 0, turnId }, meta: { at }, type: "turn.cancelled" },
-      { data: { continuationToken: "mock-cancel-token", wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+      { data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
     ];
     const startIndex = Number(new URL(route.request().url()).searchParams.get("startIndex") ?? "0");
     if (startIndex === 0) {
@@ -1304,7 +1454,7 @@ test("stop cancels server work and returns the thread to an interactive state", 
   });
 
   await page.goto("/");
-  const composer = page.getByRole("textbox", { name: "Describe a task" });
+  const composer = page.getByRole("textbox", { name: "Do anything" });
   await composer.fill("Wait");
   await composer.press("Enter");
   const stop = page.getByRole("button", { name: "Stop" });
@@ -1317,18 +1467,18 @@ test("stop cancels server work and returns the thread to an interactive state", 
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
 });
 
-function mockSuccessfulTurn(message: string, reply: string): string {
+function mockSuccessfulTurn(message: string, reply: string, sequence = 0): string {
   const at = new Date().toISOString();
-  const turnId = "turn_0";
+  const turnId = `turn_${sequence}`;
   const events = [
     { data: { runtime: { agentId: "open-agent", agentName: "open-agent", eveVersion: "test", modelId: "mock/model" } }, meta: { at }, type: "session.started" },
-    { data: { sequence: 0, turnId }, meta: { at }, type: "turn.started" },
-    { data: { message, parts: [{ text: message, type: "text" }], sequence: 0, turnId }, meta: { at }, type: "message.received" },
-    { data: { sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "step.started" },
-    { data: { finishReason: "stop", message: reply, sequence: 0, stepIndex: 0, turnId }, meta: { at }, type: "message.completed" },
-    { data: { finishReason: "stop", sequence: 0, stepIndex: 0, turnId, usage: { inputTokens: 1, outputTokens: 1 } }, meta: { at }, type: "step.completed" },
-    { data: { sequence: 0, turnId }, meta: { at }, type: "turn.completed" },
-    { data: { continuationToken: "mock-token-1", wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+    { data: { sequence, turnId }, meta: { at }, type: "turn.started" },
+    { data: { message, parts: [{ text: message, type: "text" }], sequence, turnId }, meta: { at }, type: "message.received" },
+    { data: { sequence, stepIndex: 0, turnId }, meta: { at }, type: "step.started" },
+    { data: { finishReason: "stop", message: reply, sequence, stepIndex: 0, turnId }, meta: { at }, type: "message.completed" },
+    { data: { finishReason: "stop", sequence, stepIndex: 0, turnId, usage: { inputTokens: 1, outputTokens: 1 } }, meta: { at }, type: "step.completed" },
+    { data: { sequence, turnId }, meta: { at }, type: "turn.completed" },
+    { data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
   ];
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
@@ -1367,7 +1517,7 @@ function mockToolTurn(
     { data: { finishReason: "stop", message: reply, sequence: 0, stepIndex: 1, turnId }, meta: { at: at(2_000) }, type: "message.completed" },
     { data: { finishReason: "stop", sequence: 0, stepIndex: 1, turnId, usage: { inputTokens: 10_600, outputTokens: 200 } }, meta: { at: at(2_100) }, type: "step.completed" },
     { data: { sequence: 0, turnId }, meta: { at: at(2_200) }, type: "turn.completed" },
-    { data: { continuationToken: "mock-tool-token", wait: "next-user-message" }, meta: { at: at(2_300) }, type: "session.waiting" },
+    { data: { wait: "next-user-message" }, meta: { at: at(2_300) }, type: "session.waiting" },
   ];
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
@@ -1386,7 +1536,7 @@ function mockReasoningMarkdownTurn(): string {
     { data: { finishReason: "stop", message: "## Result\n\n- Markdown is active.\n- Code blocks are styled.\n\n```ts\nconst ready = true;\n```", sequence: 0, stepIndex: 0, turnId }, meta: { at: at(1_800) }, type: "message.completed" },
     { data: { finishReason: "stop", sequence: 0, stepIndex: 0, turnId, usage: { inputTokens: 128, outputTokens: 64 } }, meta: { at: at(1_900) }, type: "step.completed" },
     { data: { sequence: 0, turnId }, meta: { at: at(2_000) }, type: "turn.completed" },
-    { data: { continuationToken: "mock-rich-token", wait: "next-user-message" }, meta: { at: at(2_100) }, type: "session.waiting" },
+    { data: { wait: "next-user-message" }, meta: { at: at(2_100) }, type: "session.waiting" },
   ];
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
@@ -1401,7 +1551,7 @@ function mockContinuationTurn(message: string, reply: string, sequence = 1): str
     { data: { finishReason: "stop", message: reply, sequence, stepIndex: 0, turnId }, meta: { at }, type: "message.completed" },
     { data: { finishReason: "stop", sequence, stepIndex: 0, turnId, usage: { inputTokens: 2, outputTokens: 2 } }, meta: { at }, type: "step.completed" },
     { data: { sequence, turnId }, meta: { at }, type: "turn.completed" },
-    { data: { continuationToken: `mock-follow-up-token-${sequence}`, wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
+    { data: { wait: "next-user-message" }, meta: { at }, type: "session.waiting" },
   ];
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
@@ -1461,7 +1611,7 @@ function mockChildApprovalEvents(): readonly unknown[] {
       type: "input.requested",
     },
     { data: { sequence: 0, turnId: "turn-parent" }, meta: { at: at(800) }, type: "turn.completed" },
-    { data: { continuationToken: "mock-child-approval-token", wait: "next-user-message" }, meta: { at: at(900) }, type: "session.waiting" },
+    { data: { wait: "next-user-message" }, meta: { at: at(900) }, type: "session.waiting" },
   ];
 }
 
@@ -1476,7 +1626,7 @@ function mockChildApprovalResumeEvents(): string {
     { data: { finishReason: "stop", message: "The delegated task resumed and completed.", sequence: 1, stepIndex: 0, turnId: "turn-resumed" }, meta: { at: at(400) }, type: "message.completed" },
     { data: { finishReason: "stop", sequence: 1, stepIndex: 0, turnId: "turn-resumed", usage: { inputTokens: 20, outputTokens: 8 } }, meta: { at: at(500) }, type: "step.completed" },
     { data: { sequence: 1, turnId: "turn-resumed" }, meta: { at: at(600) }, type: "turn.completed" },
-    { data: { continuationToken: "mock-resumed-token", wait: "next-user-message" }, meta: { at: at(700) }, type: "session.waiting" },
+    { data: { wait: "next-user-message" }, meta: { at: at(700) }, type: "session.waiting" },
   ];
   return `${events.map((event) => JSON.stringify(event)).join("\n")}\n`;
 }
@@ -1484,7 +1634,6 @@ function mockChildApprovalResumeEvents(): string {
 type FakeStoredThread = {
   readonly events?: readonly unknown[];
   readonly session?: {
-    readonly continuationToken?: string;
     readonly sessionId?: string;
     readonly streamIndex?: number;
   };

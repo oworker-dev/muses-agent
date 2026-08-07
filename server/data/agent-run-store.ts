@@ -8,7 +8,7 @@ import type {
   AgentRunStatus,
   AgentRunUsage,
   JsonValue,
-} from "../../contracts/agent-run";
+} from "@oworker/open-agent-contracts/agent-run";
 import {
   getAgentDatabasePool,
   quoteIdentifier,
@@ -18,7 +18,6 @@ import {
 
 export type AgentRunRecord = {
   readonly cancellationRequestedAt?: string;
-  readonly continuationToken?: string;
   readonly correlationId: string;
   readonly createdAt: string;
   readonly eventCount: number;
@@ -66,7 +65,7 @@ export type AgentRunProjection = {
 };
 
 export interface AgentRunStore {
-  attachSession(runId: string, sessionId: string, continuationToken?: string): Promise<AgentRunRecord>;
+  attachSession(runId: string, sessionId: string): Promise<AgentRunRecord>;
   findOwned(tenantId: string, principalId: string, runId: string): Promise<AgentRunRecord | undefined>;
   markCancelled(runId: string): Promise<AgentRunRecord>;
   markCancellationRequested(runId: string): Promise<AgentRunRecord>;
@@ -127,17 +126,16 @@ function postgresAgentRunStore(pool: Pool, table: string): AgentRunStore {
         status: row.requestFingerprint === input.requestFingerprint ? "replay" : "conflict",
       };
     },
-    async attachSession(runId, sessionId, continuationToken) {
+    async attachSession(runId, sessionId) {
       const result = await pool.query<AgentRunRow>(
         `update ${table}
             set eve_session_id = $2,
-                eve_continuation_token = $3,
                 status = 'running',
                 revision = revision + 1,
                 updated_at = now()
           where run_id = $1 and status = 'submitting'
           returning ${selectColumns()}`,
-        [runId, sessionId, continuationToken ?? null],
+        [runId, sessionId],
       );
       return toRecord(requireRow(result.rows[0]));
     },
@@ -218,6 +216,7 @@ function postgresAgentRunStore(pool: Pool, table: string): AgentRunStore {
           [runId],
         );
         const current = toRecord(requireRow(locked.rows[0]));
+        if (current.eventCount > projection.eventCount) return current;
         const cancellationPending = Boolean(current.cancellationRequestedAt);
         const status = isTerminal(current.status)
           ? current.status
@@ -260,7 +259,6 @@ function postgresAgentRunStore(pool: Pool, table: string): AgentRunStore {
 
 type AgentRunRow = {
   cancellationRequestedAt: Date | string | null;
-  continuationToken: string | null;
   correlationId: string;
   createdAt: Date | string;
   eventCount: number;
@@ -286,7 +284,7 @@ function selectColumns(): string {
   return `run_id as "runId", tenant_id as "tenantId", principal_id as "principalId",
     idempotency_key as "idempotencyKey", request_fingerprint as "requestFingerprint",
     correlation_id as "correlationId", profile, policy, parent, metadata, status,
-    eve_session_id as "sessionId", eve_continuation_token as "continuationToken",
+    eve_session_id as "sessionId",
     event_count as "eventCount", usage, result, failure, revision::text,
     cancellation_requested_at as "cancellationRequestedAt",
     created_at as "createdAt", updated_at as "updatedAt"`;
@@ -295,7 +293,6 @@ function selectColumns(): string {
 function toRecord(row: AgentRunRow): AgentRunRecord {
   return {
     ...(row.cancellationRequestedAt ? { cancellationRequestedAt: toIso(row.cancellationRequestedAt) } : {}),
-    ...(row.continuationToken ? { continuationToken: row.continuationToken } : {}),
     correlationId: row.correlationId,
     createdAt: toIso(row.createdAt),
     eventCount: row.eventCount,

@@ -87,8 +87,6 @@ export class AgentClientHttpError extends Error {
         this.body = body;
     }
 }
-/** @deprecated Use AgentClientHttpError. */
-export { AgentClientHttpError as AgentHostHttpError };
 function normalizeBaseUrl(value) {
     const normalized = value.trim().replace(/\/+$/, "");
     if (!normalized)

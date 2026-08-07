@@ -11,13 +11,12 @@ const DEFAULT_BUSY_RETRY_MS = 2_000;
 
 export type AgentMailboxBoundary =
   | { readonly state: "running" }
-  | { readonly continuationToken: string; readonly state: "waiting" }
+  | { readonly state: "waiting" }
   | { readonly state: "terminal" };
 
 export interface AgentMailboxRuntime {
   deliver(input: {
     readonly clientMessageId: string;
-    readonly continuationToken: string;
     readonly itemId: string;
     readonly owner: AgentSessionOwner;
     readonly payload: AgentMailboxPayload;
@@ -116,7 +115,6 @@ export async function dispatchNextAgentMailboxMessage(options: {
     await options.store.beginAdmission(item.itemId, claimToken);
     const delivered = await options.runtime.deliver({
       clientMessageId: item.clientMessageId,
-      continuationToken: boundary.continuationToken,
       itemId: item.itemId,
       owner,
       payload: item.payload,

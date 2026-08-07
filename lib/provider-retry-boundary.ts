@@ -22,8 +22,8 @@ export class ProviderStreamInterruptedError extends Error {
     super("The model Provider stream ended before completion.");
     this.name = "ProviderStreamInterruptedError";
     this.isRetryable = options.retryable === true;
-    // Eve 0.27.x treats an explicit true flag as transient, but does not use a
-    // false flag to force terminal classification. A 4xx-class signal keeps a
+    // Eve treats an explicit true flag as transient, but does not use a false
+    // flag to force terminal classification. A 4xx-class signal keeps a
     // post-tool interruption out of Workflow's durable step retry path, where
     // replaying the model step could duplicate an external side effect.
     if (!this.isRetryable) this.statusCode = 422;

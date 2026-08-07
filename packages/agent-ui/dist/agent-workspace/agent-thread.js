@@ -1,23 +1,25 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { isCurrentTurnBoundaryEvent } from "eve/client";
 import { useEveAgent } from "eve/react";
-import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
 import { AssistantRuntimeProvider, unstable_defaultDirectiveFormatter, useExternalStoreRuntime } from "@assistant-ui/react";
 import { AlertCircleIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 import { cn } from "../utils.js";
-import { createAgentSession } from "./agent-client.js";
+import { attachAgentSession, createAgentSession } from "./agent-client.js";
+import { convertEveMessages, getEveMessageContent } from "./eve-message-adapter.js";
 import { AssistantThreadSurface } from "./assistant-thread-surface.js";
 import { sanitizeAgentError } from "./error-presentation.js";
 import { messagesFor } from "./i18n.js";
 import { appendThreadEvent, titleFromPrompt } from "./thread-storage.js";
-import { hasUnresolvedInputRequests, isProxiedInputOnlyMessage, } from "./turn-presentation.js";
+import { eventsBeforeLastUserTurn, hasUnresolvedInputRequests, isProxiedInputOnlyMessage, } from "./turn-presentation.js";
 import { summarizeUsage } from "./usage.js";
 export function AgentThreadView({ client, commands, draftStorageKey, isRecovering = false, locale, mailbox, mentions, models, onChange, onEvent, onOpenSubagent, onRecoveryNeeded, providerReady, reasoningLevels, thread, }) {
     const preferencesRef = useRef(thread.preferences);
     const cancellationRef = useRef({ requested: false });
+    const cancellationTimerRef = useRef(undefined);
     const recoveryRequestedRef = useRef(false);
     const initialEventCountRef = useRef(thread.events.length);
     const initialStreamIndexRef = useRef(thread.session.streamIndex);
@@ -29,6 +31,7 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
     const dispatchingQueuedTurnIdRef = useRef(undefined);
     const mailboxEnqueueIdsRef = useRef(new Set());
     const turnAdmissionBusyRef = useRef(false);
+    const resubmissionStartedRef = useRef(false);
     const [cancellationState, setCancellationState] = useState("idle");
     const [cancellationError, setCancellationError] = useState();
     const [queueError, setQueueError] = useState();
@@ -43,20 +46,21 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
     useEffect(() => {
         pendingTurnRef.current = thread.pendingTurn;
     }, [thread.pendingTurn]);
-    const [session] = useState(() => createAgentSession(client, () => preferencesRef.current, thread.session));
+    const [connection] = useState(() => createAgentSession(client, () => preferencesRef.current, thread.session));
+    const sessionRef = useRef(attachAgentSession(connection, connection.initialSession));
     const cancelTurn = useCallback((turnId) => {
         const cancellation = cancellationRef.current;
         if (!cancellation.requested || cancellation.sentTurnId === turnId)
             return;
         cancellation.sentTurnId = turnId;
         setCancellationState("cancelling");
-        void session.cancel({ turnId }).catch((error) => {
+        void sessionRef.current?.cancel({ turnId }).catch((error) => {
             cancellation.requested = false;
             cancellation.sentTurnId = undefined;
             setCancellationError(error instanceof Error ? error.message : "Unable to stop this turn.");
             setCancellationState("idle");
         });
-    }, [session]);
+    }, []);
     const handleEvent = useCallback((event) => {
         if (event.type === "turn.started") {
             cancellationRef.current.turnId = event.data.turnId;
@@ -95,18 +99,25 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
         }
         if (event.type === "session.waiting" &&
             (cancellationRef.current.requested || cancellationRef.current.sentTurnId)) {
+            window.clearTimeout(cancellationTimerRef.current);
+            cancellationTimerRef.current = undefined;
             cancellationRef.current = { requested: false };
             setCancellationState("idle");
         }
         onEvent?.(event);
     }, [cancelTurn, onChange, onEvent]);
     const agent = useEveAgent({
+        auth: connection.auth,
+        headers: connection.headers,
+        host: connection.host,
         initialEvents: thread.events,
-        initialSession: thread.session,
+        initialSession: connection.initialSession,
         onEvent: handleEvent,
-        onSessionChange: (nextSession) => onChange({ session: nextSession }),
+        onSessionChange: (nextSession) => {
+            sessionRef.current = attachAgentSession(connection, nextSession);
+            onChange({ session: nextSession ?? { streamIndex: 0 } });
+        },
         prepareSend: client?.prepareSend,
-        session,
     });
     const stopAgent = agent.stop;
     const agentIsBusy = agent.status === "submitted" || agent.status === "streaming";
@@ -119,21 +130,22 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
     const requestRecovery = useCallback(() => {
         if (recoveryRequestedRef.current)
             return;
+        const state = agent.session;
+        if (!state)
+            return;
         const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
         const currentSession = {
-            ...session.state,
-            streamIndex: Math.max(session.state.streamIndex, initialStreamIndexRef.current + consumedEvents),
+            ...state,
+            streamIndex: Math.max(state.streamIndex, initialStreamIndexRef.current + consumedEvents),
         };
-        if (!currentSession.sessionId)
-            return;
         recoveryRequestedRef.current = true;
         onChange({ session: currentSession, status: "streaming", updatedAt: Date.now() });
         stopAgent();
         onRecoveryNeeded();
-    }, [agent.events.length, onChange, onRecoveryNeeded, session, stopAgent]);
+    }, [agent.events.length, agent.session, onChange, onRecoveryNeeded, stopAgent]);
     useEffect(() => {
         const lastEvent = agent.events.at(-1);
-        if (agent.session.sessionId &&
+        if (agent.session?.sessionId &&
             !isRecovering &&
             !cancellationRef.current.requested &&
             !isBusy &&
@@ -141,9 +153,13 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
             !isSessionBoundary(lastEvent)) {
             requestRecovery();
         }
-    }, [agent.events, agent.session.sessionId, isBusy, isRecovering, requestRecovery]);
+    }, [agent.events, agent.session?.sessionId, isBusy, isRecovering, requestRecovery]);
+    useEffect(() => () => {
+        window.clearTimeout(cancellationTimerRef.current);
+    }, []);
     useEffect(() => {
-        if (isRecovering || !agentIsBusy || !agent.session.sessionId || recoveryRequestedRef.current)
+        const durableSession = sessionRef.current;
+        if (isRecovering || !agentIsBusy || !agent.session?.sessionId || !durableSession || recoveryRequestedRef.current)
             return;
         let disposed = false;
         let timer;
@@ -153,8 +169,8 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
             durableProbeInFlightRef.current = true;
             try {
                 const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
-                const cursor = Math.max(session.state.streamIndex, initialStreamIndexRef.current + consumedEvents);
-                if (await hasDurableProgressAfter(session, cursor))
+                const cursor = Math.max(durableSession.state.streamIndex, initialStreamIndexRef.current + consumedEvents);
+                if (await hasDurableProgressAfter(durableSession, cursor))
                     requestRecovery();
             }
             finally {
@@ -169,12 +185,12 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
             disposed = true;
             window.clearTimeout(timer);
         };
-    }, [agent.events.length, agent.session.sessionId, agentIsBusy, isRecovering, requestRecovery, session]);
+    }, [agent.events.length, agent.session?.sessionId, agentIsBusy, isRecovering, requestRecovery]);
     useEffect(() => {
         if (isRecovering)
             return;
         const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
-        const streamIndex = Math.max(agent.session.streamIndex, initialStreamIndexRef.current + consumedEvents);
+        const streamIndex = Math.max(agent.session?.streamIndex ?? 0, initialStreamIndexRef.current + consumedEvents);
         if (agent.events.length < processedEventCountRef.current) {
             compactedEventsRef.current = agent.events;
         }
@@ -186,7 +202,7 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
         processedEventCountRef.current = agent.events.length;
         onChange({
             events: compactedEventsRef.current,
-            session: { ...agent.session, streamIndex },
+            session: agent.session ? { ...agent.session, streamIndex } : { streamIndex },
             status: turnError ? "error" : awaitingInput ? "waiting" : agent.status,
             updatedAt: Date.now(),
         });
@@ -203,12 +219,14 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
                 dispatchingQueuedTurnIdRef.current = undefined;
                 onChange({ pendingTurn: undefined, queuedTurns });
             }
-            else if (!agent.session.sessionId) {
+            else if (!agent.session?.sessionId) {
                 onChange({ pendingTurn: { ...thread.pendingTurn, state: "delivery-failed" } });
             }
         }
-    }, [agent.session.sessionId, agent.status, onChange, thread.pendingTurn]);
+    }, [agent.session?.sessionId, agent.status, onChange, thread.pendingTurn]);
     const prepareTurn = () => {
+        window.clearTimeout(cancellationTimerRef.current);
+        cancellationTimerRef.current = undefined;
         recoveryRequestedRef.current = false;
         cancellationRef.current = { requested: false };
         setCancellationError(undefined);
@@ -252,13 +270,27 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
             return;
         cancellationRef.current.requested = true;
         setCancellationState("cancelling");
-        stopAgent();
         const turnId = cancellationRef.current.turnId;
-        void session.cancel(turnId ? { turnId } : undefined).then(() => {
+        const durableSession = sessionRef.current;
+        if (!durableSession) {
             cancellationRef.current = { requested: false };
             setCancellationState("idle");
-            onChange({ status: "ready", updatedAt: Date.now() });
-            onRecoveryNeeded();
+            return;
+        }
+        void durableSession.cancel(turnId ? { turnId } : undefined).then((result) => {
+            if (result.status === "no_active_turn") {
+                cancellationRef.current = { requested: false };
+                setCancellationState("idle");
+                onChange({ status: "ready", updatedAt: Date.now() });
+            }
+            else if (cancellationRef.current.requested) {
+                window.clearTimeout(cancellationTimerRef.current);
+                cancellationTimerRef.current = window.setTimeout(() => {
+                    cancellationTimerRef.current = undefined;
+                    if (cancellationRef.current.requested)
+                        onRecoveryNeeded();
+                }, 15_000);
+            }
         }).catch((error) => {
             cancellationRef.current = { requested: false };
             setCancellationError(error instanceof Error ? error.message : "Unable to stop this turn.");
@@ -310,7 +342,7 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
             onChange({ title: titleFromPrompt(text) });
         }
         if (message.files.length === 0) {
-            await agent.send({ message: text });
+            await agent.send(text);
             return;
         }
         const parts = [];
@@ -319,7 +351,7 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
         for (const file of message.files) {
             parts.push({ data: file.url, filename: file.filename, mediaType: file.mediaType, type: "file" });
         }
-        await agent.send({ message: parts });
+        await agent.send(parts);
     };
     const visibleMessages = agent.data.messages.filter((message) => !isProxiedInputOnlyMessage(message, agent.events));
     const assistantMessages = convertEveMessages({ ...agent.data, messages: visibleMessages }, {
@@ -361,21 +393,62 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
             const prompt = promptFromAssistantMessage(content);
             if (!prompt.text && prompt.files.length === 0)
                 return;
-            await session.reset();
-            agent.reset();
-            onChange({ events: [], pendingTurn: undefined, session: { streamIndex: 0 }, status: "ready", updatedAt: Date.now() });
-            await submit(prompt);
+            const durableSession = sessionRef.current;
+            if (!durableSession || isBusy)
+                return;
+            try {
+                const clearResult = await durableSession.clear();
+                if (clearResult.status !== "accepted") {
+                    throw new Error("The session is no longer active.");
+                }
+                for await (const event of durableSession.stream()) {
+                    if (isCurrentTurnBoundaryEvent(event))
+                        break;
+                }
+                const pendingTurn = {
+                    id: createPendingTurnId(),
+                    state: "resubmitting",
+                    submittedAt: Date.now(),
+                    text: prompt.text,
+                };
+                onChange({
+                    events: eventsBeforeLastUserTurn(agent.events),
+                    pendingTurn,
+                    queuedTurns: [],
+                    revision: (thread.revision ?? 0) + 1,
+                    session: durableSession.state,
+                    status: "ready",
+                    updatedAt: Date.now(),
+                });
+            }
+            catch (error) {
+                setTurnError(error instanceof Error ? error.message : "Unable to edit this message.");
+            }
         },
         onNew: async (message) => {
             await submit(promptFromAssistantMessage(getEveMessageContent(message)));
         },
         onRespondToToolApproval: async (response) => {
             prepareTurn();
-            await agent.send({ inputResponses: [{ optionId: response.optionId, requestId: response.approvalId, text: response.reason }] });
+            await agent.respond([{ optionId: response.optionId, requestId: response.approvalId, text: response.reason }]);
         },
     });
     useEffect(() => {
-        if (!mailbox || !agent.session.sessionId)
+        const pendingTurn = thread.pendingTurn;
+        if (pendingTurn?.state !== "resubmitting" ||
+            resubmissionStartedRef.current ||
+            !providerReady ||
+            isBusy)
+            return;
+        resubmissionStartedRef.current = true;
+        void submit({ files: [], text: pendingTurn.text }).catch((error) => {
+            turnAdmissionBusyRef.current = false;
+            onChange({ pendingTurn: { ...pendingTurn, state: "delivery-failed" }, status: "error" });
+            setTurnError(error instanceof Error ? error.message : "Unable to resend this message.");
+        });
+    }, [isBusy, onChange, providerReady, thread.pendingTurn]);
+    useEffect(() => {
+        if (!mailbox || !agent.session?.sessionId)
             return;
         const next = queuedTurnsRef.current.find((turn) => turn.delivery === "server" &&
             turn.state === "queued" &&
@@ -404,7 +477,7 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
         }).finally(() => {
             mailboxEnqueueIdsRef.current.delete(next.id);
         });
-    }, [agent.session.sessionId, mailbox, messages.queueDeliveryFailed, thread.queuedTurns]);
+    }, [agent.session?.sessionId, mailbox, messages.queueDeliveryFailed, thread.queuedTurns]);
     useEffect(() => {
         if (!mailbox)
             return;
@@ -448,7 +521,7 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
     useEffect(() => {
         if (admissionBusy || awaitingInput || !providerReady ||
             dispatchingQueuedTurnIdRef.current ||
-            !agent.session.continuationToken)
+            !agent.session?.sessionId)
             return;
         const next = queuedTurnsRef.current.find((turn) => turn.state === "queued" && turn.delivery !== "server");
         if (!next)
@@ -470,16 +543,16 @@ export function AgentThreadView({ client, commands, draftStorageKey, isRecoverin
             submittedAt: next.submittedAt,
             text: next.text,
         };
-        void agent.send({ message: next.text }).catch(() => {
+        void agent.send(next.text).catch(() => {
             const queuedTurns = queuedTurnsRef.current.map((turn) => turn.id === next.id ? { ...turn, state: "delivery-failed" } : turn);
             queuedTurnsRef.current = queuedTurns;
             dispatchingQueuedTurnIdRef.current = undefined;
             onChange({ pendingTurn: undefined, queuedTurns });
         });
-    }, [admissionBusy, agent, agent.session.continuationToken, awaitingInput, onChange, providerReady, thread.queuedTurns]);
+    }, [admissionBusy, agent, agent.session?.sessionId, awaitingInput, onChange, providerReady, thread.queuedTurns]);
     const respond = (inputResponses) => {
         prepareTurn();
-        return agent.send({ inputResponses });
+        return agent.respond(inputResponses);
     };
     const showPendingTurn = Boolean(thread.pendingTurn && !hasProjectedUserText(agent.data.messages, thread.pendingTurn.text));
     const activeTaskIsVisible = (isBusy || awaitingInput) && visibleMessages.some((message) => message.role === "assistant" &&

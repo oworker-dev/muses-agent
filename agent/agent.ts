@@ -122,11 +122,8 @@ export default defineAgent({
   limits: {
     ...definitionLimits,
   },
-  ...(workflowWorld
-    ? {
-        experimental: {
-          workflow: { world: workflowWorld },
-        },
-      }
-    : {}),
+  experimental: {
+    subagentPersistentSessions: true,
+    ...(workflowWorld ? { workflow: { world: workflowWorld } } : {}),
+  },
 });

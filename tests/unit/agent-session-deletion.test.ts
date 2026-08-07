@@ -22,7 +22,6 @@ test("retires the durable session before authorizing sandbox deletion", async ()
   const order: string[] = [];
   const outcome = await deleteAgentSession({
     accessToken: "host-token",
-    continuationToken: "continuation-1",
     deletionStore: deletionStore(order, "created"),
     identity,
     ownershipStore: ownershipStore("owned"),
@@ -36,15 +35,14 @@ test("retires the durable session before authorizing sandbox deletion", async ()
   assert.equal(outcome?.reset, "reset");
 });
 
-test("replays an existing tombstone without reusing a retired continuation token", async () => {
+test("replays an existing tombstone without resetting the retired session again", async () => {
   const order: string[] = [];
   const outcome = await deleteAgentSession({
     accessToken: "host-token",
-    continuationToken: "already-retired-token",
     deletionStore: deletionStore(order, "existing", true),
     identity,
     ownershipStore: ownershipStore("owned"),
-    runtime: runtime(order, "unavailable"),
+    runtime: runtime(order, "no_active_session"),
     sessionId: "session-1",
   });
 
@@ -57,7 +55,6 @@ test("does not reveal or delete a session owned by another principal", async () 
   const order: string[] = [];
   const outcome = await deleteAgentSession({
     accessToken: "host-token",
-    continuationToken: "continuation-1",
     deletionStore: deletionStore(order, "created"),
     identity,
     ownershipStore: ownershipStore("forbidden"),
@@ -69,37 +66,33 @@ test("does not reveal or delete a session owned by another principal", async () 
   assert.deepEqual(order, []);
 });
 
-test("keeps the sandbox when continuation state is missing", async () => {
+test("retires a session by stable ID", async () => {
   const order: string[] = [];
-  await assert.rejects(
-    deleteAgentSession({
-      accessToken: "host-token",
-      deletionStore: deletionStore(order, "created"),
-      identity,
-      ownershipStore: ownershipStore("owned"),
-      runtime: runtime(order, "reset"),
-      sessionId: "session-1",
-    }),
-    (error: unknown) => error instanceof AgentSessionDeletionError
-      && error.code === "agent_session_continuation_required",
-  );
-  assert.deepEqual(order, []);
+  const outcome = await deleteAgentSession({
+    accessToken: "host-token",
+    deletionStore: deletionStore(order, "created"),
+    identity,
+    ownershipStore: ownershipStore("owned"),
+    runtime: runtime(order, "reset"),
+    sessionId: "session-1",
+  });
+  assert.equal(outcome?.reset, "reset");
+  assert.deepEqual(order, ["reset", "authorize"]);
 });
 
-test("rejects oversized or whitespace-bearing continuation tokens", async () => {
+test("rejects invalid stable session IDs", async () => {
   const order: string[] = [];
   await assert.rejects(
     deleteAgentSession({
       accessToken: "host-token",
-      continuationToken: "token with whitespace",
       deletionStore: deletionStore(order, "created"),
       identity,
       ownershipStore: ownershipStore("owned"),
       runtime: runtime(order, "reset"),
-      sessionId: "session-1",
+      sessionId: "session with whitespace",
     }),
     (error: unknown) => error instanceof AgentSessionDeletionError
-      && error.code === "agent_session_continuation_invalid",
+      && error.code === "agent_session_id_invalid",
   );
   assert.deepEqual(order, []);
 });
@@ -115,7 +108,6 @@ test("keeps the sandbox when Eve cannot retire the durable session", async () =>
   await assert.rejects(
     deleteAgentSession({
       accessToken: "host-token",
-      continuationToken: "continuation-1",
       deletionStore: deletionStore(order, "created"),
       identity,
       ownershipStore: ownershipStore("owned"),
@@ -144,7 +136,7 @@ function ownershipStore(
 
 function runtime(
   order: string[],
-  result: "no_active_session" | "reset" | "unavailable",
+  result: "no_active_session" | "reset",
 ): AgentSessionDeletionRuntime {
   return {
     async reset() {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import {
   CheckCircle2Icon,
   ChevronRightIcon,
@@ -31,7 +31,7 @@ export function AgentSubagentMenu({
   onOpen,
 }: {
   readonly activeSessionId?: string;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly locale: AgentLocale;
   readonly onOpen: (sessionId: string) => void;
 }) {

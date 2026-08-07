@@ -17,7 +17,6 @@ export type AgentSessionStreamOptions = {
     readonly signal?: AbortSignal;
 };
 export interface AgentSessionTurn<TOutput = unknown> extends AsyncIterable<AgentSessionEvent> {
-    readonly continuationToken?: string;
     readonly sessionId: string;
     result(): Promise<AgentSessionTurnResult<TOutput>>;
 }
@@ -34,7 +33,7 @@ export interface AgentSessionClient {
     session(cursor?: AgentSessionCursor): AgentSession;
 }
 /**
- * Default interactive-session adapter for Eve 0.27.x.
+ * Default interactive-session adapter for Eve 0.31.x.
  *
  * The returned surface contains no Eve classes or event types. Hosts persist
  * the AgentSession cursor and can replace this adapter without changing UI

@@ -44,7 +44,7 @@ try {
     "--ignore-scripts",
     "--no-audit",
     "--no-fund",
-    "eve@0.27.8",
+    "eve@0.31.1",
     ...archives,
   ], {
     cwd: consumerDirectory,
@@ -83,7 +83,7 @@ try {
     join(pnpmConsumerDirectory, "package.json"),
     JSON.stringify({ name: "agent-sdk-pnpm-conformance-consumer", private: true, type: "module" }),
   );
-  execFileSync("pnpm", ["add", "--ignore-scripts", "eve@0.27.8", ...archives], {
+  execFileSync("pnpm", ["add", "--ignore-scripts", "eve@0.31.1", ...archives], {
     cwd: pnpmConsumerDirectory,
     stdio: "pipe",
   });

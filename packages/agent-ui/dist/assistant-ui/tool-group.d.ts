@@ -1,4 +1,3 @@
-import { type FC, type PropsWithChildren } from "react";
 import { type VariantProps } from "class-variance-authority";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 declare const toolGroupVariants: (props?: ({
@@ -16,14 +15,5 @@ declare function ToolGroupTrigger({ count, active, label: labelProp, className, 
     label?: string;
 }): import("react/jsx-runtime").JSX.Element;
 declare function ToolGroupContent({ className, children, ...props }: React.ComponentProps<typeof CollapsibleContent>): import("react/jsx-runtime").JSX.Element;
-type ToolGroupComponent = FC<PropsWithChildren<{
-    startIndex: number;
-    endIndex: number;
-}>> & {
-    Root: typeof ToolGroupRoot;
-    Trigger: typeof ToolGroupTrigger;
-    Content: typeof ToolGroupContent;
-};
-declare const ToolGroup: ToolGroupComponent;
-export { ToolGroup, ToolGroupRoot, ToolGroupTrigger, ToolGroupContent, toolGroupVariants, };
+export { ToolGroupRoot, ToolGroupTrigger, ToolGroupContent, toolGroupVariants, };
 //# sourceMappingURL=tool-group.d.ts.map

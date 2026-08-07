@@ -3,6 +3,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { useAuiState } from "@assistant-ui/react";
 import { useThreadTokenUsage } from "@assistant-ui/react-ai-sdk";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, } from "../ui/tooltip.js";
+import { Popover, PopoverContent, PopoverTrigger, } from "../ui/popover.js";
 import { cn } from "../utils.js";
 import { createContext, useContext, useEffect, useMemo, useState, } from "react";
 const formatTokenCount = (tokens) => {
@@ -60,11 +61,23 @@ function useContextDisplay() {
 function ContextDisplayRootBase({ modelContextWindow, children, labels: labelOverrides, usage, sessionUsage, }) {
     const threadId = useAuiState((s) => s.threadListItem.id);
     const rawTokens = usage?.totalTokens ?? 0;
+    const [interaction, setInteraction] = useState("hover");
+    const [open, setOpen] = useState(false);
     const [tokenState, setTokenState] = useState({
         threadId,
         totalTokens: rawTokens > 0 ? rawTokens : 0,
         usage,
     });
+    useEffect(() => {
+        const media = window.matchMedia("(hover: none) and (pointer: coarse)");
+        const updateInteraction = () => {
+            setInteraction(media.matches ? "touch" : "hover");
+            setOpen(false);
+        };
+        updateInteraction();
+        media.addEventListener("change", updateInteraction);
+        return () => media.removeEventListener("change", updateInteraction);
+    }, []);
     useEffect(() => {
         setTokenState((prev) => {
             if (prev.threadId !== threadId) {
@@ -87,14 +100,17 @@ function ContextDisplayRootBase({ modelContextWindow, children, labels: labelOve
     const percent = getUsagePercent(totalTokens, modelContextWindow);
     const labels = useMemo(() => ({ ...defaultLabels, ...labelOverrides }), [labelOverrides]);
     const contextValue = useMemo(() => ({
+        interaction,
         labels,
         usage: tokenState.usage,
         sessionUsage,
         totalTokens,
         percent,
         modelContextWindow,
-    }), [labels, modelContextWindow, percent, sessionUsage, tokenState.usage, totalTokens]);
-    return (_jsx(ContextDisplayContext.Provider, { value: contextValue, children: _jsx(TooltipProvider, { children: _jsx(Tooltip, { children: children }) }) }));
+        open,
+        setOpen,
+    }), [interaction, labels, modelContextWindow, open, percent, sessionUsage, tokenState.usage, totalTokens]);
+    return (_jsx(ContextDisplayContext.Provider, { value: contextValue, children: interaction === "touch" ? (_jsx(Popover, { open: open, onOpenChange: setOpen, children: children })) : (_jsx(TooltipProvider, { children: _jsx(Tooltip, { open: open, onOpenChange: setOpen, children: children }) })) }));
 }
 function ContextDisplayRootInternal({ modelContextWindow, children, labels, }) {
     const usage = useThreadTokenUsage();
@@ -107,7 +123,11 @@ function ContextDisplayRoot(props) {
     return (_jsx(ContextDisplayRootInternal, { modelContextWindow: props.modelContextWindow, labels: props.labels, children: props.children }));
 }
 function ContextDisplayTrigger({ className, children, ...props }) {
-    return (_jsx(TooltipTrigger, { asChild: true, children: _jsx("button", { type: "button", "data-slot": "context-display-trigger", className: cn("inline-flex items-center rounded-md transition-colors", className), ...props, children: children }) }));
+    const { interaction, open } = useContextDisplay();
+    const trigger = (_jsx("button", { type: "button", "data-slot": "context-display-trigger", "aria-expanded": open, className: cn("inline-flex items-center rounded-md transition-colors", className), ...props, children: children }));
+    return interaction === "touch"
+        ? _jsx(PopoverTrigger, { asChild: true, children: trigger })
+        : _jsx(TooltipTrigger, { asChild: true, children: trigger });
 }
 const getContextSegments = (usage, labels) => {
     if (!usage)
@@ -120,11 +140,13 @@ const getContextSegments = (usage, labels) => {
     ].filter((segment) => segment.tokens > 0);
 };
 function ContextDisplayContent({ side = "top", className, }) {
-    const { labels, sessionUsage, totalTokens, percent, modelContextWindow } = useContextDisplay();
+    const { interaction, labels, sessionUsage, totalTokens, percent, modelContextWindow } = useContextDisplay();
     const segments = getContextSegments(sessionUsage, labels);
-    return (_jsx(TooltipContent, { side: side, sideOffset: 8, hideArrow: true, "data-slot": "context-display-popover", className: cn("bg-popover text-popover-foreground w-56 rounded-lg border p-3 text-left shadow-md", className), children: _jsxs("div", { className: "text-xs", children: [_jsxs("div", { className: "flex items-baseline justify-between gap-6 whitespace-nowrap", children: [_jsx("span", { className: "font-medium", children: labels.contextUsage }), _jsxs("span", { className: "text-muted-foreground tabular-nums", children: [formatTokenCount(Math.min(totalTokens, modelContextWindow)), " ", labels.of, " ", formatTokenCount(modelContextWindow)] })] }), _jsx("div", { className: "bg-muted mt-2.5 h-1 overflow-hidden rounded-full", children: _jsx("div", { className: cn("h-full w-(--usage-width) rounded-full transition-[width] duration-300", totalTokens > 0 && "min-w-1", getBarColor(percent)), style: { "--usage-width": `${percent}%` } }) }), segments.length > 0 && (_jsxs("div", { className: "mt-3 grid gap-1.5", children: [_jsx("span", { className: "font-medium", children: labels.sessionUsage }), segments.map((segment) => (_jsxs("div", { className: "flex items-baseline justify-between gap-6", children: [_jsx("span", { className: "text-muted-foreground", children: segment.label }), _jsx("span", { className: "tabular-nums", children: formatTokenCount(segment.tokens) })] }, segment.label)))] }))] }) }));
+    const content = (_jsxs("div", { className: "text-xs", children: [_jsxs("div", { className: "flex items-baseline justify-between gap-6 whitespace-nowrap", children: [_jsx("span", { className: "font-medium", children: labels.contextUsage }), _jsxs("span", { className: "text-muted-foreground tabular-nums", children: [formatTokenCount(Math.min(totalTokens, modelContextWindow)), " ", labels.of, " ", formatTokenCount(modelContextWindow)] })] }), _jsx("div", { className: "bg-muted mt-2.5 h-1 overflow-hidden rounded-full", children: _jsx("div", { className: cn("h-full w-(--usage-width) rounded-full transition-[width] duration-300", totalTokens > 0 && "min-w-1", getBarColor(percent)), style: { "--usage-width": `${percent}%` } }) }), segments.length > 0 && (_jsxs("div", { className: "mt-3 grid gap-1.5", children: [_jsx("span", { className: "font-medium", children: labels.sessionUsage }), segments.map((segment) => (_jsxs("div", { className: "flex items-baseline justify-between gap-6", children: [_jsx("span", { className: "text-muted-foreground", children: segment.label }), _jsx("span", { className: "tabular-nums", children: formatTokenCount(segment.tokens) })] }, segment.label)))] }))] }));
+    const contentClassName = cn("bg-popover text-popover-foreground w-52 rounded-lg border p-2.5 text-left shadow-md", className);
+    return interaction === "touch" ? (_jsx(PopoverContent, { align: "end", side: side, sideOffset: 8, "data-slot": "context-display-popover", className: contentClassName, children: content })) : (_jsx(TooltipContent, { side: side, sideOffset: 8, hideArrow: true, "data-slot": "context-display-popover", className: contentClassName, children: content }));
 }
-const RING_SIZE = 18;
+const RING_SIZE = 16;
 const RING_STROKE = 2.5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;

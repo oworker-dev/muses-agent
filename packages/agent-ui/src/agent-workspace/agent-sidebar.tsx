@@ -37,6 +37,7 @@ export function AgentSidebar({
   onSettings,
   open,
   threads,
+  variant = "mobile",
 }: {
   readonly activeThreadId: string | undefined;
   readonly brand: string;
@@ -52,6 +53,7 @@ export function AgentSidebar({
   readonly onSettings: () => void;
   readonly open: boolean;
   readonly threads: readonly AgentThread[];
+  readonly variant?: "desktop" | "mobile";
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -84,17 +86,23 @@ export function AgentSidebar({
 
   return (
     <AssistantRuntimeProvider runtime={listRuntime}>
-      <div className={cn("fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] lg:hidden", open ? "block" : "hidden")} onClick={onClose} />
-      <aside aria-label={messages.threads} className={cn("fixed inset-y-0 left-0 z-40 w-[252px] shrink-0 overflow-hidden border-r bg-sidebar text-sidebar-foreground shadow-xl transition-[transform,width] duration-200 lg:static lg:z-auto lg:shadow-none", open ? "translate-x-0 lg:w-[252px]" : "-translate-x-full lg:w-0 lg:border-r-0")}>
-        <div className="flex h-full min-w-[252px] flex-col">
-          <div className="flex h-13 items-center justify-between px-3">
+      {variant === "mobile" ? <div className={cn("fixed inset-0 z-30 bg-black/20 backdrop-blur-[1px] lg:hidden", open ? "block" : "hidden")} onClick={onClose} /> : null}
+      <aside aria-label={messages.threads} className={cn(
+        "overflow-hidden bg-sidebar text-sidebar-foreground",
+        variant === "desktop"
+          ? "h-full w-full"
+          : "fixed inset-y-0 left-0 z-40 w-[min(84vw,320px)] shadow-xl transition-transform duration-200 lg:hidden",
+        variant === "mobile" && (open ? "translate-x-0" : "-translate-x-full"),
+      )}>
+        <div className="flex h-full min-w-0 flex-col">
+          <div className="flex h-12 items-center justify-between px-3 lg:h-13">
             <div className="flex min-w-0 items-center gap-2 font-semibold">
               <span className="flex size-7 items-center justify-center rounded-md bg-foreground text-background"><SparklesIcon className="size-4" /></span>
               <span className="truncate">{brand}</span>
             </div>
             <div className="flex items-center gap-0.5">
               <Button aria-label={messages.search} onClick={() => setSearchOpen((open) => !open)} size="icon-sm" variant="ghost"><SearchIcon className="size-4" /></Button>
-              <Button aria-label={messages.closeNavigation} className="lg:hidden" onClick={onClose} size="icon-sm" variant="ghost"><XIcon className="size-4" /></Button>
+              {variant === "mobile" ? <Button aria-label={messages.closeNavigation} onClick={onClose} size="icon-sm" variant="ghost"><XIcon className="size-4" /></Button> : null}
             </div>
           </div>
           <div className="space-y-1 px-2">
@@ -172,7 +180,7 @@ function SidebarThreadItems({
                 <ThreadListItemPrimitive.Root
                   className={cn(
                     "group relative flex min-h-9 items-center gap-0.5 rounded-md transition-colors hover:bg-foreground/[0.045]",
-                    thread.id === activeThreadId && "bg-foreground/[0.09] text-foreground shadow-[inset_3px_0_0_var(--color-foreground)] hover:bg-foreground/[0.11]",
+                    thread.id === activeThreadId && "bg-background text-foreground hover:bg-background",
                   )}
                 >
                   {editingThreadId === thread.id ? (

@@ -1,9 +1,9 @@
 import {
   Client,
   type ClientSession,
-  type HandleMessageStreamEvent,
+  type MessageStreamEvent,
   type MessageResponse,
-  type SendTurnInput,
+  type SendTurnOptions,
 } from "eve/client";
 import {
   AGENT_SESSION_CONTRACT_VERSION,
@@ -41,7 +41,6 @@ export type AgentSessionStreamOptions = {
 };
 
 export interface AgentSessionTurn<TOutput = unknown> extends AsyncIterable<AgentSessionEvent> {
-  readonly continuationToken?: string;
   readonly sessionId: string;
   result(): Promise<AgentSessionTurnResult<TOutput>>;
 }
@@ -59,7 +58,7 @@ export interface AgentSessionClient {
 }
 
 /**
- * Default interactive-session adapter for Eve 0.27.x.
+ * Default interactive-session adapter for Eve 0.31.x.
  *
  * The returned surface contains no Eve classes or event types. Hosts persist
  * the AgentSession cursor and can replace this adapter without changing UI
@@ -70,30 +69,60 @@ export function createEveAgentSessionClient(options: AgentSessionClientOptions):
     auth: { bearer: options.getAccessToken },
     headers: options.headers,
     host: normalizeBaseUrl(options.baseUrl),
-    preserveCompletedSessions: true,
     redirect: options.redirect ?? "error",
   });
   return {
     session(cursor) {
-      return new EveAgentSession(client.session(toEveCursor(cursor)));
+      return new EveAgentSession(client, cursor);
     },
   };
 }
 
 class EveAgentSession implements AgentSession {
-  constructor(private readonly sessionHandle: ClientSession) {}
+  private sessionHandle: ClientSession | undefined;
+
+  constructor(
+    private readonly client: Client,
+    cursor?: AgentSessionCursor,
+  ) {
+    validateCursor(cursor);
+    if (cursor?.sessionId) {
+      this.sessionHandle = client.sessions.attach(cursor.sessionId, {
+        streamIndex: cursor.eventCursor,
+      });
+    }
+  }
 
   get cursor(): AgentSessionCursor {
-    return fromEveCursor(this.sessionHandle.state);
+    return this.sessionHandle
+      ? fromEveCursor(this.sessionHandle.state)
+      : { eventCursor: 0 };
   }
 
   async send<TOutput = unknown>(input: AgentSessionSendInput): Promise<AgentSessionTurn<TOutput>> {
     const startCursor = this.cursor.eventCursor;
-    const response = await this.sessionHandle.send<TOutput>(toEveSendInput<TOutput>(input));
+    const payload = toEveSendInput<TOutput>(input);
+    let response: MessageResponse<TOutput>;
+    if (!this.sessionHandle) {
+      if ("inputResponses" in payload) {
+        throw new Error("An active Agent session is required to answer an input request.");
+      }
+      const created = await this.client.sessions.create<TOutput>({
+        message: toEveMessage(payload.message),
+        ...payload.options,
+      });
+      this.sessionHandle = created.session;
+      response = created.response;
+    } else if ("inputResponses" in payload) {
+      response = await this.sessionHandle.respond<TOutput>(payload.inputResponses, payload.options);
+    } else {
+      response = await this.sessionHandle.send<TOutput>(toEveMessage(payload.message), payload.options);
+    }
     return new EveAgentSessionTurn<TOutput>(response, startCursor);
   }
 
   async *stream(options?: AgentSessionStreamOptions): AsyncIterable<AgentSessionEvent> {
+    if (!this.sessionHandle) return;
     let cursor = options?.after ?? this.cursor.eventCursor;
     if (!Number.isSafeInteger(cursor) || cursor < 0) {
       throw new RangeError("Agent session event cursor must be a non-negative safe integer.");
@@ -109,16 +138,18 @@ class EveAgentSession implements AgentSession {
   }
 
   async cancel(options?: { readonly turnId?: string }): Promise<AgentSessionCancellation> {
-    return this.sessionHandle.cancel(options);
+    return this.sessionHandle?.cancel(options) ?? { status: "no_active_turn" };
   }
 
   async reset(): Promise<AgentSessionReset> {
-    return this.sessionHandle.reset();
+    if (!this.sessionHandle) return { status: "no_active_session" };
+    const result = await this.sessionHandle.reset();
+    if (result.status === "reset") this.sessionHandle = undefined;
+    return result;
   }
 }
 
 class EveAgentSessionTurn<TOutput> implements AgentSessionTurn<TOutput> {
-  readonly continuationToken?: string;
   readonly sessionId: string;
   private consumed = false;
 
@@ -126,7 +157,6 @@ class EveAgentSessionTurn<TOutput> implements AgentSessionTurn<TOutput> {
     private readonly response: MessageResponse<TOutput>,
     private readonly startCursor: number,
   ) {
-    this.continuationToken = response.continuationToken;
     this.sessionId = response.sessionId;
   }
 
@@ -159,32 +189,46 @@ class EveAgentSessionTurn<TOutput> implements AgentSessionTurn<TOutput> {
   }
 }
 
-function toEveCursor(cursor: AgentSessionCursor | undefined) {
+function validateCursor(cursor: AgentSessionCursor | undefined) {
   if (!cursor) return undefined;
   if (!Number.isSafeInteger(cursor.eventCursor) || cursor.eventCursor < 0) {
     throw new RangeError("Agent session event cursor must be a non-negative safe integer.");
   }
-  return {
-    ...(cursor.continuationToken ? { continuationToken: cursor.continuationToken } : {}),
-    ...(cursor.sessionId ? { sessionId: cursor.sessionId } : {}),
-    streamIndex: cursor.eventCursor,
-  };
 }
 
 function fromEveCursor(cursor: ClientSession["state"]): AgentSessionCursor {
   return {
-    ...(cursor.continuationToken ? { continuationToken: cursor.continuationToken } : {}),
-    ...(cursor.sessionId ? { sessionId: cursor.sessionId } : {}),
+    sessionId: cursor.sessionId,
     eventCursor: cursor.streamIndex,
   };
 }
 
-function toEveSendInput<TOutput>(input: AgentSessionSendInput): SendTurnInput<TOutput> {
-  if (typeof input === "string") return input;
-  return input as SendTurnInput<TOutput>;
+type EveSendInput<TOutput> =
+  | { readonly inputResponses: NonNullable<AgentSessionSendPayload["inputResponses"]>; readonly options?: SendTurnOptions<TOutput> }
+  | { readonly message: string | NonNullable<AgentSessionSendPayload["message"]>; readonly options?: SendTurnOptions<TOutput> };
+
+function toEveSendInput<TOutput>(input: AgentSessionSendInput): EveSendInput<TOutput> {
+  if (typeof input === "string") return { message: input };
+  const options = {
+    ...(input.clientContext === undefined ? {} : { clientContext: input.clientContext }),
+    ...(input.headers === undefined ? {} : { headers: input.headers }),
+    ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  } as SendTurnOptions<TOutput>;
+  if (input.inputResponses) return { inputResponses: input.inputResponses, options };
+  if (input.message === undefined) throw new Error("Agent session input requires a message or input response.");
+  return { message: input.message, options };
 }
 
-function projectSessionEvent(event: HandleMessageStreamEvent, cursor: number): AgentSessionEvent {
+function toEveMessage(
+  message: NonNullable<AgentSessionSendPayload["message"]>,
+): Parameters<ClientSession["send"]>[0] {
+  return typeof message === "string"
+    ? message
+    : [...message] as Parameters<ClientSession["send"]>[0];
+}
+
+function projectSessionEvent(event: MessageStreamEvent, cursor: number): AgentSessionEvent {
   const candidate = event as unknown as { readonly data?: JsonValue; readonly meta?: JsonValue; readonly type: string };
   return {
     contractVersion: AGENT_SESSION_CONTRACT_VERSION,

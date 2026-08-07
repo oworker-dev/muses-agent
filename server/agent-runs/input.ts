@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   type JsonValue,
   type StartAgentRunRequest,
-} from "../../contracts/agent-run.ts";
+} from "@oworker/open-agent-contracts/agent-run";
 import {
   DEFAULT_AGENT_RUNTIME_CONFIG,
   isAgentProfileForConfig,

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger, } from "../ui/alert-dialog.js";
 import { Button } from "../ui/button.js";
 import { AgentActivity } from "./agent-activity.js";
-import { createAgentSession } from "./agent-client.js";
+import { attachAgentSession, createAgentSession } from "./agent-client.js";
 import { AgentMessage } from "./agent-message.js";
 import { messagesFor } from "./i18n.js";
 import { isProxiedInputOnlyMessage } from "./turn-presentation.js";
@@ -30,7 +30,10 @@ export function AgentChildSessionView({ client, locale, preferences, sessionId, 
     }, [sessionId]);
     useEffect(() => {
         const controller = new AbortController();
-        const session = createAgentSession(client, preferences, { sessionId, streamIndex: 0 });
+        const connection = createAgentSession(client, preferences, { sessionId, streamIndex: 0 });
+        const session = attachAgentSession(connection, connection.initialSession);
+        if (!session)
+            return;
         let projected = eventsRef.current;
         let cursor = cursorRef.current;
         let reconnectFailures = 0;
@@ -90,7 +93,10 @@ export function AgentChildSessionView({ client, locale, preferences, sessionId, 
         const turnId = latestTurnId(events);
         if (!turnId)
             return;
-        const session = createAgentSession(client, preferences, { sessionId, streamIndex: events.length });
+        const connection = createAgentSession(client, preferences, { sessionId, streamIndex: events.length });
+        const session = attachAgentSession(connection, connection.initialSession);
+        if (!session)
+            return;
         try {
             await session.cancel({ turnId });
         }

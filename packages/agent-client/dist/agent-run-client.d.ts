@@ -40,8 +40,6 @@ export declare class AgentClientHttpError extends Error {
     readonly body: unknown;
     constructor(status: number, message: string, body: unknown);
 }
-/** @deprecated Use AgentClientHttpError. */
-export { AgentClientHttpError as AgentHostHttpError };
 export declare class AgentClientContractError extends Error {
     readonly body: unknown;
     constructor(message: string, body: unknown);

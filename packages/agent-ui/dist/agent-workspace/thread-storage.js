@@ -11,13 +11,14 @@ export const browserThreadStorage = {
         saveThreadCollection(storageKey, collection.threads, collection.activeThreadId);
     },
 };
-export function createAgentThread(now = Date.now(), title = "New task", preferences = FALLBACK_PREFERENCES) {
+export function createAgentThread(now = Date.now(), title = "New session", preferences = FALLBACK_PREFERENCES) {
     return {
         createdAt: now,
         events: [],
         id: createId(),
         preferences: { ...preferences },
         queuedTurns: [],
+        revision: 0,
         session: EMPTY_SESSION,
         status: "ready",
         title,
@@ -71,7 +72,7 @@ export function saveThreadCollection(storageKey, threads, activeThreadId) {
 export function titleFromPrompt(prompt) {
     const compact = prompt.replaceAll(/\s+/g, " ").trim();
     if (compact.length === 0)
-        return "New task";
+        return "New session";
     return compact.length > 42 ? `${compact.slice(0, 41)}...` : compact;
 }
 function parseThread(value) {
@@ -110,8 +111,10 @@ function parseThread(value) {
             reasoning: nonEmptyString(preferences.reasoning) ?? FALLBACK_PREFERENCES.reasoning,
         },
         queuedTurns,
+        revision: typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0
+            ? value.revision
+            : 0,
         session: {
-            continuationToken: typeof session.continuationToken === "string" ? session.continuationToken : undefined,
             sessionId: typeof session.sessionId === "string" ? session.sessionId : undefined,
             streamIndex: Math.max(storedStreamIndex, rawEvents.length),
         },
@@ -148,7 +151,7 @@ function parsePendingTurn(value) {
     if (typeof value.id !== "string" || !value.id ||
         typeof value.text !== "string" || !value.text.trim() ||
         typeof value.submittedAt !== "number" || !Number.isFinite(value.submittedAt) ||
-        (value.state !== "submitting" && value.state !== "delivery-failed")) {
+        (value.state !== "submitting" && value.state !== "resubmitting" && value.state !== "delivery-failed")) {
         return undefined;
     }
     return {

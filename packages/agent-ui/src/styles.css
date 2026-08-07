@@ -71,6 +71,31 @@
   font-size: inherit;
 }
 
+.open-agent-ui * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 24%, transparent) transparent;
+}
+
+.open-agent-ui *::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.open-agent-ui *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.open-agent-ui *::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--muted-foreground) 24%, transparent);
+}
+
+.open-agent-ui *::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--muted-foreground) 36%, transparent);
+}
+
 :root {
   --sidebar: hsl(0 0% 96.8%);
   --sidebar-foreground: hsl(240 5.3% 26.1%);

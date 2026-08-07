@@ -28,7 +28,7 @@ test("rejects a non-HTTP Agent runtime URL", () => {
   );
 });
 
-test("passes the continuation token when resetting an Eve session", async (t) => {
+test("resets an Eve session by stable ID", async (t) => {
   const originalFetch = globalThis.fetch;
   const originalRuntimeUrl = process.env.AGENT_RUNTIME_URL;
   let body: unknown;
@@ -39,9 +39,9 @@ test("passes the continuation token when resetting an Eve session", async (t) =>
   });
   process.env.AGENT_RUNTIME_URL = "https://agent.example";
   globalThis.fetch = async (input, init) => {
-    assert.match(String(input), /\/eve\/v1\/session\/reset$/);
+    assert.match(String(input), /\/eve\/v1\/session\/session-1\/reset$/);
     assert.equal(init?.method, "POST");
-    body = JSON.parse(String(init?.body));
+    body = init?.body;
     return Response.json({
       ok: true,
       previousSessionId: "session-1",
@@ -53,21 +53,32 @@ test("passes the continuation token when resetting an Eve session", async (t) =>
     "run-1",
     "correlation-1",
     "session-1",
-    "continue-1",
     "token",
   );
   assert.equal(status, "reset");
-  assert.deepEqual(body, { continuationToken: "continue-1" });
+  assert.equal(body, undefined);
 });
 
-test("reports reset unavailable for a legacy run without a continuation token", async () => {
+test("uses the stable session ID as the reset handle", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalRuntimeUrl = process.env.AGENT_RUNTIME_URL;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalRuntimeUrl === undefined) delete process.env.AGENT_RUNTIME_URL;
+    else process.env.AGENT_RUNTIME_URL = originalRuntimeUrl;
+  });
+  process.env.AGENT_RUNTIME_URL = "https://agent.example";
+  globalThis.fetch = async (input) => {
+    assert.match(String(input), /\/eve\/v1\/session\/session-1\/reset$/);
+    return Response.json({ ok: true, previousSessionId: "session-1", status: "reset" });
+  };
   assert.equal(
-    await resetEveAgentRun("run-1", "correlation-1", "session-1", undefined, "token"),
-    "unavailable",
+    await resetEveAgentRun("run-1", "correlation-1", "session-1", "token"),
+    "reset",
   );
 });
 
-test("reads a bounded no-store snapshot and closes at Eve's durable tail", async (t) => {
+test("reads a bounded no-store event page and closes at Eve's durable tail", async (t) => {
   const originalFetch = globalThis.fetch;
   const originalRuntimeUrl = process.env.AGENT_RUNTIME_URL;
   let cancelled = false;
@@ -89,7 +100,6 @@ test("reads a bounded no-store snapshot and closes at Eve's durable tail", async
     const stream = new ReadableStream<Uint8Array>({
       cancel() {
         cancelled = true;
-        return new Promise(() => undefined);
       },
       start(controller) {
         controller.enqueue(new TextEncoder().encode(
@@ -121,7 +131,7 @@ test("reads a bounded no-store snapshot and closes at Eve's durable tail", async
   assert.equal(cancelled, true);
 });
 
-test("rejects a bounded snapshot without a valid durable tail", async (t) => {
+test("rejects a bounded event page without a valid durable tail", async (t) => {
   const originalFetch = globalThis.fetch;
   const originalRuntimeUrl = process.env.AGENT_RUNTIME_URL;
   let cancelled = false;
@@ -139,12 +149,12 @@ test("rejects a bounded snapshot without a valid durable tail", async (t) => {
 
   await assert.rejects(
     readEveAgentEvents("run-1", "correlation-1", "session-1", "token"),
-    /valid bounded stream tail index/,
+    /requires the server to report the x-eve-stream-tail-index header/,
   );
   assert.equal(cancelled, true);
 });
 
-test("rejects a stream that closes before its declared durable tail", async (t) => {
+test("reconnects a bounded event page until it reaches the declared durable tail", async (t) => {
   const originalFetch = globalThis.fetch;
   const originalRuntimeUrl = process.env.AGENT_RUNTIME_URL;
   t.after(() => {
@@ -153,13 +163,17 @@ test("rejects a stream that closes before its declared durable tail", async (t) 
     else process.env.AGENT_RUNTIME_URL = originalRuntimeUrl;
   });
   process.env.AGENT_RUNTIME_URL = "https://agent.example";
-  globalThis.fetch = async () => new Response(
-    `${JSON.stringify({ data: {}, meta: { at: "2026-08-03T00:00:00.000Z" }, type: "session.started" })}\n`,
-    { headers: { "x-eve-stream-tail-index": "1" } },
-  );
+  let requestCount = 0;
+  globalThis.fetch = async (input) => {
+    const startIndex = Number(new URL(String(input)).searchParams.get("startIndex") ?? "0");
+    requestCount += 1;
+    const event = startIndex === 0
+      ? { data: {}, meta: { at: "2026-08-03T00:00:00.000Z", id: "evt_01KZ0000000000000000000001" }, type: "session.started" }
+      : { data: { wait: "next-user-message" }, meta: { at: "2026-08-03T00:00:01.000Z", id: "evt_01KZ0000000000000000000002" }, type: "session.waiting" };
+    return new Response(`${JSON.stringify(event)}\n`, { headers: { "x-eve-stream-tail-index": "1" } });
+  };
 
-  await assert.rejects(
-    readEveAgentEvents("run-1", "correlation-1", "session-1", "token"),
-    /ended before its declared durable tail/,
-  );
+  const events = await readEveAgentEvents("run-1", "correlation-1", "session-1", "token");
+  assert.deepEqual(events.map((event) => event.type), ["session.started", "session.waiting"]);
+  assert.equal(requestCount, 2);
 });

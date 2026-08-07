@@ -56,12 +56,12 @@ test("rejects cross-tenant or cross-principal session access", async () => {
   );
 });
 
-test("does not treat Eve's reset route as a session id", async () => {
-  const store = fakeStore("missing");
+test("authorizes Eve reset through the stable session ID", async () => {
+  const store = fakeStore("owned");
   const auth = withSessionOwnership(authenticate, store);
-  const result = await auth(new Request("https://agent.test/eve/v1/session/reset", { method: "POST" }));
+  const result = await auth(new Request("https://agent.test/eve/v1/session/session-1/reset", { method: "POST" }));
   assert.equal(result?.principalId, owner.principalId);
-  assert.equal(store.verifications.length, 0);
+  assert.deepEqual(store.verifications, [{ owner, sessionId: "session-1" }]);
 });
 
 test("fails closed when a session owner cannot be resolved after the claim window", async () => {

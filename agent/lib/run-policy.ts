@@ -5,7 +5,7 @@ import type {
   AgentExecutionMode,
   AgentRunLimits,
   AgentRunPolicy,
-} from "../../contracts/agent-run";
+} from "@oworker/open-agent-contracts/agent-run";
 
 export type RunPolicyState = {
   readonly inputTokens: number;

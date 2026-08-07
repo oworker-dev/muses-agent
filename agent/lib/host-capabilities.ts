@@ -1,8 +1,8 @@
 import { defineState, type SessionContext } from "eve/context";
 import { createAgentHostCapabilityClient } from "@oworker/open-agent-host/client";
 import type { AgentHostInvocationIdentity } from "@oworker/open-agent-contracts/host";
-import type { AgentHostCapabilityDescriptor } from "../../contracts/host-capability";
-import type { JsonValue } from "../../contracts/agent-run";
+import type { AgentHostCapabilityDescriptor } from "@oworker/open-agent-contracts/host-capability";
+import type { JsonValue } from "@oworker/open-agent-contracts/agent-run";
 import { allowedHostCapabilities, readAgentRunPolicy } from "./run-policy.ts";
 
 // Host-owned media and workflow calls can legitimately outlive a normal chat

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 
 export type AgentUsageSummary = {
   readonly cacheReadTokens: number;
@@ -11,7 +11,7 @@ export type AgentUsageSummary = {
   readonly steps: number;
 };
 
-export function summarizeUsage(events: readonly HandleMessageStreamEvent[]): AgentUsageSummary {
+export function summarizeUsage(events: readonly MessageStreamEvent[]): AgentUsageSummary {
   let cacheReadTokens = 0;
   let cacheWriteTokens = 0;
   let contextInputTokens = 0;
@@ -26,7 +26,10 @@ export function summarizeUsage(events: readonly HandleMessageStreamEvent[]): Age
     const usage = event.data.usage;
     cacheReadTokens += usage.cacheReadTokens ?? 0;
     cacheWriteTokens += usage.cacheWriteTokens ?? 0;
-    contextInputTokens = (usage.inputTokens ?? contextInputTokens) + (usage.outputTokens ?? 0);
+    // The provider's input count is the authoritative context size for the
+    // latest model step. Do not add output tokens or accumulate every step;
+    // that turns a rolling context window into a fictitious 600k+ total.
+    contextInputTokens = usage.inputTokens ?? contextInputTokens;
     costUsd += usage.costUsd ?? 0;
     inputTokens += usage.inputTokens ?? 0;
     outputTokens += usage.outputTokens ?? 0;
@@ -50,9 +53,10 @@ export function summarizeUsage(events: readonly HandleMessageStreamEvent[]): Age
   };
 }
 
-function estimatePendingTokens(events: readonly HandleMessageStreamEvent[]): { readonly context: number; readonly output: number } {
+function estimatePendingTokens(events: readonly MessageStreamEvent[]): { readonly context: number; readonly output: number } {
   const cumulativeText = new Map<string, string>();
   let contextCharacters = 0;
+  let actionCharacters = 0;
 
   for (const event of events) {
     if (event.type === "message.appended") {
@@ -66,25 +70,39 @@ function estimatePendingTokens(events: readonly HandleMessageStreamEvent[]): { r
     } else if (event.type === "message.received") {
       contextCharacters += event.data.message.length;
     } else if (event.type === "action.result") {
-      contextCharacters += safeSerializedLength(event.data.result.output);
+      const length = safeModelVisibleLength(event.data.result.output);
+      actionCharacters = Math.min(actionCharacters + length, 100_000);
     }
   }
 
   let outputCharacters = 0;
   for (const value of cumulativeText.values()) outputCharacters += value.length;
   return {
-    context: Math.ceil((contextCharacters + outputCharacters) / 4),
+    context: Math.ceil((contextCharacters + actionCharacters + outputCharacters) / 4),
     output: Math.ceil(outputCharacters / 4),
   };
 }
 
-function safeSerializedLength(value: unknown): number {
-  if (typeof value === "string") return value.length;
+function safeModelVisibleLength(value: unknown): number {
+  if (isBinaryToolOutput(value)) return 0;
+  if (typeof value === "string") return Math.min(value.length, 12_000);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    for (const key of ["content", "stdout", "stderr", "text", "message"]) {
+      if (typeof record[key] === "string") return Math.min(record[key].length, 12_000);
+    }
+  }
   try {
-    return JSON.stringify(value)?.length ?? 0;
+    return Math.min(JSON.stringify(value)?.length ?? 0, 12_000);
   } catch {
     return 0;
   }
+}
+
+function isBinaryToolOutput(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.binary === true && typeof record.contentType === "string";
 }
 
 export function formatTokenCount(value: number): string {

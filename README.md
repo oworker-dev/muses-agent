@@ -203,7 +203,7 @@ environment is too late. Use `npm run build:eve:local` only for an explicit
 local-disk development build.
 
 This Docker topology is for a trusted single-tenant operator or staging
-baseline. Eve 0.27.8 does not expose Docker CPU, memory, PID, Linux capability,
+baseline. Eve 0.31.1 does not expose Docker CPU, memory, PID, Linux capability,
 or non-root controls through its backend. `doctor:production` therefore rejects
 Docker when `AGENT_DEPLOYMENT_TENANCY=multi-tenant`; use a reviewed microVM
 backend such as microsandbox or Vercel Sandbox before admitting mutually
@@ -215,7 +215,7 @@ It fails if `/embed` does not contain the exact origins from
 `frame-ancestors 'none'` artifact from being promoted as a working Host
 integration.
 
-Eve 0.27.8 documents automatic local runtime startup from `next start`, but the
+Eve documents automatic local runtime startup from `next start`, but the
 installed Next.js 16.3 preview does not currently invoke that resolver reliably.
 For local production verification, start the two official services explicitly:
 
@@ -268,10 +268,10 @@ automatic retry authority: transient 408, 429, and 5xx failures receive Eve's
 bounded three-attempt policy. A stream interruption may also be retried after
 text or reasoning output, because no external action has occurred. Once the
 Provider stream reaches a tool-input, tool-call, tool-result, or opaque raw
-boundary, an interruption ends the current turn as a recoverable failure and
-preserves its continuation token; replaying that step could duplicate an
-external side effect. Caller cancellation remains distinct and propagates as
-Eve's normal cancellation flow.
+boundary, an interruption ends the current turn as a recoverable failure while
+preserving the stable session; replaying that step could duplicate an external
+side effect. Caller cancellation remains distinct and propagates as Eve's
+normal cancellation flow.
 
 The Web client treats descendant `input.requested` events as part of the owning
 root task even though Eve preserves the child turn id. A parent may therefore
@@ -336,7 +336,9 @@ model turn; reusing the key for a different request returns `409`.
 
 The event endpoint projects Eve events into the versioned Agent contract and
 reports token usage, cache reads/writes, and provider cost when Eve supplies
-them. `DELETE` first requests Eve cooperative cancellation and records
+them. Events are returned in bounded pages (up to 200 per response); advance
+with `nextCursor` and stop when a page is empty. This keeps inspection latency
+independent of the total size of a long-running event stream. `DELETE` first requests Eve cooperative cancellation and records
 `cancellationRequestedAt`. If Eve does not emit `turn.cancelled` within the
 bounded grace window, the service terminally resets that AgentRun's exclusive
 session and records `cancelled`. Late provider completion cannot overwrite the
@@ -447,10 +449,10 @@ snapshots and serializes writes so rapid stream events cannot reorder them:
 ```
 
 For server-backed threads, hosts should also provide `onDeleteThread`. The
-reference Muses embed calls `DELETE /api/agent/sessions/:sessionId` with the
-thread continuation token. The service retires Eve first, then records a
-database-authorized sandbox tombstone for asynchronous reaping. A failed
-retirement leaves the thread and sandbox visible.
+reference Muses embed calls `DELETE /api/agent/sessions/:sessionId`. The service
+retires Eve by that stable session ID first, then records a database-authorized
+sandbox tombstone for asynchronous reaping. A failed retirement leaves the
+thread and sandbox visible.
 
 The bundled HTTP adapter uses `If-Match` revisions. A competing client receives
 `409` and the workspace stops further writes, shows a visible persistence error,
@@ -469,13 +471,14 @@ commands for durable user approval. Unattended service/runtime principals are
 denied instead of approving themselves. Production rejects `never`.
 
 Each Eve sub-agent has an independent durable session and stream. The Web UI
-can inspect, reconnect to, and cancel that session. Eve's built-in `agent`
-copy shares the root sandbox; a declared specialist uses its own sandbox unless
-configured otherwise. Eve 0.27.8 does not expose Codex-style active-turn
-steering, detached/no-wait children, arbitrary parent-to-child injection, or a
-public close lifecycle. Open Agent does not replace Eve's loop or display fake
-controls for those operations; matching that supervisor contract requires a
-future Eve capability or a separately specified durable supervisor service.
+can inspect, reconnect to, and cancel that session. Eve's built-in `agent` copy
+shares the root sandbox; a declared specialist uses its own sandbox unless
+configured otherwise. Open Agent enables Eve 0.31.1 persistent subagent
+sessions: a completed child parks, receives a stable `agentId`, and can be
+continued by the parent on a later model step. Eve still does not expose
+Codex-style active-turn steering, detached/no-wait children, injection into a
+busy child, or a public close lifecycle. Open Agent does not replace Eve's loop
+or display fake controls for operations the framework cannot perform.
 
 Run the deterministic Harness suite against a real Docker sandbox:
 

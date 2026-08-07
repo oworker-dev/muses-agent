@@ -1,8 +1,8 @@
-import type { HandleMessageStreamEvent, SessionState } from "eve/client";
-import type { AgentPendingTurn, AgentQueuedTurn, AgentThread, AgentThreadPreferences, AgentThreadStatus } from "./contracts.js";
+import type { MessageStreamEvent } from "eve/client";
+import type { AgentPendingTurn, AgentQueuedTurn, AgentThread, AgentThreadPreferences, AgentThreadSessionState, AgentThreadStatus } from "./contracts.js";
 
 export const AGENT_THREAD_STORAGE_VERSION = 2;
-const EMPTY_SESSION: SessionState = { streamIndex: 0 };
+const EMPTY_SESSION: AgentThreadSessionState = { streamIndex: 0 };
 const FALLBACK_PREFERENCES: AgentThreadPreferences = {
   executionMode: "standard",
   modelId: "default",
@@ -29,7 +29,7 @@ export const browserThreadStorage: AgentThreadStorage = {
 
 export function createAgentThread(
   now = Date.now(),
-  title = "New task",
+  title = "New session",
   preferences: AgentThreadPreferences = FALLBACK_PREFERENCES,
 ): AgentThread {
   return {
@@ -38,6 +38,7 @@ export function createAgentThread(
     id: createId(),
     preferences: { ...preferences },
     queuedTurns: [],
+    revision: 0,
     session: EMPTY_SESSION,
     status: "ready",
     title,
@@ -104,7 +105,7 @@ export function saveThreadCollection(
 
 export function titleFromPrompt(prompt: string): string {
   const compact = prompt.replaceAll(/\s+/g, " ").trim();
-  if (compact.length === 0) return "New task";
+  if (compact.length === 0) return "New session";
   return compact.length > 42 ? `${compact.slice(0, 41)}...` : compact;
 }
 
@@ -125,7 +126,7 @@ function parseThread(value: unknown): AgentThread | undefined {
         .slice(0, 5)
     : [];
   const rawEvents = Array.isArray(value.events)
-    ? (value.events as readonly HandleMessageStreamEvent[])
+    ? (value.events as readonly MessageStreamEvent[])
     : [];
   const storedStreamIndex =
     typeof session.streamIndex === "number" && session.streamIndex >= 0
@@ -145,9 +146,10 @@ function parseThread(value: unknown): AgentThread | undefined {
       reasoning: nonEmptyString(preferences.reasoning) ?? FALLBACK_PREFERENCES.reasoning,
     },
     queuedTurns,
+    revision: typeof value.revision === "number" && Number.isInteger(value.revision) && value.revision >= 0
+      ? value.revision
+      : 0,
     session: {
-      continuationToken:
-        typeof session.continuationToken === "string" ? session.continuationToken : undefined,
       sessionId: typeof session.sessionId === "string" ? session.sessionId : undefined,
       streamIndex: Math.max(storedStreamIndex, rawEvents.length),
     },
@@ -187,7 +189,7 @@ function parsePendingTurn(value: unknown): AgentPendingTurn | undefined {
     typeof value.id !== "string" || !value.id ||
     typeof value.text !== "string" || !value.text.trim() ||
     typeof value.submittedAt !== "number" || !Number.isFinite(value.submittedAt) ||
-    (value.state !== "submitting" && value.state !== "delivery-failed")
+    (value.state !== "submitting" && value.state !== "resubmitting" && value.state !== "delivery-failed")
   ) {
     return undefined;
   }
@@ -200,9 +202,9 @@ function parsePendingTurn(value: unknown): AgentPendingTurn | undefined {
 }
 
 export function appendThreadEvent(
-  events: readonly HandleMessageStreamEvent[],
-  event: HandleMessageStreamEvent,
-): readonly HandleMessageStreamEvent[] {
+  events: readonly MessageStreamEvent[],
+  event: MessageStreamEvent,
+): readonly MessageStreamEvent[] {
   if (event.type === "message.appended" || event.type === "reasoning.appended") {
     const last = events.at(-1);
     return last?.type === event.type &&
@@ -226,9 +228,9 @@ export function appendThreadEvent(
 }
 
 export function compactThreadEvents(
-  events: readonly HandleMessageStreamEvent[],
-): readonly HandleMessageStreamEvent[] {
-  const compacted: HandleMessageStreamEvent[] = [];
+  events: readonly MessageStreamEvent[],
+): readonly MessageStreamEvent[] {
+  const compacted: MessageStreamEvent[] = [];
   for (const event of events) {
     if (event.type === "message.appended" || event.type === "reasoning.appended") {
       const last = compacted.at(-1);

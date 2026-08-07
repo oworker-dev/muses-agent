@@ -1,16 +1,16 @@
 "use client";
 
 import type { UserContent } from "ai";
-import type { HandleMessageStreamEvent } from "eve/client";
+import { isCurrentTurnBoundaryEvent, type ClientSession, type MessageStreamEvent } from "eve/client";
 import { useEveAgent, type EveMessage } from "eve/react";
-import { convertEveMessages, getEveMessageContent } from "@assistant-ui/eve";
 import { AssistantRuntimeProvider, unstable_defaultDirectiveFormatter, useExternalStoreRuntime, type AppendMessage, type AttachmentAdapter, type CompleteAttachment, type ExternalThreadQueueAdapter, type PendingAttachment } from "@assistant-ui/react";
 import { AlertCircleIcon, Clock3Icon, HammerIcon, RotateCcwIcon, SearchIcon, ShieldCheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button.js";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible.js";
 import { cn } from "../utils.js";
-import { createAgentSession } from "./agent-client.js";
+import { attachAgentSession, createAgentSession } from "./agent-client.js";
+import { convertEveMessages, getEveMessageContent } from "./eve-message-adapter.js";
 import type { AgentInputResponse } from "./agent-message.js";
 import { AssistantThreadSurface } from "./assistant-thread-surface.js";
 import type { AgentModelOption, AgentPromptMenuItem, AgentQueuedTurn, AgentThread, AgentThreadPatch, AgentWorkspaceClientConfig, AgentWorkspaceMailbox, PromptInputMessage } from "./contracts.js";
@@ -18,6 +18,7 @@ import { sanitizeAgentError } from "./error-presentation.js";
 import { messagesFor, type AgentLocale, type AgentMessages } from "./i18n.js";
 import { appendThreadEvent, titleFromPrompt } from "./thread-storage.js";
 import {
+  eventsBeforeLastUserTurn,
   hasUnresolvedInputRequests,
   isProxiedInputOnlyMessage,
 } from "./turn-presentation.js";
@@ -55,7 +56,7 @@ export function AgentThreadView({
   readonly mentions: readonly AgentPromptMenuItem[];
   readonly models: readonly AgentModelOption[];
   readonly onChange: (patch: AgentThreadPatch) => void;
-  readonly onEvent?: (event: HandleMessageStreamEvent) => void;
+  readonly onEvent?: (event: MessageStreamEvent) => void;
   readonly onOpenSubagent?: (sessionId: string) => void;
   readonly onRecoveryNeeded: () => void;
   readonly providerReady: boolean;
@@ -64,10 +65,11 @@ export function AgentThreadView({
 }) {
   const preferencesRef = useRef(thread.preferences);
   const cancellationRef = useRef<Cancellation>({ requested: false });
+  const cancellationTimerRef = useRef<number | undefined>(undefined);
   const recoveryRequestedRef = useRef(false);
   const initialEventCountRef = useRef(thread.events.length);
   const initialStreamIndexRef = useRef(thread.session.streamIndex);
-  const compactedEventsRef = useRef<readonly HandleMessageStreamEvent[]>(thread.events);
+  const compactedEventsRef = useRef<readonly MessageStreamEvent[]>(thread.events);
   const processedEventCountRef = useRef(thread.events.length);
   const durableProbeInFlightRef = useRef(false);
   const queuedTurnsRef = useRef<readonly AgentQueuedTurn[]>(thread.queuedTurns);
@@ -75,6 +77,7 @@ export function AgentThreadView({
   const dispatchingQueuedTurnIdRef = useRef<string | undefined>(undefined);
   const mailboxEnqueueIdsRef = useRef(new Set<string>());
   const turnAdmissionBusyRef = useRef(false);
+  const resubmissionStartedRef = useRef(false);
   const [cancellationState, setCancellationState] = useState<"idle" | "requested" | "cancelling">("idle");
   const [cancellationError, setCancellationError] = useState<string>();
   const [queueError, setQueueError] = useState<string>();
@@ -93,8 +96,11 @@ export function AgentThreadView({
     pendingTurnRef.current = thread.pendingTurn;
   }, [thread.pendingTurn]);
 
-  const [session] = useState(() =>
+  const [connection] = useState(() =>
     createAgentSession(client, () => preferencesRef.current, thread.session),
+  );
+  const sessionRef = useRef<ClientSession | undefined>(
+    attachAgentSession(connection, connection.initialSession),
   );
 
   const cancelTurn = useCallback(
@@ -103,18 +109,18 @@ export function AgentThreadView({
       if (!cancellation.requested || cancellation.sentTurnId === turnId) return;
       cancellation.sentTurnId = turnId;
       setCancellationState("cancelling");
-      void session.cancel({ turnId }).catch((error: unknown) => {
+      void sessionRef.current?.cancel({ turnId }).catch((error: unknown) => {
         cancellation.requested = false;
         cancellation.sentTurnId = undefined;
         setCancellationError(error instanceof Error ? error.message : "Unable to stop this turn.");
         setCancellationState("idle");
       });
     },
-    [session],
+    [],
   );
 
   const handleEvent = useCallback(
-    (event: HandleMessageStreamEvent) => {
+    (event: MessageStreamEvent) => {
       if (event.type === "turn.started") {
         cancellationRef.current.turnId = event.data.turnId;
         cancelTurn(event.data.turnId);
@@ -153,6 +159,8 @@ export function AgentThreadView({
         event.type === "session.waiting" &&
         (cancellationRef.current.requested || cancellationRef.current.sentTurnId)
       ) {
+        window.clearTimeout(cancellationTimerRef.current);
+        cancellationTimerRef.current = undefined;
         cancellationRef.current = { requested: false };
         setCancellationState("idle");
       }
@@ -162,12 +170,17 @@ export function AgentThreadView({
   );
 
   const agent = useEveAgent({
+    auth: connection.auth,
+    headers: connection.headers,
+    host: connection.host,
     initialEvents: thread.events,
-    initialSession: thread.session,
+    initialSession: connection.initialSession,
     onEvent: handleEvent,
-    onSessionChange: (nextSession) => onChange({ session: nextSession }),
+    onSessionChange: (nextSession) => {
+      sessionRef.current = attachAgentSession(connection, nextSession);
+      onChange({ session: nextSession ?? { streamIndex: 0 } });
+    },
     prepareSend: client?.prepareSend,
-    session,
   });
   const stopAgent = agent.stop;
 
@@ -182,25 +195,26 @@ export function AgentThreadView({
 
   const requestRecovery = useCallback(() => {
     if (recoveryRequestedRef.current) return;
+    const state = agent.session;
+    if (!state) return;
     const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
     const currentSession = {
-      ...session.state,
+      ...state,
       streamIndex: Math.max(
-        session.state.streamIndex,
+        state.streamIndex,
         initialStreamIndexRef.current + consumedEvents,
       ),
     };
-    if (!currentSession.sessionId) return;
     recoveryRequestedRef.current = true;
     onChange({ session: currentSession, status: "streaming", updatedAt: Date.now() });
     stopAgent();
     onRecoveryNeeded();
-  }, [agent.events.length, onChange, onRecoveryNeeded, session, stopAgent]);
+  }, [agent.events.length, agent.session, onChange, onRecoveryNeeded, stopAgent]);
 
   useEffect(() => {
     const lastEvent = agent.events.at(-1);
     if (
-      agent.session.sessionId &&
+      agent.session?.sessionId &&
       !isRecovering &&
       !cancellationRef.current.requested &&
       !isBusy &&
@@ -209,10 +223,15 @@ export function AgentThreadView({
     ) {
       requestRecovery();
     }
-  }, [agent.events, agent.session.sessionId, isBusy, isRecovering, requestRecovery]);
+  }, [agent.events, agent.session?.sessionId, isBusy, isRecovering, requestRecovery]);
+
+  useEffect(() => () => {
+    window.clearTimeout(cancellationTimerRef.current);
+  }, []);
 
   useEffect(() => {
-    if (isRecovering || !agentIsBusy || !agent.session.sessionId || recoveryRequestedRef.current) return;
+    const durableSession = sessionRef.current;
+    if (isRecovering || !agentIsBusy || !agent.session?.sessionId || !durableSession || recoveryRequestedRef.current) return;
     let disposed = false;
     let timer: number | undefined;
     const probe = async () => {
@@ -221,10 +240,10 @@ export function AgentThreadView({
       try {
         const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
         const cursor = Math.max(
-          session.state.streamIndex,
+          durableSession.state.streamIndex,
           initialStreamIndexRef.current + consumedEvents,
         );
-        if (await hasDurableProgressAfter(session, cursor)) requestRecovery();
+        if (await hasDurableProgressAfter(durableSession, cursor)) requestRecovery();
       } finally {
         durableProbeInFlightRef.current = false;
       }
@@ -237,13 +256,13 @@ export function AgentThreadView({
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [agent.events.length, agent.session.sessionId, agentIsBusy, isRecovering, requestRecovery, session]);
+  }, [agent.events.length, agent.session?.sessionId, agentIsBusy, isRecovering, requestRecovery]);
 
   useEffect(() => {
     if (isRecovering) return;
     const consumedEvents = Math.max(0, agent.events.length - initialEventCountRef.current);
     const streamIndex = Math.max(
-      agent.session.streamIndex,
+      agent.session?.streamIndex ?? 0,
       initialStreamIndexRef.current + consumedEvents,
     );
     if (agent.events.length < processedEventCountRef.current) {
@@ -256,7 +275,7 @@ export function AgentThreadView({
     processedEventCountRef.current = agent.events.length;
     onChange({
       events: compactedEventsRef.current,
-      session: { ...agent.session, streamIndex },
+      session: agent.session ? { ...agent.session, streamIndex } : { streamIndex },
       status: turnError ? "error" : awaitingInput ? "waiting" : agent.status,
       updatedAt: Date.now(),
     });
@@ -278,13 +297,15 @@ export function AgentThreadView({
         queuedTurnsRef.current = queuedTurns;
         dispatchingQueuedTurnIdRef.current = undefined;
         onChange({ pendingTurn: undefined, queuedTurns });
-      } else if (!agent.session.sessionId) {
+      } else if (!agent.session?.sessionId) {
         onChange({ pendingTurn: { ...thread.pendingTurn, state: "delivery-failed" } });
       }
     }
-  }, [agent.session.sessionId, agent.status, onChange, thread.pendingTurn]);
+  }, [agent.session?.sessionId, agent.status, onChange, thread.pendingTurn]);
 
   const prepareTurn = () => {
+    window.clearTimeout(cancellationTimerRef.current);
+    cancellationTimerRef.current = undefined;
     recoveryRequestedRef.current = false;
     cancellationRef.current = { requested: false };
     setCancellationError(undefined);
@@ -338,13 +359,31 @@ export function AgentThreadView({
     if (!isBusy || cancellationState !== "idle") return;
     cancellationRef.current.requested = true;
     setCancellationState("cancelling");
-    stopAgent();
     const turnId = cancellationRef.current.turnId;
-    void session.cancel(turnId ? { turnId } : undefined).then(() => {
+    // Eve cancellation is durable and asynchronous. Keep consuming the active
+    // stream until turn.cancelled -> session.waiting; aborting the local stream
+    // here would only detach the browser while the server keeps working.
+    const durableSession = sessionRef.current;
+    if (!durableSession) {
       cancellationRef.current = { requested: false };
       setCancellationState("idle");
-      onChange({ status: "ready", updatedAt: Date.now() });
-      onRecoveryNeeded();
+      return;
+    }
+    void durableSession.cancel(turnId ? { turnId } : undefined).then((result) => {
+      if (result.status === "no_active_turn") {
+        cancellationRef.current = { requested: false };
+        setCancellationState("idle");
+        onChange({ status: "ready", updatedAt: Date.now() });
+      } else if (cancellationRef.current.requested) {
+        // A lost stream must not leave the browser in an endless stopping
+        // state. Reconnect to the durable tail if Eve has not emitted the
+        // cancellation boundary within a bounded grace period.
+        window.clearTimeout(cancellationTimerRef.current);
+        cancellationTimerRef.current = window.setTimeout(() => {
+          cancellationTimerRef.current = undefined;
+          if (cancellationRef.current.requested) onRecoveryNeeded();
+        }, 15_000);
+      }
     }).catch((error: unknown) => {
       cancellationRef.current = { requested: false };
       setCancellationError(error instanceof Error ? error.message : "Unable to stop this turn.");
@@ -397,7 +436,7 @@ export function AgentThreadView({
     }
 
     if (message.files.length === 0) {
-      await agent.send({ message: text });
+      await agent.send(text);
       return;
     }
 
@@ -406,7 +445,7 @@ export function AgentThreadView({
     for (const file of message.files) {
       parts.push({ data: file.url, filename: file.filename, mediaType: file.mediaType, type: "file" });
     }
-    await agent.send({ message: parts });
+    await agent.send(parts);
   };
 
   const visibleMessages = agent.data.messages.filter((message) =>
@@ -452,24 +491,69 @@ export function AgentThreadView({
       const content = getEveMessageContent(message);
       const prompt = promptFromAssistantMessage(content);
       if (!prompt.text && prompt.files.length === 0) return;
-      // Eve owns the durable history. Editing the latest user turn retires the
-      // current run, clears the projected tail, and starts a clean Eve session.
-      await session.reset();
-      agent.reset();
-      onChange({ events: [], pendingTurn: undefined, session: { streamIndex: 0 }, status: "ready", updatedAt: Date.now() });
-      await submit(prompt);
+      const durableSession = sessionRef.current;
+      if (!durableSession || isBusy) return;
+      try {
+        // Eve has no single-turn rollback. Its official clear operation keeps
+        // the session-owned sandbox and durable resources while removing model
+        // history. The UI retains the settled transcript before the edited turn
+        // and a remounted runtime submits the replacement without stale hooks.
+        const clearResult = await durableSession.clear();
+        if (clearResult.status !== "accepted") {
+          throw new Error("The session is no longer active.");
+        }
+        // Eve applies clear asynchronously. Advance this handle through the
+        // official context.cleared -> session.waiting boundary before the
+        // remounted runtime sends the replacement turn.
+        for await (const event of durableSession.stream()) {
+          if (isCurrentTurnBoundaryEvent(event)) break;
+        }
+        const pendingTurn = {
+          id: createPendingTurnId(),
+          state: "resubmitting" as const,
+          submittedAt: Date.now(),
+          text: prompt.text,
+        };
+        onChange({
+          events: eventsBeforeLastUserTurn(agent.events),
+          pendingTurn,
+          queuedTurns: [],
+          revision: (thread.revision ?? 0) + 1,
+          session: durableSession.state,
+          status: "ready",
+          updatedAt: Date.now(),
+        });
+      } catch (error) {
+        setTurnError(error instanceof Error ? error.message : "Unable to edit this message.");
+      }
     },
     onNew: async (message: AppendMessage) => {
       await submit(promptFromAssistantMessage(getEveMessageContent(message)));
     },
     onRespondToToolApproval: async (response) => {
       prepareTurn();
-      await agent.send({ inputResponses: [{ optionId: response.optionId, requestId: response.approvalId, text: response.reason }] });
+      await agent.respond([{ optionId: response.optionId, requestId: response.approvalId, text: response.reason }]);
     },
   });
 
   useEffect(() => {
-    if (!mailbox || !agent.session.sessionId) return;
+    const pendingTurn = thread.pendingTurn;
+    if (
+      pendingTurn?.state !== "resubmitting" ||
+      resubmissionStartedRef.current ||
+      !providerReady ||
+      isBusy
+    ) return;
+    resubmissionStartedRef.current = true;
+    void submit({ files: [], text: pendingTurn.text }).catch((error: unknown) => {
+      turnAdmissionBusyRef.current = false;
+      onChange({ pendingTurn: { ...pendingTurn, state: "delivery-failed" }, status: "error" });
+      setTurnError(error instanceof Error ? error.message : "Unable to resend this message.");
+    });
+  }, [isBusy, onChange, providerReady, thread.pendingTurn]);
+
+  useEffect(() => {
+    if (!mailbox || !agent.session?.sessionId) return;
     const next = queuedTurnsRef.current.find((turn) =>
       turn.delivery === "server" &&
       turn.state === "queued" &&
@@ -502,7 +586,7 @@ export function AgentThreadView({
     }).finally(() => {
       mailboxEnqueueIdsRef.current.delete(next.id);
     });
-  }, [agent.session.sessionId, mailbox, messages.queueDeliveryFailed, thread.queuedTurns]);
+  }, [agent.session?.sessionId, mailbox, messages.queueDeliveryFailed, thread.queuedTurns]);
 
   useEffect(() => {
     if (!mailbox) return;
@@ -551,7 +635,7 @@ export function AgentThreadView({
     if (
       admissionBusy || awaitingInput || !providerReady ||
       dispatchingQueuedTurnIdRef.current ||
-      !agent.session.continuationToken
+      !agent.session?.sessionId
     ) return;
     const next = queuedTurnsRef.current.find((turn) =>
       turn.state === "queued" && turn.delivery !== "server"
@@ -575,7 +659,7 @@ export function AgentThreadView({
       submittedAt: next.submittedAt,
       text: next.text,
     };
-    void agent.send({ message: next.text }).catch(() => {
+    void agent.send(next.text).catch(() => {
       const queuedTurns = queuedTurnsRef.current.map((turn) =>
         turn.id === next.id ? { ...turn, state: "delivery-failed" as const } : turn,
       );
@@ -583,11 +667,11 @@ export function AgentThreadView({
       dispatchingQueuedTurnIdRef.current = undefined;
       onChange({ pendingTurn: undefined, queuedTurns });
     });
-  }, [admissionBusy, agent, agent.session.continuationToken, awaitingInput, onChange, providerReady, thread.queuedTurns]);
+  }, [admissionBusy, agent, agent.session?.sessionId, awaitingInput, onChange, providerReady, thread.queuedTurns]);
 
   const respond = (inputResponses: readonly AgentInputResponse[]) => {
     prepareTurn();
-    return agent.send({ inputResponses });
+    return agent.respond(inputResponses);
   };
 
   const showPendingTurn = Boolean(
@@ -699,7 +783,7 @@ function createPendingTurnId(): string {
     : `pending-${Date.now()}`;
 }
 
-function promptFromAssistantMessage(content: NonNullable<import("eve/client").SendTurnPayload["message"]>): PromptInputMessage {
+function promptFromAssistantMessage(content: Parameters<ClientSession["send"]>[0]): PromptInputMessage {
   if (typeof content === "string") return { files: [], text: content };
   const text = content.filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text").map((part) => part.text).join("\n");
   const files = content.filter((part): part is Extract<typeof part, { type: "file" }> => part.type === "file").map((part) => ({ filename: part.filename, mediaType: part.mediaType, url: typeof part.data === "string" ? part.data : String(part.data) }));
@@ -752,7 +836,7 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-function isSessionBoundary(event: HandleMessageStreamEvent): boolean {
+function isSessionBoundary(event: MessageStreamEvent): boolean {
   return event.type === "session.waiting" || event.type === "session.completed" || event.type === "session.failed";
 }
 
@@ -772,7 +856,7 @@ function mailboxTurnState(
 }
 
 async function hasDurableProgressAfter(
-  session: ReturnType<typeof createAgentSession>,
+  session: ClientSession,
   startIndex: number,
 ): Promise<boolean> {
   const controller = new AbortController();
@@ -842,7 +926,7 @@ function TurnError({ message, messages, preserved }: { readonly message: string;
   );
 }
 
-function latestTurnOutcome(events: readonly HandleMessageStreamEvent[]): "cancelled" | "completed" | "failed" | undefined {
+function latestTurnOutcome(events: readonly MessageStreamEvent[]): "cancelled" | "completed" | "failed" | undefined {
   const event = [...events].reverse().find((candidate) => candidate.type === "turn.cancelled" || candidate.type === "turn.completed" || candidate.type === "turn.failed");
   if (event?.type === "turn.cancelled") return "cancelled";
   if (event?.type === "turn.completed") return "completed";
@@ -850,7 +934,7 @@ function latestTurnOutcome(events: readonly HandleMessageStreamEvent[]): "cancel
   return undefined;
 }
 
-function latestTurnFailure(events: readonly HandleMessageStreamEvent[]): string | undefined {
+function latestTurnFailure(events: readonly MessageStreamEvent[]): string | undefined {
   if (latestTurnOutcome(events) !== "failed") return undefined;
   const event = [...events].reverse().find((candidate) => candidate.type === "turn.failed" || candidate.type === "step.failed");
   return event?.type === "turn.failed" || event?.type === "step.failed" ? event.data.message : undefined;

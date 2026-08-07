@@ -2,7 +2,6 @@ import type { JsonValue } from "./agent-run.js";
 export declare const AGENT_SESSION_CONTRACT_VERSION: "0.1.0-draft";
 /** Serializable position used to resume one durable interactive conversation. */
 export type AgentSessionCursor = {
-    readonly continuationToken?: string;
     readonly sessionId?: string;
     readonly eventCursor: number;
 };
@@ -65,7 +64,9 @@ export type AgentSessionTurnResult<TOutput = unknown> = {
 };
 export type AgentSessionCancellation = {
     readonly sessionId: string;
-    readonly status: "accepted" | "no_active_turn";
+    readonly status: "accepted";
+} | {
+    readonly status: "no_active_turn";
 };
 export type AgentSessionReset = {
     readonly previousSessionId: string;

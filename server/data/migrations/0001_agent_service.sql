@@ -173,7 +173,6 @@ create table if not exists "__AGENT_SCHEMA__"."agent_runs" (
   metadata jsonb not null default '{}'::jsonb,
   status text not null,
   eve_session_id text unique,
-  eve_continuation_token text,
   event_count integer not null default 0,
   usage jsonb not null default '{"cacheReadTokens":0,"cacheWriteTokens":0,"costUsd":0,"inputTokens":0,"outputTokens":0,"steps":0}'::jsonb,
   result jsonb,
@@ -197,6 +196,9 @@ create table if not exists "__AGENT_SCHEMA__"."agent_runs" (
   constraint agent_run_parent_object check (parent is null or jsonb_typeof(parent) = 'object'),
   constraint agent_run_metadata_object check (jsonb_typeof(metadata) = 'object')
 );
+
+alter table "__AGENT_SCHEMA__"."agent_runs"
+  drop column if exists eve_continuation_token;
 
 create unique index if not exists agent_runs_owner_idempotency_idx
   on "__AGENT_SCHEMA__"."agent_runs" (tenant_id, principal_id, idempotency_key);

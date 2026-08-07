@@ -1,7 +1,7 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import type { AgentMessages } from "./i18n.js";
 export declare function AgentActivity({ events, messages, mode, quietUntilSlow, }: {
-    readonly events: readonly HandleMessageStreamEvent[];
+    readonly events: readonly MessageStreamEvent[];
     readonly messages: AgentMessages;
     readonly mode?: "live" | "recovery";
     readonly quietUntilSlow?: boolean;

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import type { AgentThread, AgentThreadPreferences } from "./contracts.js";
 export declare const AGENT_THREAD_STORAGE_VERSION = 2;
 export type AgentThreadCollection = {
@@ -16,6 +16,6 @@ export declare function loadThreadCollection(storageKey: string): AgentThreadCol
 export declare function parseThreadCollection(value: unknown): AgentThreadCollection;
 export declare function saveThreadCollection(storageKey: string, threads: readonly AgentThread[], activeThreadId?: string): boolean;
 export declare function titleFromPrompt(prompt: string): string;
-export declare function appendThreadEvent(events: readonly HandleMessageStreamEvent[], event: HandleMessageStreamEvent): readonly HandleMessageStreamEvent[];
-export declare function compactThreadEvents(events: readonly HandleMessageStreamEvent[]): readonly HandleMessageStreamEvent[];
+export declare function appendThreadEvent(events: readonly MessageStreamEvent[], event: MessageStreamEvent): readonly MessageStreamEvent[];
+export declare function compactThreadEvents(events: readonly MessageStreamEvent[]): readonly MessageStreamEvent[];
 //# sourceMappingURL=thread-storage.d.ts.map

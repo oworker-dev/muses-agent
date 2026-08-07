@@ -3,7 +3,7 @@ import type {
   AgentRunLimits,
   AgentRunPolicy,
   AgentProfileRef as ContractAgentProfileRef,
-} from "../contracts/agent-run.ts";
+} from "@oworker/open-agent-contracts/agent-run";
 import type {
   AgentRuntimeConfigSnapshot,
   AgentRuntimeExtension,

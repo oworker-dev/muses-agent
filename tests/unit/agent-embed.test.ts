@@ -5,7 +5,7 @@ import {
   isAllowedAgentEmbedParentOrigin,
   parseAgentEmbedEvent,
   parseAgentEmbedHostMessage,
-} from "../../contracts/agent-embed.ts";
+} from "@oworker/open-agent-contracts/embed";
 import { DEFAULT_AGENT_RUNTIME_CONFIG } from "../../lib/agent-runtime-config.ts";
 
 test("accepts a valid in-memory embed configuration", () => {

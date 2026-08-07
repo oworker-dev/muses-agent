@@ -3,7 +3,7 @@ import {
   AGENT_RUN_CONTRACT_VERSION,
   type AgentEvent,
   type AgentRunSnapshot,
-} from "../../contracts/agent-run.ts";
+} from "@oworker/open-agent-contracts/agent-run";
 import type { AgentSessionOwner } from "../data/session-ownership-store.ts";
 import type { AgentRunRecord, AgentRunStore } from "../data/agent-run-store.ts";
 import type { ParsedStartAgentRun } from "./input.ts";
@@ -14,7 +14,9 @@ import {
   resetEveAgentRun,
   startEveAgentRun,
 } from "./eve-adapter.ts";
-import { projectAgentEvents, projectAgentRun } from "./projection.ts";
+import { projectAgentEvents, projectAgentRunDelta } from "./projection.ts";
+
+const AGENT_EVENT_PAGE_SIZE = 200;
 
 export type AgentRunRuntime = {
   readonly cancel: typeof cancelEveAgentRun;
@@ -122,7 +124,6 @@ export async function startAgentRun(options: {
     const record = await options.store.attachSession(
       reservation.record.runId,
       session.sessionId,
-      session.continuationToken,
     );
     return { disposition: "started", record };
   } catch (error) {
@@ -172,7 +173,11 @@ export async function readAgentRunEvents(options: {
   readonly cancellationPolicy?: Partial<AgentRunCancellationPolicy>;
   readonly runtime?: AgentRunRuntime;
   readonly store: AgentRunStore;
-}): Promise<{ readonly events: readonly AgentEvent[]; readonly record: AgentRunRecord } | undefined> {
+}): Promise<{
+  readonly events: readonly AgentEvent[];
+  readonly nextCursor: number;
+  readonly record: AgentRunRecord;
+} | undefined> {
   const record = await options.store.findOwned(
     options.identity.tenantId,
     options.identity.principalId,
@@ -186,15 +191,31 @@ export async function readAgentRunEvents(options: {
     options.runtime,
     options.cancellationPolicy,
   );
-  if (options.after > synchronized.events.length) {
+  if (options.after > synchronized.record.eventCount) {
     throw new AgentRunOperationError(
       416,
       "agent_run_cursor_out_of_range",
       "The event cursor is ahead of the AgentRun event stream.",
     );
   }
+  if (!synchronized.record.sessionId) {
+    return {
+      events: [],
+      nextCursor: options.after,
+      record: synchronized.record,
+    };
+  }
+  const events = await (options.runtime ?? eveAgentRunRuntime).readEvents(
+    synchronized.record.runId,
+    synchronized.record.correlationId,
+    synchronized.record.sessionId,
+    options.accessToken,
+    options.after,
+    AGENT_EVENT_PAGE_SIZE,
+  );
   return {
-    events: synchronized.events.slice(options.after),
+    events: projectAgentEvents(record.runId, events, options.after),
+    nextCursor: options.after + events.length,
     record: synchronized.record,
   };
 }
@@ -266,14 +287,18 @@ export async function synchronizeAgentRun(
   cancellationPolicyInput?: Partial<AgentRunCancellationPolicy>,
 ) {
   if (!record.sessionId) return { events: [], record } as const;
+  if (isTerminal(record.status)) return { events: [], record } as const;
   const events = await runtime.readEvents(
     record.runId,
     record.correlationId,
     record.sessionId,
     accessToken,
+    record.eventCount,
+    AGENT_EVENT_PAGE_SIZE,
   );
-  const projection = projectAgentRun(events);
-  let projectedRecord = await store.updateProjection(record.runId, projection);
+  let projectedRecord = events.length === 0
+    ? record
+    : await store.updateProjection(record.runId, projectAgentRunDelta(record, events));
   const cancellationPolicy = resolveCancellationPolicy(cancellationPolicyInput);
   if (
     projectedRecord.status !== "cancelled"
@@ -285,15 +310,12 @@ export async function synchronizeAgentRun(
       projectedRecord.runId,
       projectedRecord.correlationId,
       projectedRecord.sessionId,
-      projectedRecord.continuationToken,
       accessToken,
     );
-    if (reset !== "unavailable") {
-      projectedRecord = await store.markCancelled(projectedRecord.runId);
-    }
+    projectedRecord = await store.markCancelled(projectedRecord.runId);
   }
   return {
-    events: projectAgentEvents(record.runId, events),
+    events: projectAgentEvents(record.runId, events, record.eventCount),
     record: projectedRecord,
   } as const;
 }

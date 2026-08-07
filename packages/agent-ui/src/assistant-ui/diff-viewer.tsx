@@ -164,7 +164,7 @@ const diffViewerVariants = cva(
   },
 );
 
-const diffLineVariants = cva("flex", {
+const diffLineVariants = cva("flex min-w-max", {
   variants: {
     type: {
       add: "bg-[var(--diff-add-bg,_rgba(46,160,67,0.15))]",
@@ -340,7 +340,7 @@ function DiffViewerLine({
       <span
         data-slot="diff-viewer-content"
         className={cn(
-          "flex-1 break-all whitespace-pre-wrap",
+          "flex-1 whitespace-pre",
           diffLineTextVariants({ type: line.type }),
         )}
       >

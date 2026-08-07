@@ -1,6 +1,6 @@
 import type { AgentThread } from "./contracts.js";
 import type { AgentLocale, AgentMessages } from "./i18n.js";
-export declare function AgentSidebar({ activeThreadId, brand, deletingThreadIds, hostFooter, locale, messages, onClose, onDelete, onNew, onRename, onSelect, onSettings, open, threads, }: {
+export declare function AgentSidebar({ activeThreadId, brand, deletingThreadIds, hostFooter, locale, messages, onClose, onDelete, onNew, onRename, onSelect, onSettings, open, threads, variant, }: {
     readonly activeThreadId: string | undefined;
     readonly brand: string;
     readonly deletingThreadIds: ReadonlySet<string>;
@@ -15,5 +15,6 @@ export declare function AgentSidebar({ activeThreadId, brand, deletingThreadIds,
     readonly onSettings: () => void;
     readonly open: boolean;
     readonly threads: readonly AgentThread[];
+    readonly variant?: "desktop" | "mobile";
 }): import("react/jsx-runtime").JSX.Element;
 //# sourceMappingURL=agent-sidebar.d.ts.map

@@ -11,7 +11,7 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import { LexicalComposerInput, type DirectiveChipProps } from "@assistant-ui/react-lexical";
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import type { EveMessage } from "eve/react";
 import {
   ArrowDownIcon,
@@ -20,22 +20,24 @@ import {
   CheckIcon,
   CopyIcon,
   LoaderCircleIcon,
-  PaperclipIcon,
+  PlusIcon,
   PencilIcon,
   ShieldCheckIcon,
   SlashIcon,
   SquareIcon,
   WrenchIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ComposerTriggerPopover } from "../assistant-ui/composer-trigger-popover.js";
 import { ContextDisplay } from "../assistant-ui/context-display.js";
+import { copyText } from "../assistant-ui/copy-text.js";
 import { DirectiveText } from "../assistant-ui/directive-text.js";
 import { MarkdownText } from "../assistant-ui/markdown-text.js";
 import { ModelSelector, type ModelOption } from "../assistant-ui/model-selector.js";
 import { ToolFallback } from "../assistant-ui/tool-fallback.js";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button.js";
 import { Button } from "../ui/button.js";
+import { cn } from "../utils.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -76,7 +78,7 @@ export function AssistantThreadSurface({
   readonly cancellationState: AgentCancellationState;
   readonly commands: readonly AgentPromptMenuItem[];
   readonly draftStorageKey: string;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly eveMessages: readonly EveMessage[];
   readonly fallbackStartedAt?: number;
   readonly isBusy: boolean;
@@ -108,10 +110,10 @@ export function AssistantThreadSurface({
         aria-live="polite"
         autoScroll
         turnAnchor="top"
-        className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 pt-4"
+        className="relative flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-3 pt-3 sm:px-4 sm:pt-4"
         role="log"
       >
-        <div className="mx-auto mb-14 flex w-full max-w-(--thread-max-width) flex-col gap-6 empty:hidden">
+        <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-6 empty:hidden">
           <ThreadPrimitive.Messages>
             {({ message }) => message.composer.isEditing ? (
               <EditMessage messages={messages} />
@@ -132,7 +134,7 @@ export function AssistantThreadSurface({
             )}
           </ThreadPrimitive.Messages>
           {pendingTurnText ? <PendingUserTurn text={pendingTurnText} /> : null}
-          {isBusy ? (
+          {isBusy && !hasCurrentTurnVisibleProcess(events) ? (
             <AgentActivity events={events} messages={messages} quietUntilSlow={quietActivity} />
           ) : null}
         </div>
@@ -141,7 +143,7 @@ export function AssistantThreadSurface({
           {!pendingTurnText && !isBusy ? <AssistantEmptyState messages={messages} /> : null}
         </ThreadPrimitive.Empty>
 
-        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col bg-background pb-4 pt-5 md:pb-6">
+        <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-20 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col bg-background pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:pb-4 md:pb-5">
           <ThreadPrimitive.ScrollToBottom asChild>
             <TooltipIconButton
               tooltip={locale === "zh-CN" ? "滚动到底部" : "Scroll to bottom"}
@@ -170,33 +172,46 @@ export function AssistantThreadSurface({
   );
 }
 
+function hasCurrentTurnVisibleProcess(events: readonly MessageStreamEvent[]): boolean {
+  const turnId = [...events].reverse().find((event) => event.type === "turn.started")?.data.turnId;
+  if (!turnId) return false;
+  return events.some((event) =>
+    (
+      event.type === "reasoning.appended" ||
+      event.type === "reasoning.completed" ||
+      event.type === "message.appended" ||
+      event.type === "message.completed" ||
+      event.type === "actions.requested"
+    ) && event.data.turnId === turnId,
+  );
+}
+
 function UserMessage({ messages }: { readonly messages: AgentMessages }) {
   const isLastUserMessage = useAuiState((state) => {
     const lastUser = [...state.thread.messages].reverse().find((message) => message.role === "user");
     return lastUser?.id === state.message.id;
   });
+  const userText = useAuiState((state) => state.message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.type === "text" ? part.text : "")
+    .join("\n"));
 
   return (
     <MessagePrimitive.Root className="group mx-auto flex w-full max-w-(--thread-max-width) flex-col items-end">
       <div className="max-w-[min(44rem,88%)] rounded-2xl bg-muted/75 px-4 py-3 text-[15px] leading-6 text-foreground">
         <MessagePrimitive.Parts components={{ Text: DirectiveText }} />
       </div>
-      <ActionBarPrimitive.Root
-        className="mt-0.5 flex min-h-7 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-      >
-          <ActionBarPrimitive.Copy
-            aria-label={messages.copyResponse}
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <CopyIcon className="size-3.5" />
-          </ActionBarPrimitive.Copy>
+      <div className="mt-0.5 flex min-h-7 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <CopyTextAction label={messages.copyResponse} text={userText} />
+          <ActionBarPrimitive.Root className="flex min-h-7 items-center">
           <ActionBarPrimitive.Edit
             aria-label={messages.editMessage}
             className={`inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground ${isLastUserMessage ? "" : "invisible pointer-events-none"}`}
           >
             <PencilIcon className="size-3.5" />
           </ActionBarPrimitive.Edit>
-      </ActionBarPrimitive.Root>
+          </ActionBarPrimitive.Root>
+      </div>
     </MessagePrimitive.Root>
   );
 }
@@ -213,7 +228,7 @@ function AssistantMessage({
   onOpenSubagent,
 }: {
   readonly canRespond: boolean;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly fallbackStartedAt?: number;
   readonly isStreaming: boolean;
   readonly locale: AgentLocale;
@@ -235,24 +250,13 @@ function AssistantMessage({
             message={message}
             onInputResponses={onInputResponses}
             onOpenSubagent={onOpenSubagent}
-            showCopyAction={false}
+            showCopyAction
           />
         ) : (
           <MessagePrimitive.Parts components={{ Text: MarkdownText, tools: { Fallback: ToolFallback } }} />
         )}
       </div>
-      <ActionBarPrimitive.Root
-        autohide="not-last"
-        autohideFloat="single-branch"
-        className="ml-0.5 flex min-h-7 items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-      >
-        <ActionBarPrimitive.Copy
-          aria-label={messages.copyResponse}
-          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <CopyIcon className="size-3.5" />
-        </ActionBarPrimitive.Copy>
-      </ActionBarPrimitive.Root>
+      <div className="min-h-7" />
     </MessagePrimitive.Root>
   );
 }
@@ -270,14 +274,14 @@ function PendingUserTurn({ text }: { readonly text: string }) {
 function EditMessage({ messages }: { readonly messages: AgentMessages }) {
   return (
     <MessagePrimitive.Root className="mx-auto w-full max-w-(--thread-max-width)">
-      <ComposerPrimitive.Root className="rounded-2xl bg-muted/75 px-4 py-3">
-        <ComposerPrimitive.Input autoFocus className="min-h-16 w-full resize-none border-0 bg-transparent text-[15px] leading-6 outline-none" />
-        <div className="mt-2 flex justify-end gap-1.5">
+      <ComposerPrimitive.Root className="rounded-[1.25rem] border border-border/70 bg-background px-4 py-3 shadow-[0_8px_26px_-14px_rgba(0,0,0,0.28)]">
+        <ComposerPrimitive.Input autoFocus className="min-h-12 w-full resize-none border-0 bg-transparent text-[15px] leading-6 outline-none" />
+        <div className="mt-2 flex justify-end gap-2">
           <ComposerPrimitive.Cancel asChild>
-            <Button size="sm" variant="ghost">{messages.cancelEdit}</Button>
+            <Button size="sm" variant="outline">{messages.cancelEdit}</Button>
           </ComposerPrimitive.Cancel>
           <ComposerPrimitive.Send asChild>
-            <Button size="sm"><CheckIcon className="size-3.5" />{messages.saveAndResend}</Button>
+            <Button size="sm">{messages.send}</Button>
           </ComposerPrimitive.Send>
         </div>
       </ComposerPrimitive.Root>
@@ -411,7 +415,7 @@ export function AssistantComposer({
           if (!composerDisabled) aui.composer.send();
         }}
       >
-        <div className="flex w-full flex-col gap-2 rounded-2xl border border-border/70 bg-background p-2 shadow-[0_4px_18px_-12px_rgba(0,0,0,0.2)]">
+        <div className="flex w-full flex-col gap-2 rounded-[1.25rem] border border-border/70 bg-background p-2.5 shadow-[0_8px_26px_-14px_rgba(0,0,0,0.28)]">
           <ComposerPrimitive.Attachments>
             {({ attachment }) => (
               <AttachmentPrimitive.Root className="group/attachment mr-1.5 inline-flex max-w-full items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs">
@@ -432,23 +436,25 @@ export function AssistantComposer({
               const input = event.target instanceof HTMLElement
                 ? event.target.closest<HTMLElement>('[role="textbox"]')
                 : null;
-              if (input?.getAttribute("aria-expanded") === "true") return;
+              const pickerOpen = input?.getAttribute("aria-expanded") === "true" ||
+                Boolean(composerInputRef.current?.querySelector('[data-slot="composer-trigger-popover"][data-state="open"]'));
+              if (pickerOpen) return;
               event.preventDefault();
               aui.composer.send();
             }}
             className="aui-composer-input relative max-h-40 min-h-12 w-full resize-none overflow-y-auto bg-transparent px-2 py-1 text-[15px] leading-6 outline-none aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_.aui-directive-chip]:inline-flex [&_.aui-directive-chip]:items-center [&_.aui-directive-chip]:gap-1 [&_.aui-directive-chip]:rounded-md [&_.aui-directive-chip]:bg-muted [&_.aui-directive-chip]:px-1.5 [&_.aui-directive-chip]:py-0.5 [&_.aui-directive-chip]:text-[13px] [&_.aui-directive-chip]:font-medium [&_.aui-directive-chip]:text-foreground [&_.aui-directive-chip-icon]:text-muted-foreground [&_.aui-lexical-input]:min-h-6 [&_.aui-lexical-input]:outline-none [&_.aui-lexical-placeholder]:pointer-events-none [&_.aui-lexical-placeholder]:absolute [&_.aui-lexical-placeholder]:inset-x-0 [&_.aui-lexical-placeholder]:top-0 [&_.aui-lexical-placeholder]:truncate [&_.aui-lexical-placeholder]:px-2 [&_.aui-lexical-placeholder]:py-1 [&_.aui-lexical-placeholder]:text-muted-foreground"
           />
-          <div className="flex min-h-8 items-center gap-1">
+          <div className="flex min-h-9 items-center gap-0.5 sm:min-h-8 sm:gap-1">
             <ComposerPrimitive.AddAttachment asChild>
-              <Button aria-label={messages.addFiles} className="size-8 rounded-full text-muted-foreground" size="icon-sm" type="button" variant="ghost">
-                <PaperclipIcon className="size-4" />
+              <Button aria-label={messages.addFiles} className="size-9 rounded-full text-muted-foreground sm:size-8" size="icon-sm" type="button" variant="ghost">
+                <PlusIcon className="size-4" />
               </Button>
             </ComposerPrimitive.AddAttachment>
             <ExecutionModeMenu messages={messages} onChange={(executionMode) => onPreferencesChange({ ...preferences, executionMode })} value={preferences.executionMode ?? "standard"} />
             <ModelSelector
               align="start"
-              className="h-8 max-w-56 rounded-full text-muted-foreground"
-              contentClassName="w-72"
+              className="h-9 min-w-0 max-w-48 rounded-full px-2 text-muted-foreground sm:h-8 sm:max-w-64"
+              contentClassName="w-72 max-w-[calc(100vw-1.5rem)]"
               effort={preferences.reasoning}
               effortLabel={messages.reasoning}
               models={selectorModels}
@@ -457,13 +463,14 @@ export function AssistantComposer({
               searchable={models.length > 6}
               size="sm"
               value={model?.id ?? preferences.modelId}
+              valueClassName="text-xs font-normal"
               variant="ghost"
               triggerLabel={messages.model}
             />
-            <span className="ml-auto flex items-center gap-1">
+            <span className="ml-auto flex min-w-0 items-center gap-0.5 sm:gap-1">
               {model ? (
                 <ContextDisplay.Ring
-                  className="h-8 rounded-full px-1.5"
+                  className="h-9 shrink-0 rounded-full px-1.5 sm:h-8"
                   label={messages.context}
                   labels={contextLabels}
                   modelContextWindow={model.contextWindowTokens}
@@ -476,7 +483,7 @@ export function AssistantComposer({
                 <ComposerPrimitive.Cancel asChild>
                   <Button
                     aria-label={cancellationState === "idle" ? messages.cancel : messages.stopping}
-                    className="size-8 rounded-full"
+                    className="size-9 shrink-0 rounded-full sm:size-8"
                     disabled={cancellationState !== "idle"}
                     size="icon-sm"
                     type="button"
@@ -491,7 +498,7 @@ export function AssistantComposer({
               ) : (
                 <Button
                   aria-label={isRunning ? messages.queueFollowUp : messages.send}
-                  className="size-8 rounded-full"
+                  className="size-9 shrink-0 rounded-full sm:size-8"
                   disabled={composerDisabled}
                   onClick={() => aui.composer.send()}
                   size="icon-sm"
@@ -543,12 +550,12 @@ function ExecutionModeMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button aria-label={messages.executionMode} className="h-8 max-w-40 gap-1.5 rounded-full px-2.5 text-muted-foreground" type="button" variant="ghost">
+        <Button aria-label={messages.executionMode} className="h-9 max-w-40 gap-1.5 rounded-full px-2.5 text-muted-foreground sm:h-8" type="button" variant="ghost">
           <ShieldCheckIcon className="size-4" />
           <span className="hidden truncate text-xs sm:inline">{selected.label}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80" side="top">
+      <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-1.5rem)]" side="top">
         <DropdownMenuLabel>{messages.executionMode}</DropdownMenuLabel>
         <DropdownMenuRadioGroup onValueChange={(next) => onChange(next as AgentExecutionMode)} value={value}>
           {options.map((option) => (
@@ -590,6 +597,31 @@ function localizePromptMenuItem(
   };
 }
 
+function CopyTextAction({ label, text }: { readonly label: string; readonly text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timeout = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timeout.current), []);
+  return (
+    <Button
+      aria-label={label}
+      className="size-7 text-muted-foreground hover:bg-accent hover:text-foreground"
+      disabled={!text}
+      onClick={() => {
+        void copyText(text).then(() => {
+          setCopied(true);
+          window.clearTimeout(timeout.current);
+          timeout.current = window.setTimeout(() => setCopied(false), 1_500);
+        }).catch(() => setCopied(false));
+      }}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+    >
+      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </Button>
+  );
+}
+
 function AssistantEmptyState({ messages }: { readonly messages: AgentMessages }) {
   const suggestions = [
     messages.suggestionInspect,
@@ -600,13 +632,16 @@ function AssistantEmptyState({ messages }: { readonly messages: AgentMessages })
   const aui = useAui();
 
   return (
-    <div className="mx-auto flex min-h-[min(30rem,62vh)] w-full max-w-(--thread-max-width) flex-1 flex-col items-center justify-center gap-6 px-2 pb-8 text-center">
+    <div className="mx-auto flex min-h-[min(30rem,62vh)] w-full max-w-(--thread-max-width) flex-1 flex-col items-center justify-center gap-5 px-1 pb-6 text-center sm:gap-6 sm:px-2 sm:pb-8">
       <WrenchIcon className="size-8 text-muted-foreground/60" />
       <h1 className="text-2xl font-medium tracking-normal text-foreground">{messages.emptyTitle}</h1>
-      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-        {suggestions.map((suggestion) => (
+      <div className="grid w-full grid-cols-1 gap-2 min-[520px]:grid-cols-2">
+        {suggestions.map((suggestion, index) => (
           <button
-            className="min-h-20 rounded-lg border border-border/70 px-3 py-3 text-left text-sm leading-5 transition-colors hover:bg-muted/50"
+            className={cn(
+              "min-h-20 rounded-lg border border-border/70 px-3 py-3 text-left text-sm leading-5 transition-colors hover:bg-muted/50",
+              index > 1 && "hidden min-[520px]:block",
+            )}
             key={suggestion}
             onClick={() => aui.composer.setText(suggestion)}
             type="button"

@@ -62,9 +62,5 @@ function sessionIdFromRequest(request: Request): string | undefined {
   const pathname = new URL(request.url).pathname;
   const match = /^\/eve\/v1\/session\/([^/]+)(?:\/|$)/.exec(pathname);
   if (!match?.[1]) return undefined;
-  const sessionId = decodeURIComponent(match[1]);
-  // `/session/reset` is a standard Eve route. Its identity is carried by the
-  // continuation token body, so treating `reset` as a session ID would reject
-  // every authenticated reset before Eve can validate that token.
-  return sessionId === "reset" ? undefined : sessionId;
+  return decodeURIComponent(match[1]);
 }

@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { AgentRunPolicy } from "../../contracts/agent-run.ts";
+import type { AgentRunPolicy } from "@oworker/open-agent-contracts/agent-run";
 import type {
   AgentExtensionStore,
   AgentExtensionView,

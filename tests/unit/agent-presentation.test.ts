@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import type { EveMessage } from "eve/react";
 import { activityLabel } from "../../packages/agent-ui/src/agent-workspace/agent-activity-state.ts";
 import { messagesFor } from "../../packages/agent-ui/src/agent-workspace/i18n.ts";
 import {
+  eventsBeforeLastUserTurn,
   hasUnresolvedInputRequests,
   isProxiedInputOnlyMessage,
   presentAgentTurn,
@@ -143,7 +144,7 @@ test("a cancelled parent turn stops orphaned subagent timers", () => {
   const events = [
     ...running,
     event("turn.cancelled", cancelledAt, { sequence: 0, turnId: "turn-parent" }),
-    event("session.waiting", cancelledAt, { continuationToken: "continue-parent", wait: "next-user-message" }),
+    event("session.waiting", cancelledAt, { wait: "next-user-message" }),
   ];
 
   assert.deepEqual(presentSubagentCall(events, "call-agent"), {
@@ -191,7 +192,7 @@ test("a root approval is not rendered twice", () => {
     event("turn.started", startedAt, { sequence: 0, turnId: "turn-parent" }),
     inputRequested("turn-parent", "request-root", "call-bash"),
     event("turn.completed", endedAt, { sequence: 0, turnId: "turn-parent" }),
-    event("session.waiting", endedAt, { continuationToken: "continue-root", wait: "next-user-message" }),
+    event("session.waiting", endedAt, { wait: "next-user-message" }),
   ];
   const presentation = presentAgentTurn(message, events);
   assert.ok(presentation);
@@ -208,6 +209,19 @@ test("normal and recovery activity use one calm thinking state without transport
   assert.equal(activityLabel(events, messages, { mountedAt: base, now: base + 46_000 }), messages.thinking);
   assert.equal(activityLabel(events, messages, { mode: "recovery", mountedAt: base, now: base + 10_000 }), messages.thinking);
   assert.equal(activityLabel(events, messages, { mode: "recovery", mountedAt: base, now: base + 46_000 }), messages.thinking);
+});
+
+test("edit and resend keeps only events settled before the latest user turn", () => {
+  const events = [
+    event("message.received", startedAt, { message: "First", parts: [{ text: "First", type: "text" }], sequence: 0, turnId: "turn-1" }),
+    event("turn.completed", startedAt, { sequence: 0, turnId: "turn-1" }),
+    event("session.waiting", startedAt, { wait: "next-user-message" }),
+    event("message.received", endedAt, { message: "Edit me", parts: [{ text: "Edit me", type: "text" }], sequence: 1, turnId: "turn-2" }),
+    event("turn.completed", endedAt, { sequence: 1, turnId: "turn-2" }),
+  ];
+
+  assert.deepEqual(eventsBeforeLastUserTurn(events), events.slice(0, 3));
+  assert.deepEqual(eventsBeforeLastUserTurn([]), []);
 });
 
 test("context usage moves during a streamed step and reconciles to Provider usage", () => {
@@ -234,7 +248,7 @@ test("context usage moves during a streamed step and reconciles to Provider usag
   assert.deepEqual(summarizeUsage(initial), {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    contextInputTokens: 1_200,
+    contextInputTokens: 1_000,
     costUsd: 0,
     inputTokens: 1_000,
     isEstimated: false,
@@ -242,7 +256,7 @@ test("context usage moves during a streamed step and reconciles to Provider usag
     steps: 1,
   });
   const live = summarizeUsage(streaming);
-  assert.equal(live.contextInputTokens, 1_220);
+  assert.equal(live.contextInputTokens, 1_020);
   assert.equal(live.outputTokens, 220);
   assert.equal(live.isEstimated, true);
 
@@ -256,20 +270,20 @@ test("context usage moves during a streamed step and reconciles to Provider usag
       usage: { inputTokens: 1_250, outputTokens: 30 },
     }),
   ]);
-  assert.equal(reconciled.contextInputTokens, 1_280);
+  assert.equal(reconciled.contextInputTokens, 1_250);
   assert.equal(reconciled.outputTokens, 230);
   assert.equal(reconciled.isEstimated, false);
 });
 
 function event(
-  type: HandleMessageStreamEvent["type"],
+  type: MessageStreamEvent["type"],
   at: string,
   data: Record<string, unknown>,
-): HandleMessageStreamEvent {
-  return { data, meta: { at }, type } as HandleMessageStreamEvent;
+): MessageStreamEvent {
+  return { data, meta: { at }, type } as MessageStreamEvent;
 }
 
-function childApprovalEvents(): HandleMessageStreamEvent[] {
+function childApprovalEvents(): MessageStreamEvent[] {
   return [
     event("turn.started", startedAt, { sequence: 0, turnId: "turn-parent" }),
     event("actions.requested", startedAt, {
@@ -290,11 +304,11 @@ function childApprovalEvents(): HandleMessageStreamEvent[] {
     }),
     inputRequested("turn-child", "request-child", "call-bash"),
     event("turn.completed", endedAt, { sequence: 0, turnId: "turn-parent" }),
-    event("session.waiting", endedAt, { continuationToken: "continue-parent", wait: "next-user-message" }),
+    event("session.waiting", endedAt, { wait: "next-user-message" }),
   ];
 }
 
-function inputRequested(turnId: string, requestId: string, callId: string): HandleMessageStreamEvent {
+function inputRequested(turnId: string, requestId: string, callId: string): MessageStreamEvent {
   return event("input.requested", endedAt, {
     requests: [{
       action: { callId, input: { command: "npm test && rm -f /tmp/test-output" }, kind: "tool-call", toolName: "bash" },
@@ -323,6 +337,7 @@ function approvalPart(requestId: string, callId: string): EveMessage["parts"][nu
       eve: {
         inputRequest: {
           display: "confirmation",
+          kind: "tool-approval",
           options: [
             { id: "approve", label: "Approve", style: "primary" },
             { id: "deny", label: "Deny", style: "danger" },

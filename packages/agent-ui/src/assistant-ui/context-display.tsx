@@ -9,6 +9,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip.js";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../ui/popover.js";
 import { cn } from "../utils.js";
 import {
   createContext,
@@ -79,12 +84,15 @@ const getBarColor = (percent: number): string => {
 };
 
 type ContextDisplayContextValue = {
+  interaction: "hover" | "touch";
   labels: ContextDisplayLabels;
   usage: ThreadTokenUsage | undefined;
   sessionUsage: ThreadTokenUsage | undefined;
   totalTokens: number;
   percent: number;
   modelContextWindow: number;
+  open: boolean;
+  setOpen: (open: boolean) => void;
 };
 
 const ContextDisplayContext = createContext<ContextDisplayContextValue | null>(
@@ -132,11 +140,24 @@ function ContextDisplayRootBase({
 }) {
   const threadId = useAuiState((s) => s.threadListItem.id);
   const rawTokens = usage?.totalTokens ?? 0;
+  const [interaction, setInteraction] = useState<"hover" | "touch">("hover");
+  const [open, setOpen] = useState(false);
   const [tokenState, setTokenState] = useState({
     threadId,
     totalTokens: rawTokens > 0 ? rawTokens : 0,
     usage,
   });
+
+  useEffect(() => {
+    const media = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const updateInteraction = () => {
+      setInteraction(media.matches ? "touch" : "hover");
+      setOpen(false);
+    };
+    updateInteraction();
+    media.addEventListener("change", updateInteraction);
+    return () => media.removeEventListener("change", updateInteraction);
+  }, []);
 
   useEffect(() => {
     setTokenState((prev) => {
@@ -166,21 +187,28 @@ function ContextDisplayRootBase({
 
   const contextValue = useMemo(
     () => ({
+      interaction,
       labels,
       usage: tokenState.usage,
       sessionUsage,
       totalTokens,
       percent,
       modelContextWindow,
+      open,
+      setOpen,
     }),
-    [labels, modelContextWindow, percent, sessionUsage, tokenState.usage, totalTokens],
+    [interaction, labels, modelContextWindow, open, percent, sessionUsage, tokenState.usage, totalTokens],
   );
 
   return (
     <ContextDisplayContext.Provider value={contextValue}>
-      <TooltipProvider>
-        <Tooltip>{children}</Tooltip>
-      </TooltipProvider>
+      {interaction === "touch" ? (
+        <Popover open={open} onOpenChange={setOpen}>{children}</Popover>
+      ) : (
+        <TooltipProvider>
+          <Tooltip open={open} onOpenChange={setOpen}>{children}</Tooltip>
+        </TooltipProvider>
+      )}
     </ContextDisplayContext.Provider>
   );
 }
@@ -232,21 +260,24 @@ function ContextDisplayTrigger({
   children,
   ...props
 }: React.ComponentProps<"button">) {
-  return (
-    <TooltipTrigger asChild>
-      <button
-        type="button"
-        data-slot="context-display-trigger"
-        className={cn(
-          "inline-flex items-center rounded-md transition-colors",
-          className,
-        )}
-        {...props}
-      >
-        {children}
-      </button>
-    </TooltipTrigger>
+  const { interaction, open } = useContextDisplay();
+  const trigger = (
+    <button
+      type="button"
+      data-slot="context-display-trigger"
+      aria-expanded={open}
+      className={cn(
+        "inline-flex items-center rounded-md transition-colors",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </button>
   );
+  return interaction === "touch"
+    ? <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+    : <TooltipTrigger asChild>{trigger}</TooltipTrigger>;
 }
 
 type ContextSegment = {
@@ -274,61 +305,75 @@ function ContextDisplayContent({
   side?: "top" | "bottom" | "left" | "right" | undefined;
   className?: string;
 }) {
-  const { labels, sessionUsage, totalTokens, percent, modelContextWindow } =
+  const { interaction, labels, sessionUsage, totalTokens, percent, modelContextWindow } =
     useContextDisplay();
   const segments = getContextSegments(sessionUsage, labels);
+  const content = (
+    <div className="text-xs">
+      <div className="flex items-baseline justify-between gap-6 whitespace-nowrap">
+        <span className="font-medium">{labels.contextUsage}</span>
+        <span className="text-muted-foreground tabular-nums">
+          {formatTokenCount(Math.min(totalTokens, modelContextWindow))} {labels.of}{" "}
+          {formatTokenCount(modelContextWindow)}
+        </span>
+      </div>
+      <div className="bg-muted mt-2.5 h-1 overflow-hidden rounded-full">
+        <div
+          className={cn(
+            "h-full w-(--usage-width) rounded-full transition-[width] duration-300",
+            totalTokens > 0 && "min-w-1",
+            getBarColor(percent),
+          )}
+          style={{ "--usage-width": `${percent}%` } as React.CSSProperties}
+        />
+      </div>
+      {segments.length > 0 && (
+        <div className="mt-3 grid gap-1.5">
+          <span className="font-medium">{labels.sessionUsage}</span>
+          {segments.map((segment) => (
+            <div
+              key={segment.label}
+              className="flex items-baseline justify-between gap-6"
+            >
+              <span className="text-muted-foreground">{segment.label}</span>
+              <span className="tabular-nums">
+                {formatTokenCount(segment.tokens)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+  const contentClassName = cn(
+    "bg-popover text-popover-foreground w-52 rounded-lg border p-2.5 text-left shadow-md",
+    className,
+  );
 
-  return (
+  return interaction === "touch" ? (
+    <PopoverContent
+      align="end"
+      side={side}
+      sideOffset={8}
+      data-slot="context-display-popover"
+      className={contentClassName}
+    >
+      {content}
+    </PopoverContent>
+  ) : (
     <TooltipContent
       side={side}
       sideOffset={8}
       hideArrow
       data-slot="context-display-popover"
-      className={cn(
-        "bg-popover text-popover-foreground w-56 rounded-lg border p-3 text-left shadow-md",
-        className,
-      )}
+      className={contentClassName}
     >
-      <div className="text-xs">
-        <div className="flex items-baseline justify-between gap-6 whitespace-nowrap">
-          <span className="font-medium">{labels.contextUsage}</span>
-          <span className="text-muted-foreground tabular-nums">
-            {formatTokenCount(Math.min(totalTokens, modelContextWindow))} {labels.of}{" "}
-            {formatTokenCount(modelContextWindow)}
-          </span>
-        </div>
-        <div className="bg-muted mt-2.5 h-1 overflow-hidden rounded-full">
-          <div
-            className={cn(
-              "h-full w-(--usage-width) rounded-full transition-[width] duration-300",
-              totalTokens > 0 && "min-w-1",
-              getBarColor(percent),
-            )}
-            style={{ "--usage-width": `${percent}%` } as React.CSSProperties}
-          />
-        </div>
-        {segments.length > 0 && (
-          <div className="mt-3 grid gap-1.5">
-            <span className="font-medium">{labels.sessionUsage}</span>
-            {segments.map((segment) => (
-              <div
-                key={segment.label}
-                className="flex items-baseline justify-between gap-6"
-              >
-                <span className="text-muted-foreground">{segment.label}</span>
-                <span className="tabular-nums">
-                  {formatTokenCount(segment.tokens)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {content}
     </TooltipContent>
   );
 }
 
-const RING_SIZE = 18;
+const RING_SIZE = 16;
 const RING_STROKE = 2.5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;

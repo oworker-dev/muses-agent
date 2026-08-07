@@ -113,11 +113,12 @@ try {
       "x-fixture-tenant-id": tenantId,
     },
     host: eveUrl,
-    preserveCompletedSessions: true,
   });
 
-  const session = client.session();
-  const readTurn = await (await session.send("EVAL_MCP_READ")).result();
+  const { session, response: readResponse } = await client.sessions.create({
+    message: "EVAL_MCP_READ",
+  });
+  const readTurn = await readResponse.result();
   assert.equal(readTurn.message, "MCP_READ_COMPLETED");
   assert.equal(effects.read, 1);
   assert.equal(effects.hiddenDelete, 0);
@@ -128,9 +129,9 @@ try {
   const approvalRequest = findApprovalRequest(writePending);
   assert.ok(approvalRequest, "write MCP tool did not park for durable approval");
   assert.equal(effects.write, 0);
-  const writeComplete = await (await session.send({
-    inputResponses: [{ optionId: "approve", requestId: approvalRequest.requestId }],
-  })).result();
+  const writeComplete = await (await session.respond([
+    { optionId: "approve", requestId: approvalRequest.requestId },
+  ])).result();
   assert.equal(writeComplete.message, "MCP_WRITE_COMPLETED");
   assert.equal(effects.write, 1);
 
@@ -154,10 +155,12 @@ try {
       "x-fixture-tenant-id": tenantId,
     },
     host: eveUrl,
-    preserveCompletedSessions: true,
   });
   const brokerRequestsBeforeDeniedPolicy = requests.broker.length;
-  const deniedPolicyTurn = await (await deniedPolicyClient.session().send("EVAL_MCP_READ")).result();
+  const { response: deniedPolicyResponse } = await deniedPolicyClient.sessions.create({
+    message: "EVAL_MCP_READ",
+  });
+  const deniedPolicyTurn = await deniedPolicyResponse.result();
   assert.notEqual(deniedPolicyTurn.message, "MCP_READ_COMPLETED");
   assert.equal(requests.broker.length, brokerRequestsBeforeDeniedPolicy);
 
@@ -171,12 +174,9 @@ try {
       "x-fixture-tenant-id": "tenant-mcp-conformance-other",
     },
     host: eveUrl,
-    preserveCompletedSessions: true,
   });
   const brokerRequestsBeforeCrossTenant = requests.broker.length;
-  const crossTenantSession = crossTenantClient.session({
-    continuationToken: session.state.continuationToken,
-    sessionId: session.state.sessionId,
+  const crossTenantSession = crossTenantClient.sessions.attach(session.state.sessionId, {
     streamIndex: session.state.streamIndex,
   });
   const crossTenantTurn = await (await crossTenantSession.send("EVAL_MCP_READ")).result();
@@ -257,7 +257,7 @@ async function scaffoldFixtureAgent({ agentRoot, brokerPort, mcpPort }) {
     type: "module",
     dependencies: {
       "@oworker/open-agent-mcp-adapter": "0.1.0-alpha.9",
-      eve: "0.27.8",
+      eve: "0.31.1",
     },
   }, null, 2));
   await writeFile(join(tempRoot, "tsconfig.json"), JSON.stringify({

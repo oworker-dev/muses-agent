@@ -1,8 +1,8 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import type { AgentMessages } from "./i18n.js";
 
 export function activityLabel(
-  _events: readonly HandleMessageStreamEvent[],
+  _events: readonly MessageStreamEvent[],
   messages: AgentMessages,
   _options: {
     readonly mode?: "live" | "recovery";

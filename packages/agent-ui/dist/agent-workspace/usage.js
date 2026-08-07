@@ -13,7 +13,7 @@ export function summarizeUsage(events) {
         const usage = event.data.usage;
         cacheReadTokens += usage.cacheReadTokens ?? 0;
         cacheWriteTokens += usage.cacheWriteTokens ?? 0;
-        contextInputTokens = (usage.inputTokens ?? contextInputTokens) + (usage.outputTokens ?? 0);
+        contextInputTokens = usage.inputTokens ?? contextInputTokens;
         costUsd += usage.costUsd ?? 0;
         inputTokens += usage.inputTokens ?? 0;
         outputTokens += usage.outputTokens ?? 0;
@@ -37,6 +37,7 @@ export function summarizeUsage(events) {
 function estimatePendingTokens(events) {
     const cumulativeText = new Map();
     let contextCharacters = 0;
+    let actionCharacters = 0;
     for (const event of events) {
         if (event.type === "message.appended") {
             cumulativeText.set(`message:${event.data.turnId}:${event.data.stepIndex}`, event.data.messageSoFar);
@@ -54,26 +55,42 @@ function estimatePendingTokens(events) {
             contextCharacters += event.data.message.length;
         }
         else if (event.type === "action.result") {
-            contextCharacters += safeSerializedLength(event.data.result.output);
+            const length = safeModelVisibleLength(event.data.result.output);
+            actionCharacters = Math.min(actionCharacters + length, 100_000);
         }
     }
     let outputCharacters = 0;
     for (const value of cumulativeText.values())
         outputCharacters += value.length;
     return {
-        context: Math.ceil((contextCharacters + outputCharacters) / 4),
+        context: Math.ceil((contextCharacters + actionCharacters + outputCharacters) / 4),
         output: Math.ceil(outputCharacters / 4),
     };
 }
-function safeSerializedLength(value) {
+function safeModelVisibleLength(value) {
+    if (isBinaryToolOutput(value))
+        return 0;
     if (typeof value === "string")
-        return value.length;
+        return Math.min(value.length, 12_000);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+        const record = value;
+        for (const key of ["content", "stdout", "stderr", "text", "message"]) {
+            if (typeof record[key] === "string")
+                return Math.min(record[key].length, 12_000);
+        }
+    }
     try {
-        return JSON.stringify(value)?.length ?? 0;
+        return Math.min(JSON.stringify(value)?.length ?? 0, 12_000);
     }
     catch {
         return 0;
     }
+}
+function isBinaryToolOutput(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return false;
+    const record = value;
+    return record.binary === true && typeof record.contentType === "string";
 }
 export function formatTokenCount(value) {
     if (value >= 1_000_000)

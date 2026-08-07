@@ -51,8 +51,8 @@ export function createEveAgentMailboxRuntime(
       if (parsed.state === "running" || parsed.state === "terminal") {
         return { state: parsed.state };
       }
-      if (parsed.state === "waiting" && validText(parsed.continuationToken)) {
-        return { continuationToken: parsed.continuationToken, state: "waiting" };
+      if (parsed.state === "waiting") {
+        return { state: "waiting" };
       }
       throw new Error("The Agent runtime returned an invalid mailbox boundary.");
     },
@@ -62,7 +62,6 @@ export function createEveAgentMailboxRuntime(
         result = await request({
           action: "deliver",
           clientMessageId: input.clientMessageId,
-          continuationToken: input.continuationToken,
           itemId: input.itemId,
           ...(input.payload.preferences ?? {}),
           ...(input.owner.issuer ? { issuer: input.owner.issuer } : {}),

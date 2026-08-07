@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent, InputRequest } from "eve/client";
+import type { MessageStreamEvent, InputRequest } from "eve/client";
 import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
 
 export type AgentTurnStatus = "cancelled" | "completed" | "failed" | "running" | "waiting";
@@ -27,7 +27,7 @@ export type AgentTurnPresentation = {
 
 export function presentAgentTurn(
   message: EveMessage,
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): AgentTurnPresentation | undefined {
   if (message.role !== "assistant" || !message.metadata?.turnId) return undefined;
 
@@ -84,7 +84,7 @@ export function presentAgentTurn(
  */
 export function isProxiedInputOnlyMessage(
   message: EveMessage,
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): boolean {
   if (message.role !== "assistant" || !message.metadata?.turnId) return false;
   const turnId = message.metadata.turnId;
@@ -105,7 +105,7 @@ export function isProxiedInputOnlyMessage(
 }
 
 export function unresolvedInputRequests(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): readonly InputRequest[] {
   let pending = new Map<string, InputRequest>();
   let hasRequestedInput = false;
@@ -131,13 +131,21 @@ export function unresolvedInputRequests(
 }
 
 export function hasUnresolvedInputRequests(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): boolean {
   return unresolvedInputRequests(events).length > 0;
 }
 
+/** Keeps the settled transcript before the latest user turn for edit/resend. */
+export function eventsBeforeLastUserTurn(
+  events: readonly MessageStreamEvent[],
+): readonly MessageStreamEvent[] {
+  const lastUserTurnIndex = events.findLastIndex((event) => event.type === "message.received");
+  return lastUserTurnIndex < 0 ? [] : events.slice(0, lastUserTurnIndex);
+}
+
 export function presentSubagentCall(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   callId: string,
 ): SubagentCallPresentation {
   const started = events.find((event) =>
@@ -207,7 +215,7 @@ export function presentSubagentCall(
 }
 
 export function presentSubagentSessions(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): readonly SubagentSessionPresentation[] {
   const calls = events.flatMap((event) =>
     event.type === "actions.requested"
@@ -222,9 +230,9 @@ export function presentSubagentSessions(
 }
 
 function eventsForRootTurn(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   turnId: string,
-): readonly HandleMessageStreamEvent[] {
+): readonly MessageStreamEvent[] {
   const start = events.findIndex((event) =>
     event.type === "turn.started" && event.data.turnId === turnId,
   );
@@ -234,7 +242,7 @@ function eventsForRootTurn(
 }
 
 function pendingRequestsForRootTurn(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   turnId: string,
 ): readonly InputRequest[] {
   const pendingIds = new Set(unresolvedInputRequests(events).map((request) => request.requestId));
@@ -255,6 +263,7 @@ function toProxiedInputPart(request: InputRequest): EveDynamicToolPart {
         inputRequest: {
           allowFreeform: request.allowFreeform,
           display: request.display,
+          kind: request.kind,
           options: request.options,
           prompt: request.prompt,
           requestId: request.requestId,
@@ -269,7 +278,7 @@ function toProxiedInputPart(request: InputRequest): EveDynamicToolPart {
 }
 
 function finalDeliveryStepIndex(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   message: EveMessage,
   status: AgentTurnStatus,
 ): number | undefined {
@@ -291,14 +300,14 @@ function finalDeliveryStepIndex(
     : undefined;
 }
 
-function eventTurnId(event: HandleMessageStreamEvent): string | undefined {
+function eventTurnId(event: MessageStreamEvent): string | undefined {
   if (!("data" in event) || !event.data || typeof event.data !== "object") return undefined;
   return "turnId" in event.data && typeof event.data.turnId === "string"
     ? event.data.turnId
     : undefined;
 }
 
-function eventTimestamp(event: HandleMessageStreamEvent | undefined): number | undefined {
+function eventTimestamp(event: MessageStreamEvent | undefined): number | undefined {
   const timestamp = event?.meta?.at;
   if (!timestamp) return undefined;
   const parsed = Date.parse(timestamp);

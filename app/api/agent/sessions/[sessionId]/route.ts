@@ -18,19 +18,10 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
     return problem(413, "request_too_large", "The session deletion request is too large.");
   }
 
-  const continuationToken = await parseContinuationToken(request);
-  if (!continuationToken) {
-    return problem(
-      400,
-      "agent_session_continuation_required",
-      "The request must contain a durable session continuation token.",
-    );
-  }
   const { sessionId } = await context.params;
   try {
     const outcome = await deleteAgentSession({
       accessToken: authenticated.accessToken,
-      continuationToken,
       deletionStore,
       identity: authenticated.identity,
       ownershipStore,
@@ -46,17 +37,6 @@ export async function DELETE(request: Request, context: RouteContext): Promise<R
     return error instanceof AgentSessionDeletionError
       ? problem(error.status, error.code, error.message)
       : problem(502, "agent_session_deletion_failed", "The Agent session could not be deleted.");
-  }
-}
-
-async function parseContinuationToken(request: Request): Promise<string | undefined> {
-  try {
-    const body = await request.json() as { continuationToken?: unknown };
-    return typeof body.continuationToken === "string" && body.continuationToken.trim()
-      ? body.continuationToken
-      : undefined;
-  } catch {
-    return undefined;
   }
 }
 

@@ -1,4 +1,4 @@
-import type { HandleMessageStreamEvent } from "eve/client";
+import type { MessageStreamEvent } from "eve/client";
 import {
   AGENT_RUN_CONTRACT_VERSION,
   type AgentEvent,
@@ -7,22 +7,52 @@ import {
   type AgentRunStatus,
   type AgentRunUsage,
   type JsonValue,
-} from "../../contracts/agent-run.ts";
-import type { AgentRunProjection } from "../data/agent-run-store.ts";
+} from "@oworker/open-agent-contracts/agent-run";
+import type {
+  AgentRunProjection,
+  AgentRunRecord,
+} from "../data/agent-run-store.ts";
 
 export function projectAgentRun(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
 ): AgentRunProjection {
-  let status: AgentRunStatus = "running";
-  let result: AgentRunResult | undefined;
-  let failure: AgentRunProjection["failure"];
-  let cancelled = false;
-  let waitingInput = false;
-  let waitingAuthorization = false;
-  const usage = emptyUsage();
+  return projectAgentRunFrom(
+    {
+      eventCount: 0,
+      status: "running",
+      usage: emptyUsage(),
+    },
+    events,
+  );
+}
+
+export function projectAgentRunDelta(
+  current: AgentRunRecord,
+  events: readonly MessageStreamEvent[],
+): AgentRunProjection {
+  return projectAgentRunFrom(current, events);
+}
+
+function projectAgentRunFrom(
+  current: Pick<AgentRunRecord, "eventCount" | "failure" | "result" | "status" | "usage">,
+  events: readonly MessageStreamEvent[],
+): AgentRunProjection {
+  let status: AgentRunStatus = current.status === "submitting" ? "running" : current.status;
+  let result: AgentRunResult | undefined = current.result;
+  let failure: AgentRunProjection["failure"] = current.failure;
+  let cancelled = status === "cancelled";
+  let waitingInput = status === "waiting-input";
+  let waitingAuthorization = status === "waiting-authorization";
+  const usage: MutableUsage = { ...current.usage };
 
   for (const event of events) {
     switch (event.type) {
+      case "turn.started":
+      case "message.received":
+        waitingInput = false;
+        waitingAuthorization = false;
+        if (!cancelled && !failure) status = "running";
+        break;
       case "input.requested":
         waitingInput = true;
         status = "waiting-input";
@@ -80,7 +110,7 @@ export function projectAgentRun(
   }
 
   return {
-    eventCount: events.length,
+    eventCount: current.eventCount + events.length,
     ...(failure ? { failure } : {}),
     ...(result ? { result } : {}),
     status,
@@ -90,19 +120,20 @@ export function projectAgentRun(
 
 export function projectAgentEvents(
   runId: string,
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
+  startIndex = 0,
 ): readonly AgentEvent[] {
   return events.map((event, index) => ({
     contractVersion: AGENT_RUN_CONTRACT_VERSION,
     ...(event.meta?.at ? { createdAt: event.meta.at } : {}),
     data: toJsonObject("data" in event ? event.data : {}),
     runId,
-    sequence: index + 1,
+    sequence: startIndex + index + 1,
     type: eventType(event.type),
   }));
 }
 
-function eventType(type: HandleMessageStreamEvent["type"]): AgentEventType {
+function eventType(type: MessageStreamEvent["type"]): AgentEventType {
   switch (type) {
     case "session.started": return "run.started";
     case "session.completed":

@@ -14,17 +14,15 @@ test("Eve mailbox runtime reads waiting boundaries and admits messages", async (
     const body = JSON.parse(String(init?.body));
     requests.push(body);
     return body.action === "inspect"
-      ? Response.json({ continuationToken: "continue-1", ok: true, state: "waiting" })
+      ? Response.json({ ok: true, state: "waiting" })
       : Response.json({ ok: true, sessionId: "session-1" }, { status: 202 });
   });
 
   assert.deepEqual(await runtime.inspect({ owner: owner(), sessionId: "session-1" }), {
-    continuationToken: "continue-1",
     state: "waiting",
   });
   assert.deepEqual(await runtime.deliver({
     clientMessageId: "message-1",
-    continuationToken: "continue-1",
     itemId: "mail-1",
     owner: owner(),
     payload: { message: "Continue" },
@@ -40,7 +38,6 @@ test("Eve mailbox runtime distinguishes rejection from ambiguous admission", asy
   await assert.rejects(
     rejected.deliver({
       clientMessageId: "message-1",
-      continuationToken: "continue-1",
       itemId: "mail-1",
       owner: owner(),
       payload: { message: "Continue" },
@@ -55,7 +52,6 @@ test("Eve mailbox runtime distinguishes rejection from ambiguous admission", asy
   await assert.rejects(
     ambiguous.deliver({
       clientMessageId: "message-1",
-      continuationToken: "continue-1",
       itemId: "mail-1",
       owner: owner(),
       payload: { message: "Continue" },

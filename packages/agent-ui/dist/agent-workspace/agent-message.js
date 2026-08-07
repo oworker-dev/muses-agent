@@ -1,8 +1,9 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { BracesIcon, CheckIcon, CheckCircleIcon, ChevronDownIcon, CirclePauseIcon, CircleStopIcon, CopyIcon, ExternalLinkIcon, FileIcon, ImageIcon, KeyRoundIcon, LoaderCircleIcon, NetworkIcon, SearchIcon, TerminalIcon, FileSearchIcon, ListChecksIcon, XCircleIcon, } from "lucide-react";
+import { BracesIcon, CheckIcon, CheckCircleIcon, ChevronDownIcon, CircleStopIcon, CopyIcon, ExternalLinkIcon, FileIcon, ImageIcon, KeyRoundIcon, LoaderCircleIcon, NetworkIcon, SearchIcon, TerminalIcon, FileSearchIcon, ListChecksIcon, XCircleIcon, } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StaticMarkdownText } from "../assistant-ui/markdown-text.js";
+import { copyText } from "../assistant-ui/copy-text.js";
 import { ReasoningContent, ReasoningRoot, ReasoningText, ReasoningTrigger, } from "../assistant-ui/reasoning.js";
 import { ToolFallbackContent, ToolFallbackRoot, } from "../assistant-ui/tool-fallback.js";
 import { ToolGroupContent, ToolGroupRoot, ToolGroupTrigger, } from "../assistant-ui/tool-group.js";
@@ -33,16 +34,18 @@ function safeStringify(value) {
 }
 export function AgentMessage({ canRespond, events, fallbackStartedAt, isStreaming, locale, message, onOpenSubagent, onInputResponses, showCopyAction = true, }) {
     const task = presentAgentTurn(message, events);
-    const lastTextIndex = message.parts.reduce((last, part, index) => (part.type === "text" ? index : last), -1);
     const responseText = task?.finalPart?.text ?? (task ? undefined : lastText(message.parts));
-    return (_jsxs(Message, { "data-optimistic": message.metadata?.optimistic ? "true" : undefined, from: message.role, children: [_jsx(MessageContent, { className: message.role === "assistant" ? "w-full" : undefined, children: task ? (_jsxs(_Fragment, { children: [_jsxs(ExecutionGroup, { fallbackStartedAt: fallbackStartedAt, locale: locale, task: task, children: [_jsx(ProcessParts, { canRespond: canRespond, events: events, inActiveExecution: task.status === "running" || task.status === "waiting", locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, parts: task.processParts, turnId: message.metadata?.turnId }), task.proxiedInputParts.map((part) => (_jsxs("div", { className: "space-y-2", children: [_jsx("p", { className: "text-xs font-medium text-amber-700 dark:text-amber-300", children: localize(locale, "A delegated task needs your approval", "子代理任务需要你的批准") }), _jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: true, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false, turnId: message.metadata?.turnId })] }, `proxied-input:${part.toolCallId}`)))] }), task.finalPart ? (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: task.finalPart, showCaret: isStreaming && task.finalPart.state === "streaming", turnId: message.metadata?.turnId })) : null] })) : message.parts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: isStreaming && message.role === "assistant" && index === lastTextIndex, turnId: message.metadata?.turnId }, partKey(part, index)))) }), showCopyAction && message.role === "assistant" && responseText && !isStreaming ? (_jsx(CopyResponseAction, { locale: locale, text: responseText })) : null] }));
+    return (_jsxs(Message, { "data-optimistic": message.metadata?.optimistic ? "true" : undefined, from: message.role, children: [_jsx(MessageContent, { className: message.role === "assistant" ? "w-full" : undefined, children: task ? (_jsxs(_Fragment, { children: [_jsxs(ExecutionGroup, { collapseWhenSettled: Boolean(task.finalPart?.text.trim() ||
+                                hasLaterFinalDelivery(events, message.metadata?.turnId)), fallbackStartedAt: fallbackStartedAt, locale: locale, task: task, children: [_jsx(ProcessParts, { canRespond: canRespond, events: events, inActiveExecution: task.status === "running" || task.status === "waiting", locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, parts: task.processParts, turnId: message.metadata?.turnId }), task.proxiedInputParts.map((part) => (_jsxs("div", { className: "space-y-2", children: [_jsx("p", { className: "text-xs font-medium text-amber-700 dark:text-amber-300", children: localize(locale, "A delegated task needs your approval", "子代理任务需要你的批准") }), _jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: true, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, turnId: message.metadata?.turnId })] }, `proxied-input:${part.toolCallId}`)))] }), task.finalPart ? (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: task.finalPart, turnId: message.metadata?.turnId })) : null] })) : message.parts.map((part, index) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: false, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, turnId: message.metadata?.turnId }, partKey(part, index)))) }), showCopyAction && message.role === "assistant" && responseText && !isStreaming ? (_jsx(CopyResponseAction, { locale: locale, text: responseText })) : null] }));
 }
-function AgentMessagePart({ canRespond, events, inActiveExecution, locale, onOpenSubagent, onInputResponses, part, showCaret, turnId, }) {
+function AgentMessagePart({ canRespond, events, inActiveExecution, locale, onOpenSubagent, onInputResponses, part, turnId, }) {
     switch (part.type) {
         case "step-start":
             return null;
         case "text":
-            return (_jsxs("div", { className: "relative break-words", children: [_jsx(StaticMarkdownText, { text: part.text }), showCaret ? _jsx("span", { className: "ml-1 inline-block animate-pulse text-muted-foreground", children: "|" }) : null] }));
+            if (!part.text.trim())
+                return null;
+            return (_jsx("div", { className: "relative break-words", children: _jsx(StaticMarkdownText, { text: part.text }) }));
         case "reasoning": {
             return _jsx(ReasoningPart, { events: events, locale: locale, part: part, turnId: turnId });
         }
@@ -60,7 +63,7 @@ function ProcessParts({ canRespond, events, inActiveExecution, locale, onInputRe
     for (let index = 0; index < parts.length;) {
         const part = parts[index];
         if (part.type !== "dynamic-tool") {
-            rendered.push(_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: inActiveExecution, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, showCaret: false, turnId: turnId }, partKey(part, index)));
+            rendered.push(_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: inActiveExecution, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: part, turnId: turnId }, partKey(part, index)));
             index += 1;
             continue;
         }
@@ -75,7 +78,7 @@ function ProcessParts({ canRespond, events, inActiveExecution, locale, onInputRe
             Boolean(toolPart.toolMetadata?.eve?.inputRequest && !toolPart.toolMetadata.eve.inputResponse));
         rendered.push(_jsxs(ToolGroupRoot, { defaultOpen: needsInput, variant: "ghost", children: [_jsx(ToolGroupTrigger, { active: active, count: toolParts.length, label: localize(locale, active
                         ? `Running ${toolParts.length} ${toolParts.length === 1 ? "tool" : "tools"}`
-                        : `Ran ${toolParts.length} ${toolParts.length === 1 ? "tool" : "tools"}`, active ? `正在运行 ${toolParts.length} 个工具` : `已运行 ${toolParts.length} 个工具`) }), _jsx(ToolGroupContent, { children: toolParts.map((toolPart) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: inActiveExecution, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: toolPart, showCaret: false, turnId: turnId }, toolPart.toolCallId))) })] }, `tools:${toolParts[0]?.toolCallId}`));
+                        : `Ran ${toolParts.length} ${toolParts.length === 1 ? "tool" : "tools"}`, active ? `正在运行 ${toolParts.length} 个工具` : `已运行 ${toolParts.length} 个工具`) }), _jsx(ToolGroupContent, { children: toolParts.map((toolPart) => (_jsx(AgentMessagePart, { canRespond: canRespond, events: events, inActiveExecution: inActiveExecution, locale: locale, onInputResponses: onInputResponses, onOpenSubagent: onOpenSubagent, part: toolPart, turnId: turnId }, toolPart.toolCallId))) })] }, `tools:${toolParts[0]?.toolCallId}`));
         index = cursor;
     }
     return _jsx(_Fragment, { children: rendered });
@@ -85,7 +88,8 @@ function ToolPart({ canRespond, events, locale, onInputResponses, onOpenSubagent
     const defaultOpen = part.state === "approval-requested" ||
         Boolean(part.toolMetadata?.eve?.inputRequest && !part.toolMetadata.eve.inputResponse);
     const Icon = toolIcon(part);
-    return (_jsxs(ToolFallbackRoot, { className: "my-0", defaultOpen: defaultOpen, children: [_jsxs(CollapsibleTrigger, { className: "group/trigger flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-left text-sm text-muted-foreground transition-[color,scale] hover:text-foreground active:scale-[0.98]", children: [running ? (_jsx(LoaderCircleIcon, { className: "size-4 shrink-0 animate-spin [animation-duration:0.65s]" })) : part.state === "output-error" || part.state === "output-denied" ? (_jsx(XCircleIcon, { className: "size-4 shrink-0 text-destructive" })) : (_jsx(Icon, { className: "size-4 shrink-0" })), _jsx("span", { className: "truncate", children: toolTitle(locale, part) }), _jsx("span", { className: cn("shrink-0 text-xs", part.state === "output-error" && "text-destructive"), children: toolStatusLabel(locale, part.state) }), _jsx(ChevronDownIcon, { className: "size-3.5 shrink-0 -rotate-90 transition-transform group-data-[state=open]/trigger:rotate-0" })] }), _jsxs(ToolFallbackContent, { children: [_jsx(KnownToolContent, { events: events, locale: locale, onOpenSubagent: onOpenSubagent, part: part }), _jsx(InputRequestActions, { canRespond: canRespond, locale: locale, onInputResponses: onInputResponses, part: part }), part.errorText ? _jsx("p", { className: "whitespace-pre-wrap text-xs text-destructive", children: part.errorText }) : null] })] }));
+    const statusLabel = isFileMutationTool(part) ? undefined : toolStatusLabel(locale, part.state);
+    return (_jsxs(ToolFallbackRoot, { className: "my-0", defaultOpen: defaultOpen, children: [_jsxs(CollapsibleTrigger, { className: "group/trigger flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-left text-sm text-muted-foreground transition-[color,scale] hover:text-foreground active:scale-[0.98]", children: [running ? (_jsx(LoaderCircleIcon, { className: "size-4 shrink-0 animate-spin [animation-duration:0.65s]" })) : part.state === "output-error" || part.state === "output-denied" ? (_jsx(XCircleIcon, { className: "size-4 shrink-0 text-destructive" })) : (_jsx(Icon, { className: "size-4 shrink-0" })), _jsx("span", { className: "truncate", children: toolTitle(locale, part) }), statusLabel ? (_jsx("span", { className: cn("shrink-0 text-xs", part.state === "output-error" && "text-destructive"), children: statusLabel })) : null, _jsx(ChevronDownIcon, { className: "size-3.5 shrink-0 -rotate-90 transition-transform group-data-[state=open]/trigger:rotate-0" })] }), _jsxs(ToolFallbackContent, { children: [_jsx(KnownToolContent, { events: events, locale: locale, onOpenSubagent: onOpenSubagent, part: part }), _jsx(InputRequestActions, { canRespond: canRespond, locale: locale, onInputResponses: onInputResponses, part: part }), part.errorText ? _jsx("p", { className: "whitespace-pre-wrap text-xs text-destructive", children: part.errorText }) : null] })] }));
 }
 function KnownToolContent({ events, locale, onOpenSubagent, part, }) {
     const normalized = normalizeToolName(part.toolName);
@@ -98,10 +102,10 @@ function KnownToolContent({ events, locale, onOpenSubagent, part, }) {
     }
     if (["apply_patch", "patch_file", "write_file", "edit_file"].includes(normalized)) {
         if (patch) {
-            return _jsx("div", { "data-tool-view": "diff", children: _jsx(DiffViewer, { contentClassName: "max-h-[28rem] overflow-auto", patch: patch, showIcon: true, size: "sm", variant: "ghost" }) });
+            return _jsx("div", { "data-tool-view": "diff", children: _jsx(DiffViewer, { contentClassName: "max-h-72 overflow-auto", patch: patch, showIcon: true, size: "sm", variant: "muted" }) });
         }
         if (fileChange) {
-            return (_jsx("div", { "data-tool-view": "diff", children: _jsx(DiffViewer, { contentClassName: "max-h-[28rem] overflow-auto", newFile: { content: fileChange.newContent, name: fileChange.path }, oldFile: { content: fileChange.oldContent, name: fileChange.path }, showIcon: true, size: "sm", variant: "ghost" }) }));
+            return (_jsx("div", { "data-tool-view": "diff", children: _jsx(DiffViewer, { contentClassName: "max-h-72 overflow-auto", newFile: { content: fileChange.newContent, name: fileChange.path }, oldFile: { content: fileChange.oldContent, name: fileChange.path }, showIcon: true, size: "sm", variant: "muted" }) }));
         }
         return _jsx("p", { className: "text-xs text-muted-foreground", children: localize(locale, "Receiving file changes...", "正在接收文件变更…") });
     }
@@ -113,7 +117,7 @@ function KnownToolContent({ events, locale, onOpenSubagent, part, }) {
     if (["read_file", "read", "view_file"].includes(normalized)) {
         const path = firstString(input, ["path", "file", "filename"]);
         const result = readableOutput(output);
-        return (_jsxs("div", { className: "space-y-1.5 text-xs", children: [path ? _jsx("p", { className: "truncate font-mono text-muted-foreground", children: path }) : null, result ? _jsx("pre", { className: "max-h-80 overflow-auto whitespace-pre-wrap break-words font-mono text-foreground", children: result }) : null] }));
+        return (_jsxs("div", { className: "overflow-hidden rounded-md bg-muted/50 text-xs", "data-tool-view": "file-read", children: [path ? _jsx("p", { className: "truncate border-b border-border/40 px-3 py-2 font-mono text-muted-foreground", children: path }) : null, result ? _jsx("pre", { className: "max-h-72 overflow-auto whitespace-pre px-3 py-2.5 font-mono text-foreground", children: result }) : null] }));
     }
     if (["todo", "todo_write", "update_plan"].includes(normalized)) {
         const items = todoItems(part.input, output);
@@ -122,7 +126,15 @@ function KnownToolContent({ events, locale, onOpenSubagent, part, }) {
     if (["glob", "find_files", "grep", "search_files", "web_search", "search_web", "search"].includes(normalized)) {
         const query = firstString(input, ["query", "pattern", "glob", "path"]);
         const result = readableOutput(output);
-        return (_jsxs("div", { className: "space-y-1.5 text-xs", children: [query ? _jsx("p", { className: "font-mono text-muted-foreground", children: query }) : null, result ? _jsx("pre", { className: "max-h-72 overflow-auto whitespace-pre-wrap break-words text-foreground", children: result }) : null] }));
+        return (_jsxs("div", { className: "overflow-hidden rounded-md bg-muted/50 text-xs", "data-tool-view": "search", children: [query ? _jsx("p", { className: "border-b border-border/40 px-3 py-2 font-mono text-muted-foreground", children: query }) : null, result ? _jsx("pre", { className: "max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 text-foreground", children: result }) : null] }));
+    }
+    if (["web_fetch", "fetch_url"].includes(normalized)) {
+        const record = asRecord(output);
+        const contentType = firstString(record, ["contentType", "content_type"]);
+        const url = firstString(record, ["url"]) ?? firstString(input, ["url"]);
+        const binary = record?.binary === true;
+        const content = firstString(record, ["content"]);
+        return (_jsxs("div", { className: "overflow-hidden rounded-md bg-muted/50 text-xs", "data-tool-view": "web-fetch", children: [url ? _jsx("p", { className: "truncate border-b border-border/40 px-3 py-2 text-muted-foreground", children: url }) : null, binary ? (_jsxs("p", { className: "px-3 py-2.5 text-muted-foreground", children: [localize(locale, "Binary response kept out of text context", "二进制响应未进入文本上下文"), contentType ? ` · ${contentType}` : ""] })) : content ? (_jsx("pre", { className: "max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 text-foreground", children: content })) : null] }));
     }
     if (["publish_preview", "website_preview"].includes(normalized)) {
         const result = readableOutput(output);
@@ -159,6 +171,8 @@ function toolIcon(part) {
         return FileSearchIcon;
     if (["grep", "search_files", "web_search", "search_web", "search"].includes(normalized))
         return SearchIcon;
+    if (["web_fetch", "fetch_url"].includes(normalized))
+        return ExternalLinkIcon;
     if (["todo", "todo_write", "update_plan"].includes(normalized))
         return ListChecksIcon;
     if (["write_file", "edit_file", "apply_patch", "patch_file", "publish_artifact", "artifact_publish"].includes(normalized))
@@ -173,11 +187,64 @@ function isToolTerminal(state) {
 function normalizeToolName(toolName) {
     return toolName.toLocaleLowerCase().replaceAll("-", "_");
 }
+function isFileMutationTool(part) {
+    return ["apply_patch", "patch_file", "write_file", "edit_file"].includes(normalizeToolName(part.toolName));
+}
+function fileMutationSummary(part) {
+    const patch = toolPatch(part);
+    const change = toolFileChange(part);
+    const patchPath = patch ? patchFilePath(patch) : undefined;
+    const path = change?.path ?? patchPath;
+    const patchStats = patch ? patchLineStats(patch) : undefined;
+    const additions = patchStats?.additions ?? countContentLines(change?.newContent);
+    const deletions = patchStats?.deletions ?? countContentLines(change?.oldContent);
+    const operation = patch?.includes("--- /dev/null") || (change && change.oldContent.length === 0)
+        ? "create"
+        : patch?.includes("+++ /dev/null") || (change && change.newContent.length === 0)
+            ? "delete"
+            : "edit";
+    return { additions, deletions, operation, ...(path ? { path } : {}) };
+}
+function fileMutationTitle(locale, part) {
+    const running = !isToolTerminal(part.state);
+    const summary = fileMutationSummary(part);
+    const action = summary.operation === "create"
+        ? running ? localize(locale, "Creating", "正在创建") : localize(locale, "Created", "已创建")
+        : summary.operation === "delete"
+            ? running ? localize(locale, "Deleting", "正在删除") : localize(locale, "Deleted", "已删除")
+            : running ? localize(locale, "Editing", "正在编辑") : localize(locale, "Edited", "已编辑");
+    const stats = [
+        summary.additions > 0 ? `+${summary.additions}` : undefined,
+        summary.deletions > 0 ? `-${summary.deletions}` : undefined,
+    ].filter(Boolean).join(" ");
+    return [action, summary.path, stats].filter(Boolean).join(" ");
+}
+function patchFilePath(patch) {
+    const match = patch.match(/^\+\+\+\s+(?:b\/)?(.+)$/m) ?? patch.match(/^---\s+(?:a\/)?(.+)$/m);
+    const path = match?.[1]?.trim();
+    return path && path !== "/dev/null" ? path : undefined;
+}
+function patchLineStats(patch) {
+    let additions = 0;
+    let deletions = 0;
+    for (const line of patch.split("\n")) {
+        if (line.startsWith("+") && !line.startsWith("+++"))
+            additions += 1;
+        if (line.startsWith("-") && !line.startsWith("---"))
+            deletions += 1;
+    }
+    return { additions, deletions };
+}
+function countContentLines(value) {
+    if (!value)
+        return 0;
+    return value.endsWith("\n") ? value.slice(0, -1).split("\n").length : value.split("\n").length;
+}
 function ReasoningPart({ events, locale, part, turnId, }) {
     const timing = reasoningTiming(events, turnId, part.stepIndex);
     const durationSeconds = useElapsedSeconds(timing.startedAt, timing.endedAt);
     const streaming = part.state === "streaming";
-    return (_jsxs(ReasoningRoot, { className: "mb-1", defaultOpen: streaming, streaming: streaming, variant: "ghost", children: [_jsx(ReasoningTrigger, { active: streaming, duration: timing.startedAt ? durationSeconds : undefined, label: streaming
+    return (_jsxs(ReasoningRoot, { className: "mb-1", defaultOpen: streaming, streaming: streaming, variant: "ghost", children: [_jsx(ReasoningTrigger, { active: streaming, duration: !streaming && timing.startedAt && durationSeconds > 0 ? durationSeconds : undefined, label: streaming
                     ? reasoningSummary(part.text) ?? localize(locale, "Thinking", "正在思考")
                     : localize(locale, "Reasoning complete", "思考完成") }), _jsx(ReasoningContent, { "aria-busy": streaming, children: _jsx(ReasoningText, { children: _jsx(StaticMarkdownText, { text: part.text }) }) })] }));
 }
@@ -264,11 +331,16 @@ function ShellToolContent({ command, locale, output, result, running, }) {
     const copyCommand = async () => {
         if (!command)
             return;
-        await navigator.clipboard.writeText(command);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1_500);
+        try {
+            await copyText(command);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1_500);
+        }
+        catch {
+            setCopied(false);
+        }
     };
-    return (_jsxs("div", { className: "overflow-hidden rounded-md bg-muted/55 font-mono text-xs", "data-tool-view": "terminal", children: [_jsxs("div", { className: "flex min-h-9 items-center gap-2 px-3 py-2", children: [_jsx(TerminalIcon, { className: "size-3.5 shrink-0 text-muted-foreground" }), _jsx("pre", { className: "min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words text-foreground", children: command ?? localize(locale, "Shell command", "终端命令") }), running ? (_jsx(LoaderCircleIcon, { className: "size-3.5 shrink-0 animate-spin text-muted-foreground" })) : exitCode !== undefined ? (_jsxs("span", { className: cn("shrink-0 tabular-nums", exitCode === 0 ? "text-muted-foreground" : "text-destructive"), children: ["exit ", exitCode] })) : null, command ? (_jsx(Button, { "aria-label": localize(locale, "Copy command", "复制命令"), className: "size-6 shrink-0", onClick: () => void copyCommand(), size: "icon-sm", type: "button", variant: "ghost", children: copied ? _jsx(CheckIcon, { className: "size-3.5" }) : _jsx(CopyIcon, { className: "size-3.5" }) })) : null] }), result ? (_jsx("pre", { className: "max-h-80 overflow-auto border-t border-border/50 px-3 py-2.5 whitespace-pre-wrap break-words text-muted-foreground", children: result })) : !running && output !== undefined ? (_jsx("p", { className: "border-t border-border/50 px-3 py-2 font-sans text-muted-foreground", children: localize(locale, "Command completed with no output.", "命令已完成，没有输出。") })) : null] }));
+    return (_jsxs("div", { className: "overflow-hidden rounded-md bg-muted/50 font-mono text-xs", "data-tool-view": "terminal", children: [_jsxs("div", { className: "flex min-h-9 items-start gap-2 px-3 py-2.5", children: [_jsx(TerminalIcon, { className: "size-3.5 shrink-0 text-muted-foreground" }), _jsx("pre", { className: "min-w-0 flex-1 overflow-x-auto whitespace-pre text-foreground", children: command ?? localize(locale, "Shell command", "终端命令") }), running ? (_jsx(LoaderCircleIcon, { className: "size-3.5 shrink-0 animate-spin text-muted-foreground" })) : exitCode !== undefined ? (_jsxs("span", { className: cn("shrink-0 tabular-nums", exitCode === 0 ? "text-muted-foreground" : "text-destructive"), children: ["exit ", exitCode] })) : null, command ? (_jsx(Button, { "aria-label": localize(locale, "Copy command", "复制命令"), className: "size-6 shrink-0", onClick: () => void copyCommand(), size: "icon-sm", type: "button", variant: "ghost", children: copied ? _jsx(CheckIcon, { className: "size-3.5" }) : _jsx(CopyIcon, { className: "size-3.5" }) })) : null] }), result ? (_jsx("pre", { className: "max-h-72 overflow-auto border-t border-border/40 bg-background/40 px-3 py-2.5 whitespace-pre text-muted-foreground", children: result })) : !running && output !== undefined ? (_jsx("p", { className: "border-t border-border/50 px-3 py-2 font-sans text-muted-foreground", children: localize(locale, "Command completed with no output.", "命令已完成，没有输出。") })) : null] }));
 }
 function shellExitCode(value) {
     const record = asRecord(value);
@@ -355,27 +427,45 @@ function SubagentProgress({ events, locale, onOpenSubagent, part, }) {
                                 ? localize(locale, "Works in the parent Agent workspace.", "在父 Agent 的工作区中执行。")
                                 : localize(locale, "Runs in its own isolated workspace.", "在独立隔离的工作区中执行。")] }), presentation.childSessionId && onOpenSubagent ? (_jsxs(Button, { className: "mt-2 h-7 px-2 text-xs", onClick: () => onOpenSubagent(presentation.childSessionId), size: "sm", variant: "outline", children: [_jsx(NetworkIcon, { className: "size-3.5" }), localize(locale, `Open ${presentation.name === "agent" ? "sub-agent" : presentation.name ?? "sub-agent"} session`, `打开${presentation.name && presentation.name !== "agent" ? ` ${presentation.name}` : "子代理"}会话`)] })) : null] }), presentation.startedAt ? (_jsx("span", { className: "shrink-0 text-xs tabular-nums text-muted-foreground", children: formatDuration(elapsedSeconds) })) : null] }));
 }
-function ExecutionGroup({ children, fallbackStartedAt, locale, task, }) {
+function ExecutionGroup({ children, collapseWhenSettled, fallbackStartedAt, locale, task, }) {
     const isActive = task.status === "running" || task.status === "waiting";
-    const [open, setOpen] = useState(isActive);
+    const hasFinalDelivery = task.status === "completed" && collapseWhenSettled;
+    const [open, setOpen] = useState(!hasFinalDelivery);
     const previousStatus = useRef(task.status);
+    const previousFinalDelivery = useRef(hasFinalDelivery);
     const startedAt = task.startedAt ?? fallbackStartedAt;
     const elapsedSeconds = useElapsedSeconds(startedAt, task.endedAt);
     useEffect(() => {
         const wasActive = previousStatus.current === "running" || previousStatus.current === "waiting";
+        const finalDeliveryArrived = !previousFinalDelivery.current && hasFinalDelivery;
         if (task.status === "waiting")
             setOpen(true);
-        else if (wasActive && !isActive)
+        else if (finalDeliveryArrived || wasActive && hasFinalDelivery)
             setOpen(false);
+        else if (wasActive && !isActive)
+            setOpen(true);
         previousStatus.current = task.status;
-    }, [isActive, task.status]);
-    return (_jsxs(Collapsible, { className: "group/execution w-full", onOpenChange: setOpen, open: open, children: [_jsx(CollapsibleTrigger, { asChild: true, children: _jsxs("button", { className: "flex w-full items-center gap-2 py-1 text-left text-sm text-muted-foreground transition-colors hover:text-foreground", type: "button", children: [task.status === "running" ? (_jsx(LoaderCircleIcon, { className: "size-4 shrink-0 animate-spin" })) : task.status === "waiting" ? (_jsx(CirclePauseIcon, { className: "size-4 shrink-0 text-amber-600 dark:text-amber-300" })) : task.status === "completed" ? (_jsx(CheckCircleIcon, { className: "size-4 shrink-0" })) : (_jsx(XCircleIcon, { className: "size-4 shrink-0" })), _jsx("span", { children: executionLabel(locale, task.status) }), startedAt ? _jsx("span", { className: "tabular-nums", children: formatDuration(elapsedSeconds) }) : null, _jsx(ChevronDownIcon, { className: "size-3.5 transition-transform group-data-[state=open]/execution:rotate-180" })] }) }), _jsx(CollapsibleContent, { className: "overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in", children: _jsx("div", { className: "mt-2 space-y-3 border-t border-border/60 pt-3", children: children }) })] }));
+        previousFinalDelivery.current = hasFinalDelivery;
+    }, [hasFinalDelivery, isActive, task.status]);
+    return (_jsxs(Collapsible, { className: "group/execution w-full", onOpenChange: setOpen, open: open, children: [_jsx(CollapsibleTrigger, { asChild: true, children: _jsxs("button", { className: "flex w-full items-center gap-1.5 border-b border-border/60 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:text-foreground", type: "button", children: [_jsx("span", { children: executionLabel(locale, task.status) }), startedAt && elapsedSeconds > 0 ? _jsx("span", { className: "tabular-nums", children: formatDuration(elapsedSeconds) }) : null, _jsx(ChevronDownIcon, { className: "size-3.5 transition-transform group-data-[state=open]/execution:rotate-180" })] }) }), _jsx(CollapsibleContent, { className: "overflow-hidden data-[state=closed]:animate-out data-[state=open]:animate-in", children: _jsx("div", { className: "mt-2 space-y-3 pt-2", children: children }) })] }));
+}
+function hasLaterFinalDelivery(events, turnId) {
+    if (!turnId)
+        return false;
+    const turnEnd = events.findIndex((event) => (event.type === "turn.completed" || event.type === "turn.cancelled" || event.type === "turn.failed") &&
+        event.data.turnId === turnId);
+    if (turnEnd < 0)
+        return false;
+    return events.slice(turnEnd + 1).some((event) => event.type === "message.completed" &&
+        event.data.finishReason === "stop" &&
+        typeof event.data.message === "string" &&
+        event.data.message.trim().length > 0);
 }
 function CopyResponseAction({ locale, text }) {
     const [copied, setCopied] = useState(false);
     const timeout = useRef(undefined);
     useEffect(() => () => window.clearTimeout(timeout.current), []);
-    return (_jsx(MessageActions, { className: "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100", children: _jsx(MessageAction, { label: localize(locale, "Copy response", "复制回复"), onClick: () => {
+    return (_jsx(MessageActions, { children: _jsx(MessageAction, { label: localize(locale, "Copy response", "复制回复"), onClick: () => {
                 void copyText(text).then(() => {
                     setCopied(true);
                     window.clearTimeout(timeout.current);
@@ -416,22 +506,6 @@ function formatDuration(totalSeconds) {
 function lastText(parts) {
     const part = [...parts].reverse().find((candidate) => candidate.type === "text");
     return part?.type === "text" ? part.text : undefined;
-}
-async function copyText(text) {
-    if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
-    }
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.append(textarea);
-    textarea.select();
-    const copied = document.execCommand("copy");
-    textarea.remove();
-    if (!copied)
-        throw new Error("Clipboard access is unavailable.");
 }
 function AttachmentPart({ locale, part }) {
     const label = part.filename ?? localize(locale, "Attachment", "附件");
@@ -544,6 +618,8 @@ function toolTitle(locale, part) {
     if (kind === "subagent-call")
         return localize(locale, "Sub-agent", "子代理");
     const normalized = part.toolName.toLocaleLowerCase().replaceAll("-", "_");
+    if (isFileMutationTool(part))
+        return fileMutationTitle(locale, part);
     if (["bash", "shell", "terminal", "exec_command"].includes(normalized))
         return localize(locale, "Terminal command", "终端命令");
     if (["publish_preview", "website_preview"].includes(normalized))
@@ -554,8 +630,6 @@ function toolTitle(locale, part) {
         return localize(locale, "Saved checkpoint", "保存检查点");
     if (["read_file", "read", "view_file"].includes(normalized))
         return localize(locale, "Read file", "读取文件");
-    if (["write_file", "edit_file", "apply_patch", "patch_file"].includes(normalized))
-        return localize(locale, "Edited files", "编辑文件");
     if (["glob", "find_files"].includes(normalized))
         return localize(locale, "Found files", "查找文件");
     if (["grep", "search_files"].includes(normalized))
@@ -564,6 +638,8 @@ function toolTitle(locale, part) {
         return localize(locale, "Updated tasks", "更新任务列表");
     if (["web_search", "search_web", "search"].includes(normalized))
         return localize(locale, "Searched the web", "搜索网页");
+    if (["web_fetch", "fetch_url"].includes(normalized))
+        return localize(locale, "Fetched webpage", "读取网页");
     return part.toolName.replaceAll("_", " ");
 }
 function partKey(part, index) {

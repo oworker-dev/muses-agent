@@ -133,7 +133,7 @@ const diffViewerVariants = cva("aui-diff-viewer overflow-hidden rounded-lg font-
         size: "default",
     },
 });
-const diffLineVariants = cva("flex", {
+const diffLineVariants = cva("flex min-w-max", {
     variants: {
         type: {
             add: "bg-[var(--diff-add-bg,_rgba(46,160,67,0.15))]",
@@ -192,7 +192,7 @@ function DiffViewerLine({ line, showLineNumbers = true, className, ...props }) {
                     ? line.oldLineNumber
                     : line.type === "add"
                         ? line.newLineNumber
-                        : line.oldLineNumber })), _jsx("span", { "data-slot": "diff-viewer-indicator", className: cn("w-4 shrink-0 text-center select-none", diffLineTextVariants({ type: line.type })), children: indicator }), _jsx("span", { "data-slot": "diff-viewer-content", className: cn("flex-1 break-all whitespace-pre-wrap", diffLineTextVariants({ type: line.type })), children: line.content })] }));
+                        : line.oldLineNumber })), _jsx("span", { "data-slot": "diff-viewer-indicator", className: cn("w-4 shrink-0 text-center select-none", diffLineTextVariants({ type: line.type })), children: indicator }), _jsx("span", { "data-slot": "diff-viewer-content", className: cn("flex-1 whitespace-pre", diffLineTextVariants({ type: line.type })), children: line.content })] }));
 }
 function DiffViewerSplitLine({ pair, showLineNumbers = true, className, ...props }) {
     const { left, right } = pair;

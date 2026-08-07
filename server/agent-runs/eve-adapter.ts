@@ -1,15 +1,15 @@
-import { Client, ClientError, type HandleMessageStreamEvent } from "eve/client";
-import type { AgentRunPolicy } from "../../contracts/agent-run";
+import { Client, type MessageStreamEvent } from "eve/client";
+import type { AgentRunPolicy } from "@oworker/open-agent-contracts/agent-run";
 import type { ParsedStartAgentRun } from "./input";
 
-const DEFAULT_RUNTIME_REQUEST_TIMEOUT_MS = 15_000;
+const DEFAULT_RUNTIME_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_EVENT_READ_LIMIT = 200;
 
 export type EveAgentSessionRef = {
-  readonly continuationToken: string;
   readonly sessionId: string;
 };
 
-export type EveResetStatus = "no_active_session" | "reset" | "unavailable";
+export type EveResetStatus = "no_active_session" | "reset";
 
 export function isAgentRuntimeConfigured(): boolean {
   return Boolean(process.env.AGENT_RUNTIME_URL?.trim());
@@ -20,27 +20,20 @@ export async function startEveAgentRun(
   runId: string,
   accessToken: string,
 ): Promise<EveAgentSessionRef> {
-  const session = createClient(
+  const created = await createClient(
     accessToken,
     runId,
     input.correlationId,
     input.profile,
     input.policy,
-  ).session();
-  const response = await session.send({
+  ).sessions.create({
     ...(input.clientContext ? { clientContext: input.clientContext } : {}),
     message: input.message,
     ...(input.outputSchema ? { outputSchema: input.outputSchema } : {}),
     signal: AbortSignal.timeout(runtimeRequestTimeoutMs()),
     streamReconnectPolicy: { reconnect: false },
   });
-  if (!response.continuationToken) {
-    throw new Error("The Eve runtime accepted a session without a continuation token.");
-  }
-  return {
-    continuationToken: response.continuationToken,
-    sessionId: response.sessionId,
-  };
+  return { sessionId: created.response.sessionId };
 }
 
 export async function readEveAgentEvents(
@@ -48,107 +41,30 @@ export async function readEveAgentEvents(
   correlationId: string,
   sessionId: string,
   accessToken: string,
-): Promise<readonly HandleMessageStreamEvent[]> {
-  const stop = new AbortController();
-  const signal = AbortSignal.any([AbortSignal.timeout(runtimeRequestTimeoutMs()), stop.signal]);
-  try {
-    const response = await createClient(
-      accessToken,
-      runId,
-      correlationId,
-      undefined,
-      undefined,
-      { includeTailIndex: "1", startIndex: "0" },
-    ).fetch(
-      `/eve/v1/session/${encodeURIComponent(sessionId)}/stream`,
-      {
-        cache: "no-store",
-        redirect: "error",
-        signal,
-      },
-    );
-    if (!response.ok) {
-      throw new ClientError(response.status, await response.text(), response.headers);
-    }
-    if (!response.body) {
-      throw new Error("The Eve runtime returned an empty Agent event stream.");
-    }
-    const tailIndex = parseTailIndex(response.headers.get("x-eve-stream-tail-index"));
-    if (tailIndex === undefined) {
-      void response.body.cancel().catch(() => undefined);
-      throw new Error("The Eve runtime did not return a valid bounded stream tail index.");
-    }
-    if (tailIndex < 0) {
-      void response.body.cancel().catch(() => undefined);
-      return [];
-    }
-    return await readBoundedNdjsonEvents(response.body, tailIndex, { signal });
-  } finally {
-    stop.abort();
+  startIndex = 0,
+  limit = DEFAULT_EVENT_READ_LIMIT,
+): Promise<readonly MessageStreamEvent[]> {
+  if (!Number.isSafeInteger(startIndex) || startIndex < 0) {
+    throw new RangeError("Eve event start index must be a non-negative safe integer.");
   }
-}
-
-async function readBoundedNdjsonEvents(
-  body: ReadableStream<Uint8Array>,
-  tailIndex: number,
-  options: { readonly signal: AbortSignal },
-): Promise<readonly HandleMessageStreamEvent[]> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  const events: HandleMessageStreamEvent[] = [];
-  let buffer = "";
-  let reachedEnd = false;
-  const abort = () => {
-    void reader.cancel().catch(() => undefined);
-  };
-  options.signal.addEventListener("abort", abort, { once: true });
-  try {
-    while (!options.signal.aborted && events.length <= tailIndex) {
-      const chunk = await reader.read();
-      if (chunk.done) {
-        reachedEnd = true;
-        buffer += decoder.decode();
-        buffer = consumeNdjsonLines(buffer, events, tailIndex);
-        break;
-      }
-      if (chunk.value) buffer += decoder.decode(chunk.value, { stream: true });
-      buffer = consumeNdjsonLines(buffer, events, tailIndex);
-    }
-    if (events.length <= tailIndex && buffer.trim()) {
-      events.push(JSON.parse(buffer.trim()) as HandleMessageStreamEvent);
-    }
-    if (events.length <= tailIndex) {
-      options.signal.throwIfAborted();
-      throw new Error("The Eve Agent event stream ended before its declared durable tail.");
-    }
-    return events.slice(0, tailIndex + 1);
-  } finally {
-    options.signal.removeEventListener("abort", abort);
-    if (!reachedEnd) void reader.cancel().catch(() => undefined);
-    reader.releaseLock();
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) {
+    throw new RangeError("Eve event read limit must be an integer from 1 to 1000.");
   }
-}
 
-function consumeNdjsonLines(
-  input: string,
-  events: HandleMessageStreamEvent[],
-  tailIndex: number,
-): string {
-  let buffer = input;
-  let newline = buffer.indexOf("\n");
-  while (newline >= 0 && events.length <= tailIndex) {
-    const line = buffer.slice(0, newline).trim();
-    buffer = buffer.slice(newline + 1);
-    if (line) events.push(JSON.parse(line) as HandleMessageStreamEvent);
-    newline = buffer.indexOf("\n");
+  const session = createClient(accessToken, runId, correlationId).sessions.attach(
+    sessionId,
+    { streamIndex: startIndex },
+  );
+  const events: MessageStreamEvent[] = [];
+  for await (const event of session.stream({
+    follow: false,
+    signal: AbortSignal.timeout(runtimeRequestTimeoutMs()),
+    startIndex,
+  })) {
+    events.push(event);
+    if (events.length >= limit) break;
   }
-  return buffer;
-}
-
-function parseTailIndex(value: string | null): number | undefined {
-  if (value === null || !/^-?\d+$/.test(value)) return undefined;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= -1 ? parsed : undefined;
+  return events;
 }
 
 export async function cancelEveAgentRun(
@@ -157,10 +73,7 @@ export async function cancelEveAgentRun(
   sessionId: string,
   accessToken: string,
 ): Promise<"accepted" | "no_active_turn"> {
-  const session = createClient(accessToken, runId, correlationId).session({
-    sessionId,
-    streamIndex: 0,
-  });
+  const session = createClient(accessToken, runId, correlationId).sessions.attach(sessionId);
   return (await session.cancel()).status;
 }
 
@@ -168,30 +81,18 @@ export async function resetEveAgentRun(
   runId: string,
   correlationId: string,
   sessionId: string,
-  continuationToken: string | undefined,
   accessToken: string,
 ): Promise<EveResetStatus> {
-  if (!continuationToken) return "unavailable";
-  const session = createClient(accessToken, runId, correlationId).session({
-    continuationToken,
-    sessionId,
-    streamIndex: 0,
-  });
+  const session = createClient(accessToken, runId, correlationId).sessions.attach(sessionId);
   return (await session.reset()).status;
 }
 
 export async function resetEveSession(
   sessionId: string,
-  continuationToken: string | undefined,
   accessToken: string,
   correlationId: string,
 ): Promise<EveResetStatus> {
-  if (!continuationToken) return "unavailable";
-  const session = createClient(accessToken, `sandbox-delete-${sessionId}`, correlationId).session({
-    continuationToken,
-    sessionId,
-    streamIndex: 0,
-  });
+  const session = createClient(accessToken, `sandbox-delete-${sessionId}`, correlationId).sessions.attach(sessionId);
   return (await session.reset()).status;
 }
 
@@ -221,7 +122,6 @@ function createClient(
       ...(policy ? { "x-agent-run-policy": Buffer.from(JSON.stringify(policy)).toString("base64url") } : {}),
     },
     host: host.toString(),
-    preserveCompletedSessions: true,
     redirect: "error",
   });
 }

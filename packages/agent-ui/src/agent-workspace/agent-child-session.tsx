@@ -1,6 +1,6 @@
 "use client";
 
-import { ClientError, defaultMessageReducer, type HandleMessageStreamEvent } from "eve/client";
+import { ClientError, defaultMessageReducer, type MessageStreamEvent } from "eve/client";
 import { AlertCircleIcon, ArrowDownIcon, CirclePauseIcon, Clock3Icon, LoaderCircleIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -16,7 +16,7 @@ import {
 } from "../ui/alert-dialog.js";
 import { Button } from "../ui/button.js";
 import { AgentActivity } from "./agent-activity.js";
-import { createAgentSession } from "./agent-client.js";
+import { attachAgentSession, createAgentSession } from "./agent-client.js";
 import { AgentMessage } from "./agent-message.js";
 import type { AgentThreadPreferences, AgentWorkspaceClientConfig } from "./contracts.js";
 import { messagesFor, type AgentLocale } from "./i18n.js";
@@ -39,11 +39,11 @@ export function AgentChildSessionView({
   readonly sessionId: string;
 }) {
   const [attempt, setAttempt] = useState(0);
-  const [events, setEvents] = useState<readonly HandleMessageStreamEvent[]>([]);
+  const [events, setEvents] = useState<readonly MessageStreamEvent[]>([]);
   const [error, setError] = useState<string>();
   const [phase, setPhase] = useState<ChildSessionPhase>("connecting");
   const cursorRef = useRef(0);
-  const eventsRef = useRef<readonly HandleMessageStreamEvent[]>([]);
+  const eventsRef = useRef<readonly MessageStreamEvent[]>([]);
   const reducer = useMemo(() => defaultMessageReducer(), []);
   const messages = messagesFor(locale);
 
@@ -57,7 +57,9 @@ export function AgentChildSessionView({
 
   useEffect(() => {
     const controller = new AbortController();
-    const session = createAgentSession(client, preferences, { sessionId, streamIndex: 0 });
+    const connection = createAgentSession(client, preferences, { sessionId, streamIndex: 0 });
+    const session = attachAgentSession(connection, connection.initialSession);
+    if (!session) return;
     let projected = eventsRef.current;
     let cursor = cursorRef.current;
     let reconnectFailures = 0;
@@ -124,7 +126,9 @@ export function AgentChildSessionView({
   const stop = async () => {
     const turnId = latestTurnId(events);
     if (!turnId) return;
-    const session = createAgentSession(client, preferences, { sessionId, streamIndex: events.length });
+    const connection = createAgentSession(client, preferences, { sessionId, streamIndex: events.length });
+    const session = attachAgentSession(connection, connection.initialSession);
+    if (!session) return;
     try {
       await session.cancel({ turnId });
     } catch (cause) {
@@ -210,7 +214,7 @@ export function AgentChildSessionView({
   );
 }
 
-function phaseFromChildEvents(events: readonly HandleMessageStreamEvent[]): ChildSessionPhase {
+function phaseFromChildEvents(events: readonly MessageStreamEvent[]): ChildSessionPhase {
   const last = events.at(-1);
   if (!last) return "connecting";
   if (last.type === "session.failed" || last.type === "turn.failed") return "failed";
@@ -219,11 +223,11 @@ function phaseFromChildEvents(events: readonly HandleMessageStreamEvent[]): Chil
   return "running";
 }
 
-function isChildSessionBoundary(event: HandleMessageStreamEvent): boolean {
+function isChildSessionBoundary(event: MessageStreamEvent): boolean {
   return event.type === "session.completed" || event.type === "session.failed";
 }
 
-function latestTurnId(events: readonly HandleMessageStreamEvent[]): string | undefined {
+function latestTurnId(events: readonly MessageStreamEvent[]): string | undefined {
   const event = [...events].reverse().find((candidate) => candidate.type === "turn.started");
   return event?.type === "turn.started" ? event.data.turnId : undefined;
 }
@@ -275,7 +279,7 @@ function waitForRetry(signal: AbortSignal, milliseconds: number): Promise<void> 
   });
 }
 
-function useChildElapsedSeconds(events: readonly HandleMessageStreamEvent[]): number | undefined {
+function useChildElapsedSeconds(events: readonly MessageStreamEvent[]): number | undefined {
   const startedAt = eventTime(events.find((event) => event.type === "turn.started"));
   const endedAt = eventTime([...events].reverse().find((event) =>
     event.type === "session.completed" || event.type === "session.failed" || event.type === "turn.failed",
@@ -290,7 +294,7 @@ function useChildElapsedSeconds(events: readonly HandleMessageStreamEvent[]): nu
   return Math.max(0, Math.floor(((endedAt ?? now) - startedAt) / 1_000));
 }
 
-function eventTime(event: HandleMessageStreamEvent | undefined): number | undefined {
+function eventTime(event: MessageStreamEvent | undefined): number | undefined {
   if (!event?.meta?.at) return undefined;
   const timestamp = Date.parse(event.meta.at);
   return Number.isFinite(timestamp) ? timestamp : undefined;

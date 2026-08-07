@@ -20,7 +20,7 @@ The mailbox worker is part of the Web follow-up durability path. It polls the
 authenticated internal Web dispatcher and must be deployed at least once per
 Agent Web database. Multiple worker replicas are safe: PostgreSQL leases and
 per-session FIFO blockers prevent duplicate delivery. Do not replace it with a
-browser timer or an Eve continuation-token retry loop.
+browser timer or a client-owned session retry loop.
 
 Use a unique `WORKFLOW_POSTGRES_JOB_PREFIX` for every World. The supported Eve
 prefix is `open_agent_`; the Muses host uses `muses_` in its own database.

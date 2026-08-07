@@ -355,12 +355,12 @@ function ModelSelectorValue({
   return (
     <span
       data-slot="model-selector-value"
-      className={cn("flex min-w-0 items-center gap-2", className)}
+      className={cn("flex min-w-0 items-center gap-1", className)}
     >
       {selectedModel.icon && <ModelIcon>{selectedModel.icon}</ModelIcon>}
       <span className="truncate font-medium">{selectedModel.name}</span>
       {effortName && (
-        <span className="text-muted-foreground min-w-7.5 truncate text-center">
+        <span className="text-muted-foreground truncate">
           {effortName}
         </span>
       )}
@@ -592,7 +592,7 @@ function ModelSelectorItem({
             <ModelIcon className="mt-[3px]">{model.icon}</ModelIcon>
           )}
           <span className="flex min-w-0 flex-col">
-            <span className="truncate font-medium">{model.name}</span>
+            <span className="truncate text-[13px] leading-5 font-medium">{model.name}</span>
             {model.description && (
               <span className="text-muted-foreground truncate text-xs">
                 {model.description}
@@ -686,6 +686,7 @@ export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
     contentClassName?: string;
     effortLabel?: ReactNode;
     triggerLabel?: string;
+    valueClassName?: string;
   };
 
 /** Registers the selection with assistant-ui's ModelContext system. The
@@ -719,6 +720,7 @@ const ModelSelectorImpl = ({
   contentClassName,
   effortLabel,
   triggerLabel,
+  valueClassName,
   ...rootProps
 }: ModelSelectorProps) => {
   return (
@@ -729,7 +731,9 @@ const ModelSelectorImpl = ({
         variant={variant}
         size={size}
         className={className}
-      />
+      >
+        <ModelSelectorValue className={valueClassName} />
+      </ModelSelectorTrigger>
       <ModelSelectorContent
         {...(align !== undefined ? { align } : {})}
         className={contentClassName}
